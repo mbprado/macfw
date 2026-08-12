@@ -120,7 +120,7 @@ int main() {
         }
 
         UInt16 nodeID = 0;
-        kr = (*device)->GetRemoteNodeID(device, &nodeID);
+	kr = (*device)->GetRemoteNodeID(device, generation, &nodeID);
         if (kr == KERN_SUCCESS) {
             std::cout << "    remote node ID:     0x"
                       << std::hex << nodeID << std::dec << '\n';
