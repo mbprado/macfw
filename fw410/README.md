@@ -52,7 +52,10 @@ On an Intel Mac running macOS Monterey, a normal user-space process using Apple'
 - read and decode the BeBoB information registers;
 - issue the guarded M-Audio boot-from-flash cue;
 - survive the resulting FireWire bus reset by reacquiring generation/node state;
-- rediscover the device as the operational `FW 410` personality.
+- rediscover the device as the operational `FW 410` personality;
+- send AV/C commands through raw FCP from user space;
+- receive FCP responses through a user-space pseudo address space;
+- query the operational output plug signal format and decode the current sample rate.
 
 Confirmed identity transition:
 
@@ -62,6 +65,14 @@ after:  FW 410        / model 0x00010046 / generation 145
 ```
 
 The operational BeBoB information block reports bootloader version `0`, confirming that the application firmware is running.
+
+Confirmed AV/C status transaction:
+
+```text
+command:  01 ff 18 00 90 ff ff ff
+response: 0c ff 18 00 90 02 ff ff
+rate:     48000 Hz
+```
 
 ## Protocol layers
 
@@ -143,7 +154,7 @@ See [`analysis/`](analysis/) for reverse-engineering notes.
 - [ ] Bus reset notification/recovery abstraction
 - [x] 64-bit asynchronous addressing
 - [x] Asynchronous block read/write primitives
-- [ ] FCP command/response transport
+- [x] FCP command/response transport
 - [ ] Isochronous channels
 - [ ] CIP handling
 - [ ] Bandwidth/channel allocation
@@ -153,10 +164,11 @@ See [`analysis/`](analysis/) for reverse-engineering notes.
 - [x] Device identification
 - [x] Firmware information
 - [x] Firmware boot-from-flash sequence
-- [ ] AV/C commands
+- [x] AV/C STATUS command path
 - [ ] Plug discovery
 - [ ] Clock source discovery/control
-- [ ] Sample-rate discovery/control
+- [x] Sample-rate discovery (output plug 0)
+- [ ] Sample-rate control
 - [ ] Stream configuration
 - [ ] MIDI/control protocol mapping
 
@@ -192,9 +204,9 @@ See [`analysis/`](analysis/) for reverse-engineering notes.
 
 ## Current phase
 
-**M2/M3 boundary — operational-device protocol discovery.**
+**M2/M3 operational-device discovery.**
 
-The next task is to implement a minimal AV/C Function Control Protocol transport in user space and use read-only AV/C STATUS commands to discover the operational FW410's plug configuration and current sample rate before any audio streaming is attempted.
+Raw user-space FCP command/response transport is now proven. The next read-only work is to query input plug 0, verify that input/output sample rates agree as Linux `snd-bebob` expects, enumerate unit plugs, then move into BridgeCo extended stream-format and channel-position discovery.
 
 ## External references
 
