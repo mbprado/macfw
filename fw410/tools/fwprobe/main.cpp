@@ -4,6 +4,7 @@
 #include <IOKit/firewire/IOFireWireLib.h>
 
 #include <algorithm>
+#include <cctype>
 #include <iomanip>
 #include <iostream>
 #include <string>
@@ -276,18 +277,73 @@ static void dumpConfigROM(IOFireWireLibDeviceRef device) {
     (*directory)->Release(directory);
 }
 
+static void readInfoDate(IOFireWireLibDeviceRef device, UInt32 generation) {
+    constexpr UInt16 kAddressHi = 0xffff;
+    constexpr UInt32 kAddressLo = 0xc8020020;
+    constexpr UInt32 kLength = 8;
+
+    FWAddress address = {};
+    address.nodeID = 0;
+    address.addressHi = kAddressHi;
+    address.addressLo = kAddressLo;
+
+    UInt8 buffer[kLength] = {};
+    UInt32 size = kLength;
+
+    std::cout << "    BeBoB software build date probe:\n";
+    std::cout << "        address: 0xffffc8020020\n";
+    std::cout << "        length:  8 bytes\n";
+
+    const IOReturn kr = (*device)->Read(
+        device,
+        0,
+        &address,
+        buffer,
+        &size,
+        true,
+        generation);
+
+    if (kr != kIOReturnSuccess) {
+        std::cout << "        read:    failed (0x"
+                  << std::hex << kr << std::dec << ")\n";
+        return;
+    }
+
+    std::cout << "        read:    success (" << size << " bytes)\n";
+    std::cout << "        raw:     ";
+    for (UInt32 i = 0; i < size; ++i) {
+        if (i != 0) {
+            std::cout << ' ';
+        }
+        std::cout << std::hex << std::setw(2) << std::setfill('0')
+                  << static_cast<unsigned>(buffer[i]);
+    }
+    std::cout << std::dec << std::setfill(' ') << '\n';
+
+    std::cout << "        ASCII:   ";
+    for (UInt32 i = 0; i < size; ++i) {
+        const unsigned char byte = buffer[i];
+        std::cout << (std::isprint(byte) ? static_cast<char>(byte) : '.');
+    }
+    std::cout << '\n';
+}
+
 static void printUsage(const char *program) {
-    std::cout << "Usage: " << program << " [--rom]\n"
-              << "  --rom   Read and recursively display the remote configuration ROM\n";
+    std::cout << "Usage: " << program << " [--rom] [--info-date]\n"
+              << "  --rom        Read and recursively display the remote configuration ROM\n"
+              << "  --info-date  Read 8 bytes from BeBoB information register 0xffffc8020020\n";
 }
 
 int main(int argc, char **argv) {
     bool dumpROM = false;
+    bool infoDate = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--rom") {
             dumpROM = true;
+        } else if (arg == "--info-date") {
+            infoDate = true;
         } else if (arg == "--help" || arg == "-h") {
             printUsage(argv[0]);
             return 0;
@@ -382,6 +438,15 @@ int main(int argc, char **argv) {
 
         if (dumpROM) {
             dumpConfigROM(device);
+        }
+
+        if (infoDate) {
+            if (kr == KERN_SUCCESS) {
+                readInfoDate(device, generation);
+            } else {
+                std::cout << "    BeBoB software build date probe skipped: "
+                             "valid bus generation unavailable\n";
+            }
         }
 
         (*device)->Release(device);
