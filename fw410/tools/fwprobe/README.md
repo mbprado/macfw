@@ -45,31 +45,61 @@ ASCII: 20070504
 ./fwprobe --info
 ```
 
-FFADO/FreeBoB documents the BeBoB bootloader information block at `0xffffc8020000`. `--info` performs one read-only 104-byte transaction covering offsets `0x00` through `0x67` and decodes the documented fields:
+FFADO/FreeBoB documents the BeBoB bootloader information block at `0xffffc8020000`. `--info` performs one read-only 104-byte transaction covering offsets `0x00` through `0x67` and decodes the documented fields.
 
-- manufacturer ID;
-- bootloader protocol version;
-- bootloader version;
-- device GUID;
-- hardware model ID and revision;
-- software date and time;
-- software ID and version;
-- application base address;
-- maximum image length;
-- bootloader date and time;
-- debugger date/time, ID, and version.
+On the tested Intel Mac, numeric fields in this BeBoB information structure must be interpreted using the same little-endian native layout used by FFADO on Linux. This is distinct from the ASCII date/time fields, which are shown directly. The GUID is displayed using FFADO's two-32-bit-word layout.
 
-Numeric fields are decoded from the FireWire byte stream as big-endian values. ASCII date/time fields are also displayed directly so the raw device representation remains easy to verify.
+Confirmed FW410 values include:
 
-The FireWire interface is opened only for the duration of the direct transaction and closed immediately afterward.
+```text
+protocol version:     0x00000001
+bootloader version:   0x00002705
+hardware model ID:    0x00000002
+hardware revision:    0x00000001
+software date:        20070504
+software time:        102656
+software ID:          0x00010046
+software version:     0x00ffffff
+base address:         0x20080000
+max image length:     0x00180000
+bootloader date:      20030404
+bootloader time:      134625
+```
+
+The `software ID` value `0x00010046` matches the normal FW410 model ID used by Linux `snd-bebob`, providing strong evidence that the application firmware is already present in flash.
+
+## M-Audio boot-from-flash cue check
+
+```bash
+./fwprobe --boot-cue-check
+```
+
+This mode is a **dry run**. It re-reads the BeBoB information block and verifies the prerequisites used for the known FW410 flash-boot path:
+
+- BeBoB bootloader protocol version 1;
+- non-zero bootloader version;
+- software build date at least `20070401`;
+- application/software ID `0x00010046`.
+
+If all checks pass, it prints the Linux FW410 cue that would be written to the BeBoB request register:
+
+```text
+target:           0xffffc8021000
+logical quadlets: 0x00000001 0x01110000 0x00000000
+wire bytes:       01 00 00 00 00 00 11 01 00 00 00 00
+```
+
+**No write is performed.**
+
+Linux `snd-bebob` writes these three little-endian quadlets as one block to request the bootloader to start the firmware stored in flash. The expected result is a FireWire bus reset followed by re-enumeration from bootloader model `0x00010058` to normal FW410 model `0x00010046`.
 
 ## Safety
 
-`--rom`, `--info-date`, and `--info` are read-only. They do **not**:
+`--rom`, `--info-date`, `--info`, and `--boot-cue-check` do not perform FireWire writes. They do **not**:
 
-- issue FireWire writes;
 - reset the FireWire bus;
-- upload or start firmware;
+- upload firmware;
+- start firmware;
 - send the M-Audio bootloader cue;
 - allocate isochronous channels;
 - start audio or MIDI streaming.
@@ -101,10 +131,12 @@ This matches the Linux `snd-bebob` FW410 bootloader identity. See [`../../analys
 4. [x] Validate read-only configuration-ROM inspection on FW410 hardware.
 5. [x] Validate bootloader identity against Linux `snd-bebob`.
 6. [x] Validate direct BeBoB register access (`--info-date`, result `20070504`).
-7. [x] Add a full documented read-only BeBoB information-register probe (`--info`).
-8. [ ] Validate `--info` on FW410 hardware and record the returned fields.
-9. [ ] Map the M-Audio bootloader cue and expected re-enumeration without sending it yet.
-10. [ ] Add isochronous capability probing.
-11. [ ] Repeat successful probes on Intel macOS Sonoma.
+7. [x] Add and validate a full documented BeBoB information-register probe (`--info`).
+8. [x] Correct numeric BeBoB field interpretation against FFADO/Linux semantics.
+9. [x] Add a no-write FW410 boot cue prerequisite check (`--boot-cue-check`).
+10. [ ] Validate `--boot-cue-check` on FW410 hardware.
+11. [ ] After validation, implement an explicitly gated one-shot boot-from-flash cue and re-enumeration watcher.
+12. [ ] Add isochronous capability probing.
+13. [ ] Repeat successful probes on Intel macOS Sonoma.
 
-Do not add arbitrary write operations until the exact FW410 command has been verified against Linux/FFADO and the original M-Audio driver.
+Do not add arbitrary write operations. Any future write mode must be limited to a command independently verified against trusted implementations and must clearly state the expected hardware transition before execution.
