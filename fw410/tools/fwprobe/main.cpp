@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <string>
@@ -248,21 +249,26 @@ static std::string asciiField(const UInt8 *p, size_t len) {
     return out;
 }
 
-static UInt32 be32(const UInt8 *p) {
-    return (static_cast<UInt32>(p[0]) << 24) |
-           (static_cast<UInt32>(p[1]) << 16) |
-           (static_cast<UInt32>(p[2]) << 8) |
-           static_cast<UInt32>(p[3]);
+// FFADO reads this structure directly into native integers on little-endian
+// Linux. The numeric BeBoB info-register fields therefore appear little-endian
+// in the byte buffer returned by IOFireWireLib on the tested Intel Mac.
+static UInt32 le32(const UInt8 *p) {
+    return static_cast<UInt32>(p[0]) |
+           (static_cast<UInt32>(p[1]) << 8) |
+           (static_cast<UInt32>(p[2]) << 16) |
+           (static_cast<UInt32>(p[3]) << 24);
 }
 
-static UInt64 be64(const UInt8 *p) {
-    return (static_cast<UInt64>(be32(p)) << 32) | be32(p + 4);
+// FFADO treats the GUID as two native 32-bit words and swaps the two halves
+// after reading. This reproduces that layout without guessing byte order.
+static UInt64 ffadoGuid(const UInt8 *p) {
+    return (static_cast<UInt64>(le32(p)) << 32) | le32(p + 4);
 }
 
 static void printHex32Field(const char *label, const UInt8 *p) {
     std::cout << "        " << std::left << std::setw(22) << label
               << "0x" << std::right << std::hex << std::setw(8)
-              << std::setfill('0') << be32(p)
+              << std::setfill('0') << le32(p)
               << std::dec << std::setfill(' ') << std::left << '\n';
 }
 
@@ -279,6 +285,26 @@ static bool openForTransaction(IOFireWireLibDeviceRef device, const char *prefix
         return false;
     }
     std::cout << prefix << "open:    success\n";
+    return true;
+}
+
+static bool readInfoBlock(IOFireWireLibDeviceRef device,
+                          UInt32 generation,
+                          UInt16 remoteNodeID,
+                          UInt8 *buffer,
+                          UInt32 &size,
+                          const char *prefix) {
+    constexpr UInt16 kAddressHi = 0xffff;
+    constexpr UInt32 kAddressLo = 0xc8020000;
+    if (!openForTransaction(device, prefix)) return false;
+    const IOReturn kr = readAbsolute(device, generation, remoteNodeID,
+                                     kAddressHi, kAddressLo, buffer, size);
+    (*device)->Close(device);
+    if (kr != kIOReturnSuccess) {
+        std::cout << prefix << "read:    failed (0x" << std::hex << kr
+                  << std::dec << ")\n";
+        return false;
+    }
     return true;
 }
 
@@ -318,43 +344,13 @@ static void readInfoDate(IOFireWireLibDeviceRef device,
               << "        ASCII:   " << asciiField(buffer, size) << '\n';
 }
 
-static void readInfoRegisters(IOFireWireLibDeviceRef device,
-                              UInt32 generation,
-                              UInt16 remoteNodeID) {
-    constexpr UInt16 kAddressHi = 0xffff;
-    constexpr UInt32 kAddressLo = 0xc8020000;
-    constexpr UInt32 kLength = 0x68; // FFADO info_register_t, offsets 0x00..0x64.
-    UInt8 buffer[kLength] = {};
-    UInt32 size = kLength;
-
-    std::cout << "    BeBoB information registers:\n"
-              << "        address: 0xffffc8020000\n"
-              << "        node:    0x" << std::hex << remoteNodeID << std::dec << '\n'
-              << "        length:  " << kLength << " bytes\n";
-
-    if (!openForTransaction(device, "        ")) return;
-    const IOReturn kr = readAbsolute(device, generation, remoteNodeID,
-                                     kAddressHi, kAddressLo, buffer, size);
-    (*device)->Close(device);
-
-    if (kr != kIOReturnSuccess) {
-        std::cout << "        read:    failed (0x" << std::hex << kr
-                  << std::dec << ")\n";
-        return;
-    }
-    if (size < kLength) {
-        std::cout << "        read:    short read (" << size << "/" << kLength
-                  << " bytes)\n";
-        return;
-    }
-
-    std::cout << "        read:    success (" << size << " bytes)\n";
+static void printInfoFields(const UInt8 *buffer) {
     printAsciiField("manufacturer:", buffer + 0x00, 8);
     printHex32Field("protocol version:", buffer + 0x08);
     printHex32Field("bootloader version:", buffer + 0x0c);
-    std::cout << "        " << std::left << std::setw(22) << "GUID:"
+    std::cout << "        " << std::left << std::setw(22) << "GUID (FFADO):"
               << "0x" << std::right << std::hex << std::setw(16)
-              << std::setfill('0') << be64(buffer + 0x10)
+              << std::setfill('0') << ffadoGuid(buffer + 0x10)
               << std::dec << std::setfill(' ') << std::left << '\n';
     printHex32Field("hardware model ID:", buffer + 0x18);
     printHex32Field("hardware revision:", buffer + 0x1c);
@@ -372,23 +368,104 @@ static void readInfoRegisters(IOFireWireLibDeviceRef device,
     printHex32Field("debugger version:", buffer + 0x64);
 }
 
+static void readInfoRegisters(IOFireWireLibDeviceRef device,
+                              UInt32 generation,
+                              UInt16 remoteNodeID) {
+    constexpr UInt32 kLength = 0x68;
+    UInt8 buffer[kLength] = {};
+    UInt32 size = kLength;
+
+    std::cout << "    BeBoB information registers:\n"
+              << "        address: 0xffffc8020000\n"
+              << "        node:    0x" << std::hex << remoteNodeID << std::dec << '\n'
+              << "        length:  " << kLength << " bytes\n";
+
+    if (!readInfoBlock(device, generation, remoteNodeID,
+                       buffer, size, "        ")) return;
+    if (size < kLength) {
+        std::cout << "        read:    short read (" << size << "/" << kLength
+                  << " bytes)\n";
+        return;
+    }
+
+    std::cout << "        read:    success (" << size << " bytes)\n";
+    printInfoFields(buffer);
+}
+
+static bool allAsciiDigits(const UInt8 *p, size_t len) {
+    for (size_t i = 0; i < len; ++i) {
+        if (p[i] < '0' || p[i] > '9') return false;
+    }
+    return true;
+}
+
+static void checkBootCue(IOFireWireLibDeviceRef device,
+                         UInt32 generation,
+                         UInt16 remoteNodeID) {
+    constexpr UInt32 kLength = 0x68;
+    UInt8 buffer[kLength] = {};
+    UInt32 size = kLength;
+
+    std::cout << "    M-Audio boot-from-flash cue check (dry run):\n";
+    if (!readInfoBlock(device, generation, remoteNodeID,
+                       buffer, size, "        ")) return;
+    if (size < kLength) {
+        std::cout << "        status:  FAIL - short BeBoB info read\n";
+        return;
+    }
+
+    const UInt32 protocol = le32(buffer + 0x08);
+    const UInt32 bootloaderVersion = le32(buffer + 0x0c);
+    const UInt32 softwareId = le32(buffer + 0x30);
+    const std::string softwareDate = asciiField(buffer + 0x20, 8);
+
+    const bool protocolOk = protocol == 1;
+    const bool bootloaderOk = bootloaderVersion != 0;
+    const bool dateFormatOk = softwareDate.size() == 8 &&
+                              allAsciiDigits(buffer + 0x20, 8);
+    const bool dateOk = dateFormatOk && softwareDate >= "20070401";
+    const bool softwareOk = softwareId == 0x00010046;
+    const bool safeToPlan = protocolOk && bootloaderOk && dateOk && softwareOk;
+
+    std::cout << "        protocol v1:      " << (protocolOk ? "PASS" : "FAIL")
+              << " (0x" << std::hex << protocol << std::dec << ")\n";
+    std::cout << "        bootloader active: " << (bootloaderOk ? "PASS" : "FAIL")
+              << " (0x" << std::hex << bootloaderVersion << std::dec << ")\n";
+    std::cout << "        software date:     " << (dateOk ? "PASS" : "FAIL")
+              << " (" << softwareDate << ")\n";
+    std::cout << "        FW410 app ID:      " << (softwareOk ? "PASS" : "FAIL")
+              << " (0x" << std::hex << softwareId << std::dec << ")\n";
+    std::cout << "        status:             "
+              << (safeToPlan ? "PASS - cue matches Linux FW410 loader prerequisites"
+                             : "FAIL - cue must not be sent") << '\n';
+
+    std::cout << "        would write to:     0xffffc8021000\n"
+              << "        logical quadlets:   0x00000001 0x01110000 0x00000000\n"
+              << "        wire bytes:         01 00 00 00 00 00 11 01 00 00 00 00\n"
+              << "        write performed:    NO\n";
+}
+
 static void printUsage(const char *program) {
-    std::cout << "Usage: " << program << " [--rom] [--info-date] [--info]\n"
-              << "  --rom        Read and recursively display the remote configuration ROM\n"
-              << "  --info-date  Read the 8-byte software date at 0xffffc8020020\n"
-              << "  --info       Read the documented 104-byte BeBoB information block\n";
+    std::cout << "Usage: " << program
+              << " [--rom] [--info-date] [--info] [--boot-cue-check]\n"
+              << "  --rom             Read and recursively display the configuration ROM\n"
+              << "  --info-date       Read the 8-byte software date at 0xffffc8020020\n"
+              << "  --info            Read the documented 104-byte BeBoB information block\n"
+              << "  --boot-cue-check  Validate FW410 flash-boot prerequisites; NO WRITE\n";
 }
 
 int main(int argc, char **argv) {
     bool dumpROM = false;
     bool infoDate = false;
     bool info = false;
+    bool bootCueCheck = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--rom") dumpROM = true;
         else if (arg == "--info-date") infoDate = true;
         else if (arg == "--info") info = true;
+        else if (arg == "--boot-cue-check") bootCueCheck = true;
         else if (arg == "--help" || arg == "-h") {
             printUsage(argv[0]);
             return 0;
@@ -487,6 +564,10 @@ int main(int argc, char **argv) {
         if (info) {
             if (canTransact) readInfoRegisters(device, generation, nodeID);
             else std::cout << "    BeBoB information-register probe skipped: valid generation/node ID unavailable\n";
+        }
+        if (bootCueCheck) {
+            if (canTransact) checkBootCue(device, generation, nodeID);
+            else std::cout << "    Boot cue check skipped: valid generation/node ID unavailable\n";
         }
 
         (*device)->Release(device);
