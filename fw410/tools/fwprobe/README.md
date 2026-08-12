@@ -2,11 +2,9 @@
 
 Minimal user-space FireWire diagnostic for M1.
 
-The probe intentionally does **not** open the FW410 for exclusive access except briefly around narrowly scoped direct FireWire transactions, and does not perform arbitrary writes. It discovers FireWire services, obtains `IOFireWireDeviceInterface`, reports bus generation / node information, and can optionally inspect the device configuration ROM or perform narrowly scoped read-only BeBoB register probes.
+The probe intentionally does **not** open the FW410 for exclusive access except briefly around narrowly scoped direct FireWire transactions, and does not perform arbitrary writes. It discovers FireWire services, obtains `IOFireWireDeviceInterface`, reports bus generation / node information, and can optionally inspect the device configuration ROM or perform read-only BeBoB register probes.
 
 ## Build
-
-Build on the target Intel Mac with the installed Xcode Command Line Tools:
 
 ```bash
 make
@@ -14,82 +12,60 @@ make
 
 ## Basic probe
 
-Run:
-
 ```bash
 ./fwprobe
 ```
 
-If the FW410 is attached, the program should print the FireWire services visible to the process and the interface information it can obtain.
-
 ## Configuration ROM inspection
-
-Run:
 
 ```bash
 ./fwprobe --rom
 ```
 
-This mode uses:
-
-```text
-IOFireWireDeviceInterface
-        |
-        v
-GetConfigDirectory()
-        |
-        v
-IOFireWireConfigDirectoryInterface
-        |
-        +-- GetNumEntries()
-        +-- GetIndexKey()
-        +-- GetIndexType()
-        +-- GetIndexValue_*()
-        +-- recursive subdirectory traversal
-```
-
-The ROM walker reports each entry's index, key, type, and raw value. Depending on the IEEE 1394 configuration-ROM entry type, it also reports:
-
-- immediate 32-bit values;
-- offset addresses;
-- textual or binary leaf data;
-- recursively decoded subdirectories.
-
-Binary leaf previews are limited to the first 32 bytes. Recursion is capped at 16 directory levels as a defensive guard.
+This uses `IOFireWireConfigDirectoryInterface` to enumerate the remote configuration ROM. It is read-only.
 
 ## BeBoB software build date probe
-
-Run:
 
 ```bash
 ./fwprobe --info-date
 ```
 
-This performs exactly one read-only FireWire block transaction to:
+This performs one read-only 8-byte transaction at `0xffffc8020020`. Linux `snd-bebob` uses the same field before it considers sending the M-Audio firmware-loader cue.
 
-```text
-address: 0xffffc8020020
-length:  8 bytes
-```
-
-Linux `snd-bebob` defines the BeBoB information register at `0xffffc8020000` and reads offset `0x20` before sending any M-Audio firmware-loader cue.
-
-The probe opens the FireWire device interface only for the duration of the direct transaction, performs the read using the current bus generation and remote node ID, and closes the interface immediately afterward.
-
-### Confirmed hardware result
-
-On Intel macOS Monterey, the FW410 bootloader returned:
+Confirmed on the FW410 bootloader under Intel macOS Monterey:
 
 ```text
 raw:   32 30 30 37 30 35 30 34
 ASCII: 20070504
 ```
 
-This confirms direct user-space access to the BeBoB register space through `IOFireWireLib`.
+## Full BeBoB information-register probe
 
-### Safety
+```bash
+./fwprobe --info
+```
 
-`--rom` and `--info-date` are read-only. They do **not**:
+FFADO/FreeBoB documents the BeBoB bootloader information block at `0xffffc8020000`. `--info` performs one read-only 104-byte transaction covering offsets `0x00` through `0x67` and decodes the documented fields:
+
+- manufacturer ID;
+- bootloader protocol version;
+- bootloader version;
+- device GUID;
+- hardware model ID and revision;
+- software date and time;
+- software ID and version;
+- application base address;
+- maximum image length;
+- bootloader date and time;
+- debugger date/time, ID, and version.
+
+Numeric fields are decoded from the FireWire byte stream as big-endian values. ASCII date/time fields are also displayed directly so the raw device representation remains easy to verify.
+
+The FireWire interface is opened only for the duration of the direct transaction and closed immediately afterward.
+
+## Safety
+
+`--rom`, `--info-date`, and `--info` are read-only. They do **not**:
 
 - issue FireWire writes;
 - reset the FireWire bus;
@@ -98,9 +74,9 @@ This confirms direct user-space access to the BeBoB register space through `IOFi
 - allocate isochronous channels;
 - start audio or MIDI streaming.
 
-## Confirmed FW410 bootloader result
+## Confirmed FW410 bootloader identity
 
-On Intel macOS Monterey, `--rom` successfully decoded the FW410 bootloader unit directory:
+On Intel macOS Monterey, `--rom` decoded:
 
 ```text
 specifier:        0x00a02d
@@ -109,7 +85,7 @@ model:            0x010058
 text descriptor:  FW Bootloader
 ```
 
-This result matches the Linux `snd-bebob` FW410 bootloader model. See [`../../analysis/bootloader-rom.md`](../../analysis/bootloader-rom.md) for the recorded data and Linux correlation.
+This matches the Linux `snd-bebob` FW410 bootloader identity. See [`../../analysis/bootloader-rom.md`](../../analysis/bootloader-rom.md).
 
 ## Help
 
@@ -122,11 +98,13 @@ This result matches the Linux `snd-bebob` FW410 bootloader model. See [`../../an
 1. [x] Discover `IOFireWireUnit` services.
 2. [x] Obtain `IOFireWireDeviceInterface` from user space.
 3. [x] Read bus generation and remote node ID.
-4. [x] Add and validate read-only configuration-ROM inspection on FW410 hardware.
-5. [x] Validate bootloader model/specifier identity against Linux `snd-bebob`.
-6. [x] Add a narrowly scoped read-only BeBoB information-register probe (`--info-date`).
-7. [x] Validate the BeBoB information-register read on FW410 hardware (`20070504`).
-8. [ ] Add isochronous capability probing.
-9. [ ] Repeat successful probes on Intel macOS Sonoma.
+4. [x] Validate read-only configuration-ROM inspection on FW410 hardware.
+5. [x] Validate bootloader identity against Linux `snd-bebob`.
+6. [x] Validate direct BeBoB register access (`--info-date`, result `20070504`).
+7. [x] Add a full documented read-only BeBoB information-register probe (`--info`).
+8. [ ] Validate `--info` on FW410 hardware and record the returned fields.
+9. [ ] Map the M-Audio bootloader cue and expected re-enumeration without sending it yet.
+10. [ ] Add isochronous capability probing.
+11. [ ] Repeat successful probes on Intel macOS Sonoma.
 
-Do not add arbitrary write operations to this probe until a specific FW410 register/command has been verified against the original M-Audio driver and/or another trusted implementation such as Linux `snd-bebob` or FFADO.
+Do not add arbitrary write operations until the exact FW410 command has been verified against Linux/FFADO and the original M-Audio driver.
