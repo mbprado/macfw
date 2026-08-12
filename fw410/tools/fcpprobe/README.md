@@ -9,8 +9,8 @@ Instead, the tool implements the minimum standard FCP transport directly with `I
 - opens the operational `FW 410` unit;
 - creates a local pseudo address space for the standard FCP response register in initial-units space (`0xfffff0000d00`);
 - enables write callbacks on that response window;
-- sends one AV/C STATUS command to the remote FCP command register (`0xfffff0000b00`);
-- waits for the matching response and prints the raw bytes;
+- sends an AV/C STATUS command to the remote FCP command register (`0xfffff0000b00`);
+- waits for the response and prints the raw bytes;
 - decodes the AM824 sample-frequency code when the response matches the expected OUTPUT PLUG SIGNAL FORMAT shape.
 
 ## Build
@@ -44,8 +44,47 @@ ff  SYT high unused
 ff  SYT low unused
 ```
 
+## Confirmed hardware result
+
+On the tested Intel Mac / macOS Monterey system, the operational FW410 responded successfully through the raw user-space FCP transport:
+
+```text
+command:  01 ff 18 00 90 ff ff ff
+response: 0c ff 18 00 90 02 ff ff
+```
+
+Interpretation:
+
+```text
+0c  IMPLEMENTED/STABLE
+ff  UNIT
+18  OUTPUT PLUG SIGNAL FORMAT
+00  plug 0
+90  AM824
+02  sample-frequency code 2 = 48000 Hz
+```
+
+This confirms both directions of the FCP transaction path from user space:
+
+```text
+macfw -> remote FCP command CSR -> FW410
+macfw <- local FCP response CSR  <- FW410
+```
+
+The first successful transaction reported the current output plug 0 sample rate as **48 kHz**.
+
+## Next discovery step
+
+Linux `snd-bebob` queries both output plug 0 and input plug 0 and expects the two rates to agree before streaming. The next read-only probe should therefore send:
+
+```text
+01 ff 19 00 90 ff ff ff
+```
+
+for `INPUT PLUG SIGNAL FORMAT`, followed by AV/C `PLUG INFO` discovery of the unit's streaming plug counts.
+
 ## Safety
 
-This is not a configuration command. It does not change sample rate, clock source, mixer state, routing, firmware, or streaming state. It writes only the standard AV/C STATUS request to the FCP command register and receives the device's response.
+These are STATUS queries. They do not change sample rate, clock source, mixer state, routing, firmware, or streaming state.
 
 No arbitrary FCP command interface is exposed yet.
