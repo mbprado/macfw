@@ -1,139 +1,142 @@
-# M-Audio FireWire 410 — Modern macOS Driver
+# M-Audio FireWire 410 — Modern macOS Driver / DevKit
 
-Reverse-engineering and driver development project for the **M-Audio FireWire 410 (FW410)** audio interface, with the goal of providing support on modern Intel-based macOS systems, initially targeting **macOS Sonoma and newer**.
+Reverse-engineering and **user-space driver / DevKit** project for the M-Audio FireWire 410 (FW410).
 
-The original M-Audio driver is no longer maintained by the manufacturer.
+## Primary goal
 
-## Project status
+The goal is **not** to port the original M-Audio kernel extension.
 
-**Status: Reverse engineering / research**
+The goal is to develop a modern **user-space macOS FireWire audio driver / development kit** that can eventually be reused by other legacy FireWire audio interfaces. The FW410 is the first hardware backend used to develop and validate that stack.
 
-No functional modern macOS driver exists yet.
+```text
+                    macfw
+                      │
+        ┌─────────────┴─────────────┐
+        │                           │
+        ▼                           ▼
+ FireWire / transport          Audio DevKit
+        │                           │
+        └─────────────┬─────────────┘
+                      │
+                      ▼
+                 FW410 backend
+                      │
+                      ▼
+                CoreAudio / HAL
+```
 
-The first stage of this project is to understand the original M-Audio driver, the FW410 hardware protocol, its firmware requirements, and the FireWire audio transport.
+The exact split between ordinary user-space processes, DriverKit, and AudioDriverKit will be determined experimentally rather than assumed.
 
----
+## Non-goals
+
+- Porting the original kext line-by-line.
+- Maintaining a new legacy kernel extension as the primary architecture.
+- Reproducing M-Audio's original source architecture.
+- Apple Silicon support at this stage.
+
+A kernel component should only be considered if a required low-level capability cannot be implemented through the modern user-space stack.
 
 ## Hardware
 
-**Device:** M-Audio FireWire 410
-
-**Interface:** IEEE 1394 / FireWire
-
+**Device:** M-Audio FireWire 410  
+**Interface:** IEEE 1394 / FireWire  
 **Device family:** BeBoB-based FireWire audio device
 
-The FW410 provides:
+The FW410 provides FireWire audio streaming, multiple analog inputs/outputs, S/PDIF, MIDI, headphone output, hardware mixer/routing, multiple sample rates, and clock/source configuration.
 
-- FireWire audio streaming
-- Multiple analog inputs and outputs
-- S/PDIF
-- MIDI
-- Headphone output
-- Hardware mixer/routing
-- Multiple sample rates
-- Clock/source configuration
+## Current research question
 
-Exact capabilities and hardware/firmware revisions will be documented under [`docs/hardware/`](docs/hardware/).
+Before implementing the audio driver, we need to establish the lowest-level FireWire access path available to a user-space application on Intel macOS Sonoma and newer.
 
----
+Apple provides modern DriverKit and AudioDriverKit frameworks, but there is no public `FireWireDriverKit` family. Apple also documents legacy FireWire device interfaces exposed through IOKit. The project therefore needs to experimentally determine which asynchronous and isochronous FireWire operations remain usable from user space and which parts must be recreated.
 
-## Goal
+This is the first technical milestone.
 
-The primary goal is to make the M-Audio FireWire 410 usable as a normal CoreAudio device on modern Intel Macs.
+## Architecture candidates
 
-The initial target is:
-
-- macOS Sonoma
-- Intel Macs
-- FireWire 410
-
-Newer macOS versions will be investigated after the Sonoma target is understood and working.
-
-Apple Silicon / ARM support is **not currently a project target**.
-
----
-
-## Approach
-
-This project will **not initially attempt to port the original M-Audio kernel extension directly**.
-
-Instead, the original driver will be treated as a reference implementation.
-
-The project will proceed in the following stages:
+### A. User-space FireWire service + AudioDriverKit
 
 ```text
-                    M-Audio FireWire 410
-                              │
-                              ▼
-                  ┌─────────────────────┐
-                  │ Hardware / Protocol │
-                  └──────────┬──────────┘
-                             │
-                             ▼
-                  ┌─────────────────────┐
-                  │ Reverse Engineering │
-                  │                     │
-                  │ Original M-Audio    │
-                  │ driver              │
-                  └──────────┬──────────┘
-                             │
-              ┌──────────────┴──────────────┐
-              │                             │
-              ▼                             ▼
-       Linux / BeBoB                   FFADO
-       implementation                 implementation
-              │                             │
-              └──────────────┬──────────────┘
-                             │
-                             ▼
-                  ┌─────────────────────┐
-                  │ Protocol Definition│
-                  └──────────┬──────────┘
-                             │
-                             ▼
-                  ┌─────────────────────┐
-                  │ Modern macOS        │
-                  │ implementation      │
-                  └──────────┬──────────┘
-                             │
-                             ▼
-                        CoreAudio
+CoreAudio
+   │
+   ▼
+AudioDriverKit
+   │
+   │ IPC / shared memory
+   ▼
+macfw FireWire service
+   │
+   ▼
+IEEE 1394 controller
+   │
+   ▼
+FW410
 ```
 
----
-
-# 1. Original driver analysis
-
-The original M-Audio driver is preserved under:
+### B. DriverKit-based FireWire stack
 
 ```text
-original/
+CoreAudio
+   │
+   ▼
+AudioDriverKit
+   │
+   ▼
+macfw FireWire stack
+   │
+   ▼
+OHCI / FireWire controller
+   │
+   ▼
+FW410
 ```
 
-The currently available driver is:
+### C. Existing user-space FireWire interfaces
+
+If macOS exposes sufficient functionality through existing IOKit/FireWire device interfaces, those interfaces may be used initially to validate the protocol without building the complete transport stack.
+
+The selected architecture should provide reliable asynchronous and isochronous FireWire access while keeping the audio path in user space.
+
+## Protocol layers
+
+The implementation should eventually separate these layers:
 
 ```text
-M-AudioFireWireBeBoB.kext
+┌───────────────────────────────────────┐
+│ CoreAudio / AudioDriverKit            │
+├───────────────────────────────────────┤
+│ macfw Audio DevKit                    │
+│ streams / clock / controls / MIDI     │
+├───────────────────────────────────────┤
+│ Device protocol                       │
+│ FW410 / BeBoB                         │
+├───────────────────────────────────────┤
+│ FireWire audio transport              │
+│ CIP / isochronous / connections       │
+├───────────────────────────────────────┤
+│ IEEE 1394 transport                   │
+│ async transactions / bus management   │
+├───────────────────────────────────────┤
+│ Hardware                              │
+│ OHCI / IEEE 1394 controller           │
+└───────────────────────────────────────┘
 ```
 
-The original kext must be treated as immutable evidence.
+Only the FW410-specific layers should contain M-Audio-specific assumptions.
 
-Initial observations:
+## Reverse engineering
 
-- The supplied binary is **x86_64**
-- It is therefore not simply a 32-bit driver requiring conversion
-- It is a legacy kernel extension
-- It depends on Apple's legacy FireWire and audio kernel frameworks
-- It contains M-Audio-specific FireWire/BeBoB implementation code
-- The binary contains useful class names, source filenames, diagnostic strings and firmware-related symbols
+The original M-Audio driver is treated as immutable reference material.
 
-Relevant components discovered so far include:
+Initial analysis established that the supplied driver is an **x86_64 legacy kernel extension**, not a 32-bit binary. It contains substantial FireWire, audio, firmware, and FW410-specific implementation code.
+
+Important components discovered so far include:
 
 ```text
 FWIsochChannel
 FWDCLProgram
 FWDCLInputProgram
-FWDCLInputProgram
+FWDCLOutputProgram
 FWP2PConnection
 FWConnectionManager
 FWAVCConnectionManager
@@ -145,314 +148,72 @@ FW410
 com_m_audio_FW410Device
 ```
 
-These will be mapped during the reverse-engineering phase.
-
----
-
-# 2. Reverse-engineering objectives
-
-The original driver will be analyzed to determine:
-
-### Device discovery
-
-- FireWire device matching
-- Vendor/device identifiers
-- Configuration ROM handling
-- Device initialization
-- Bus reset handling
-
-### Firmware
-
-- Firmware version detection
-- Bootloader interaction
-- Firmware upload
-- Firmware activation
-- Firmware configuration
-- Firmware persistence
-
-### FireWire transport
-
-- Asynchronous transactions
-- Isochronous channels
-- CIP packets
-- DCL programs
-- Connection management
-- Bus reset/recovery
-
-### Audio
-
-- Playback streams
-- Capture streams
-- Channel configuration
-- Sample rates
-- Clock source
-- Synchronization
-- Stream start/stop
-
-### Mixer and controls
-
-- Input routing
-- Output routing
-- Mixer levels
-- Headphone routing
-- S/PDIF
-- ADAT
-- Hardware controls
-
-### MIDI
-
-- MIDI transport
-- Device initialization
-- MIDI input/output
-
----
-
-# 3. External reference implementations
-
-Existing open-source implementations will be used as protocol references.
-
-Important references include:
-
-- Linux FireWire BeBoB support
-- Linux M-Audio FireWire support
-- FFADO
-- Other BeBoB-based devices
-
-These implementations should be kept under:
-
-```text
-reference/
-```
-
-and documented rather than blindly copied into the new implementation.
-
-The objective is to determine which behavior is:
-
-1. Generic IEEE 1394 behavior
-2. Generic BeBoB behavior
-3. M-Audio-specific behavior
-4. FW410-specific behavior
-
----
-
-# 4. Modern macOS architecture
-
-The final implementation architecture has not yet been decided.
-
-Possible approaches include:
-
-### Option A — AudioDriverKit
-
-Use Apple's modern audio-driver architecture.
-
-```text
-CoreAudio
-    │
-    ▼
-AudioDriverKit
-    │
-    ▼
-FW410 implementation
-    │
-    ▼
-FireWire transport
-```
-
-### Option B — User-space FireWire transport
-
-If a suitable FireWire transport mechanism can be made available on modern macOS, keep as much of the implementation as possible in user space.
-
-### Option C — Compatibility / transport layer
-
-If modern macOS does not expose sufficient FireWire functionality, investigate a dedicated compatibility layer.
-
-### Option D — Kernel component
-
-Only consider a kernel component if the previous approaches cannot provide the required FireWire functionality.
-
-The project should avoid committing to a kernel-extension architecture until the FireWire transport problem is understood.
-
----
-
-# 5. Repository organization
-
-```text
-docs/
-```
-
-Design documents, reverse-engineering notes and hardware documentation.
-
-```text
-original/
-```
-
-Original vendor material. This directory should remain immutable.
-
-```text
-analysis/
-```
-
-Static-analysis artifacts produced from the original driver.
-
-```text
-protocol/
-```
-
-Our reconstructed understanding of the FW410 and BeBoB protocols.
-
-```text
-captures/
-```
-
-FireWire traffic captures and other hardware observations.
-
-```text
-reference/
-```
-
-External implementations such as Linux and FFADO.
-
-```text
-experiments/
-```
-
-Temporary prototypes and experimental code.
-
-```text
-driver/
-```
-
-The eventual modern macOS driver implementation.
-
-```text
-tools/
-```
-
-Scripts and utilities developed during reverse engineering.
-
-```text
-tests/
-```
-
-Automated and hardware-based tests.
-
----
-
-# 6. Development principles
-
-### Preserve evidence
-
-Never modify the original vendor files.
-
-### Document discoveries
-
-Every significant reverse-engineering discovery should be documented.
-
-### Separate facts from assumptions
-
-When documenting protocol behavior, distinguish between:
-
-- Confirmed
-- Observed
-- Inferred
-- Unknown
-
-### Prefer protocol compatibility over code compatibility
-
-The objective is not to reproduce the original M-Audio source code.
-
-The objective is to reproduce the behavior required by the FW410 hardware.
-
-### Minimize kernel code
-
-Modern macOS compatibility should be achieved with the smallest possible privileged component.
-
-### Test incrementally
-
-The implementation should progress through small milestones:
-
-```text
-Device detection
-      ↓
-FireWire communication
-      ↓
-Firmware identification
-      ↓
-Device initialization
-      ↓
-Clock/sample-rate control
-      ↓
-Playback
-      ↓
-Capture
-      ↓
-Multiple channels
-      ↓
-Mixer
-      ↓
-MIDI
-      ↓
-Complete device
-```
-
----
-
-# 7. Initial milestones
-
-## M1 — Repository and evidence
-
-- [x] Preserve original M-Audio kext
-- [ ] Calculate hashes
-- [ ] Extract kext
-- [ ] Document Info.plist
-- [ ] Identify Mach-O architecture
-- [ ] Extract strings
-- [ ] Extract symbols
-- [ ] Import into Ghidra
-- [ ] Create initial class map
-
-## M2 — Hardware identification
-
-- [ ] Identify FW410 hardware revision
-- [ ] Identify firmware revision
-- [ ] Capture configuration ROM
-- [ ] Document FireWire identifiers
-- [ ] Document available interfaces/endpoints
-
-## M3 — Firmware
-
-- [ ] Identify firmware format
-- [ ] Identify firmware loading mechanism
-- [ ] Identify firmware version query
-- [ ] Document bootloader protocol
-- [ ] Determine whether firmware is required on every boot
-
-## M4 — FireWire protocol
-
-- [ ] Map asynchronous transactions
-- [ ] Map AVC commands
-- [ ] Map isochronous streams
-- [ ] Map CIP format
-- [ ] Map connection setup
-- [ ] Map bus reset handling
-
-## M5 — Audio protocol
-
+See [`analysis/`](analysis/) for the reverse-engineering work.
+
+## Development milestones
+
+### M0 — Repository and evidence
+
+- [x] Preserve original driver information
+- [x] Identify Mach-O architecture
+- [ ] Record hashes of original files
+- [ ] Extract and document `Info.plist`
+- [ ] Complete initial class/function map
+
+### M1 — User-space FireWire proof of concept
+
+- [ ] Identify available FireWire device interfaces on Sonoma
+- [ ] Detect an attached FireWire controller from user space
+- [ ] Detect the FW410
+- [ ] Read the configuration ROM
+- [ ] Enumerate FireWire nodes
+- [ ] Perform a harmless asynchronous read
+- [ ] Perform a harmless asynchronous write if appropriate
+- [ ] Determine whether isochronous resources can be controlled from user space
+
+**Success criterion:** a standalone user-space diagnostic program communicates with the FW410 without loading the original M-Audio kext.
+
+### M2 — FireWire transport layer
+
+- [ ] Node discovery
+- [ ] Bus reset handling
+- [ ] Addressing
+- [ ] Asynchronous transactions
+- [ ] Isochronous channels
+- [ ] CIP handling
+- [ ] Bandwidth/channel allocation
+
+### M3 — FW410 / BeBoB protocol
+
+- [ ] Device identification
+- [ ] Firmware version
+- [ ] Firmware loading / boot sequence
+- [ ] AVC commands
+- [ ] Clock
+- [ ] Sample rates
+- [ ] Stream configuration
+
+### M4 — Audio DevKit
+
+- [ ] Generic audio device abstraction
+- [ ] Playback streams
+- [ ] Capture streams
+- [ ] Clock abstraction
+- [ ] Sample-rate management
+- [ ] Channel mapping
+- [ ] Controls / mixer abstraction
+- [ ] MIDI abstraction
+
+### M5 — CoreAudio integration
+
+- [ ] Minimal AudioDriverKit device
+- [ ] Device enumeration
 - [ ] Playback
 - [ ] Capture
-- [ ] Sample rates
-- [ ] Clock source
-- [ ] Channel configuration
+- [ ] Clock synchronization
+- [ ] Controls
 
-## M6 — Modern macOS prototype
-
-- [ ] Determine Sonoma FireWire access strategy
-- [ ] Create minimal CoreAudio device
-- [ ] Establish device communication
-- [ ] Start playback
-- [ ] Start capture
-
-## M7 — Full device
+### M6 — FW410 complete implementation
 
 - [ ] Mixer
 - [ ] Routing
@@ -461,48 +222,31 @@ Complete device
 - [ ] ADAT
 - [ ] MIDI
 - [ ] Firmware management
-- [ ] Recovery from FireWire bus reset
+- [ ] Bus reset recovery
 
----
+## External references
 
-# 8. Current priority
+Existing open-source implementations will be used to validate the protocol model:
 
-The immediate priority is **not driver development**.
+- Linux FireWire / BeBoB support
+- Linux M-Audio FireWire support
+- FFADO
+- Other BeBoB implementations
 
-The immediate priority is:
+These belong under [`reference/`](reference/) and are references, not assumptions that their architecture can be directly ported to macOS.
 
-```text
-Original kext
-     │
-     ▼
-Static analysis
-     │
-     ▼
-FW410 class/function map
-     │
-     ▼
-Protocol reconstruction
-     │
-     ├─────────────┐
-     ▼             ▼
-Linux/FFADO     Hardware captures
-     │             │
-     └──────┬──────┘
-            ▼
-    Protocol specification
-            │
-            ▼
-    Sonoma architecture
-```
+## Research status
 
-Once the FireWire transport requirements are understood, the modern macOS implementation can be selected based on evidence rather than assumptions.
+**Current phase: M1 — User-space FireWire proof of concept**
 
----
+The next implementation is a small diagnostic tool, not an audio driver. It must answer:
+
+> **Can a normal user-space process on Intel macOS Sonoma communicate with the FW410 through the available FireWire interfaces, without the old M-Audio kext?**
+
+Everything else depends on this result.
 
 ## Disclaimer
 
-This repository is an independent reverse-engineering and compatibility project.
+This repository is an independent reverse-engineering and compatibility project. It is not affiliated with, endorsed by, or supported by M-Audio, Avid, Apple, or any hardware manufacturer.
 
-M-Audio/Avid is not currently providing support for this project or for modern macOS compatibility of the FireWire 410.
-
-The original vendor driver is retained for research and compatibility analysis. Redistribution of proprietary vendor material should be handled according to applicable licensing and copyright requirements.
+Vendor drivers, firmware, and other proprietary material remain subject to their respective licenses and copyrights.
