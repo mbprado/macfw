@@ -297,6 +297,15 @@ static void readInfoDate(IOFireWireLibDeviceRef device,
     std::cout << "        node:    0x" << std::hex << remoteNodeID << std::dec << '\n';
     std::cout << "        length:  8 bytes\n";
 
+    const IOReturn openResult = (*device)->Open(device);
+    if (openResult != kIOReturnSuccess) {
+        std::cout << "        open:    failed (0x"
+                  << std::hex << openResult << std::dec << ")\n";
+        return;
+    }
+
+    std::cout << "        open:    success\n";
+
     const IOReturn kr = (*device)->Read(
         device,
         0,
@@ -305,6 +314,8 @@ static void readInfoDate(IOFireWireLibDeviceRef device,
         &size,
         true,
         generation);
+
+    (*device)->Close(device);
 
     if (kr != kIOReturnSuccess) {
         std::cout << "        read:    failed (0x"
