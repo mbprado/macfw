@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>English</string>
+	<key>CFBundleExecutable</key>
+	<string>M-AudioFireWireBeBoB</string>
+	<key>CFBundleIconFile</key>
+	<string>FW410.icns</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.m-audio.driver.firewire</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundlePackageType</key>
+	<string>KEXT</string>
+	<key>CFBundleSignature</key>
+	<string>DDRV</string>
+	<key>CFBundleVersion</key>
+	<string>1.10.6 "Sierra mod"</string>
+	<key>IOKitPersonalities</key>
+	<dict>
+	<key>com_m_audio_FW410Device</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>com.m-audio.driver.firewire</string>
+			<key>FireWire Product Name</key>
+			<string>FW 410</string>
+			<key>IOClass</key>
+			<string>com_m_audio_FW410Device</string>
+			<key>IOProviderClass</key>
+			<string>com_m_audio_FWMetaNub</string>
+			<key>IOUserClientClass</key>
+			<string>com_m_audio_FWUserClient</string>
+		</dict>
+	<!--
+		<key>FWMetaNub</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>com.m-audio.driver.firewire</string>
+			<key>IOClass</key>
+			<string>com_m_audio_FWMetaNub</string>
+			<key>IOProviderClass</key>
+			<string>IOFireWireDevice</string>
+		</dict>
+		<key>FWSoloAppleGoAway1</key>
+		<dict>	
+			<key>CFBundleIdentifier</key>
+			<string>com.m-audio.driver.firewire</string>
+			<key>FireWire Product Name</key>
+			<string>FW Solo</string>
+			<key>FireWire Vendor Name</key>
+			<string>M-Audio</string>
+			<key>IOClass</key>
+			<string>com_m_audio_MakeAppleFWAudioGoAway</string>
+			<key>IOProviderClass</key>
+			<string>IOFireWireAVCSubUnit</string>
+			<key>SubUnit_Type</key>
+			<integer>1</integer>
+			<key>Vendor_ID</key>
+			<integer>3436</integer>
+		</dict>
+		<key>FWSoloAppleGoAway12</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>com.m-audio.driver.firewire</string>
+			<key>FireWire Product Name</key>
+			<string>FW Solo</string>
+			<key>FireWire Vendor Name</key>
+			<string>M-Audio</string>
+			<key>IOClass</key>
+			<string>com_m_audio_MakeAppleFWAudioGoAway</string>
+			<key>IOProviderClass</key>
+			<string>IOFireWireAVCSubUnit</string>
+			<key>SubUnit_Type</key>
+			<integer>12</integer>
+			<key>Vendor_ID</key>
+			<integer>3436</integer>
+		</dict>
+		<key>com_m_audio_FW1814Device</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>com.m-audio.driver.firewire</string>
+			<key>FireWire Product Name</key>
+			<string>FW 1814</string>
+			<key>IOClass</key>
+			<string>com_m_audio_FW1814Device</string>
+			<key>IOProviderClass</key>
+			<string>com_m_audio_FWMetaNub</string>
+			<key>IOUserClientClass</key>
+			<string>com_m_audio_FWUserClient</string>
+		</dict>
+		<key>com_m_audio_FW410Device</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>com.m-audio.driver.firewire</string>
+			<key>FireWire Product Name</key>
+			<string>FW 410</string>
+			<key>IOClass</key>
+			<string>com_m_audio_FW410Device</string>
+			<key>IOProviderClass</key>
+			<string>com_m_audio_FWMetaNub</string>
+			<key>IOUserClientClass</key>
+			<string>com_m_audio_FWUserClient</string>
+		</dict>
+		<key>com_m_audio_FWAudiophileDevice</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>com.m-audio.driver.firewire</string>
+			<key>FireWire Product Name</key>
+			<string>FW Audiophile</string>
+			<key>IOClass</key>
+			<string>com_m_audio_FWAudiophileDevice</string>
+			<key>IOProviderClass</key>
+			<string>com_m_audio_FWMetaNub</string>
+			<key>IOUserClientClass</key>
+			<string>com_m_audio_FWUserClient</string>
+		</dict>
+		<key>com_m_audio_FWLightbridgeDevice</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>com.m-audio.driver.firewire</string>
+			<key>FireWire Product Name</key>
+			<string>ProFire Lightbridge</string>
+			<key>IOClass</key>
+			<string>com_m_audio_FWLightbridgeDevice</string>
+			<key>IOProviderClass</key>
+			<string>com_m_audio_FWMetaNub</string>
+			<key>IOUserClientClass</key>
+			<string>com_m_audio_FWUserClient</string>
+		</dict>
+		<key>com_m_audio_FWNRV10Device</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>com.m-audio.driver.firewire</string>
+			<key>FireWire Product Name</key>
+			<string>NRV-10</string>
+			<key>IOClass</key>
+			<string>com_m_audio_FWNRV10Device</string>
+			<key>IOProviderClass</key>
+			<string>com_m_audio_FWMetaNub</string>
+			<key>IOUserClientClass</key>
+			<string>com_m_audio_FWUserClient</string>
+			<key>Model_ID</key>
+			<integer>65665</integer>
+		</dict>
+		<key>com_m_audio_FWOzonicDevice</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>com.m-audio.driver.firewire</string>
+			<key>FireWire Product Name</key>
+			<string>Ozonic</string>
+			<key>IOClass</key>
+			<string>com_m_audio_FWOzonicDevice</string>
+			<key>IOProviderClass</key>
+			<string>com_m_audio_FWMetaNub</string>
+			<key>IOUserClientClass</key>
+			<string>com_m_audio_FWUserClient</string>
+		</dict>
+		<key>com_m_audio_FWProjectMixDevice</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>com.m-audio.driver.firewire</string>
+			<key>FireWire Product Name</key>
+			<string>ProjectMix</string>
+			<key>IOClass</key>
+			<string>com_m_audio_FWProjectMixDevice</string>
+			<key>IOProviderClass</key>
+			<string>com_m_audio_FWMetaNub</string>
+			<key>IOUserClientClass</key>
+			<string>com_m_audio_FWUserClient</string>
+		</dict>
+		<key>com_m_audio_FWSoloDevice</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>com.m-audio.driver.firewire</string>
+			<key>FireWire Product Name</key>
+			<string>FW Solo</string>
+			<key>IOClass</key>
+			<string>com_m_audio_FWSoloDevice</string>
+			<key>IOProviderClass</key>
+			<string>com_m_audio_FWMetaNub</string>
+			<key>IOUserClientClass</key>
+			<string>com_m_audio_FWUserClient</string>
+		</dict>
+	-->
+	</dict>
+	<key>OSBundleLibraries</key>
+	<dict>
+		<key>com.apple.iokit.IOAudioFamily</key>
+		<string>1.1</string>
+		<key>com.apple.iokit.IOFireWireAVC</key>
+		<string>1.0</string>
+		<key>com.apple.iokit.IOFireWireFamily</key>
+		<string>1.0.0</string>
+		<key>com.apple.kpi.iokit</key>
+		<string>8.0</string>
+		<key>com.apple.kpi.libkern</key>
+		<string>8.0</string>
+		<key>com.apple.kpi.mach</key>
+		<string>8.0</string>
+	</dict>
+</dict>
+</plist>
