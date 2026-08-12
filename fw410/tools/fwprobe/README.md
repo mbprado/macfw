@@ -67,6 +67,19 @@ Binary leaf previews are limited to the first 32 bytes. Recursion is capped at 1
 - allocate isochronous channels;
 - start audio or MIDI streaming.
 
+## Confirmed FW410 bootloader result
+
+On Intel macOS Monterey, `--rom` successfully decoded the FW410 bootloader unit directory:
+
+```text
+specifier:        0x00a02d
+software version: 0x014001
+model:            0x010058
+text descriptor:  FW Bootloader
+```
+
+This result matches the Linux `snd-bebob` FW410 bootloader model. See [`../../analysis/bootloader-rom.md`](../../analysis/bootloader-rom.md) for the recorded data and Linux correlation.
+
 ## Help
 
 ```bash
@@ -78,9 +91,10 @@ Binary leaf previews are limited to the first 32 bytes. Recursion is capped at 1
 1. [x] Discover `IOFireWireUnit` services.
 2. [x] Obtain `IOFireWireDeviceInterface` from user space.
 3. [x] Read bus generation and remote node ID.
-4. [x] Add read-only configuration-ROM inspection.
-5. [ ] Validate the FW410 bootloader ROM output against Linux/ALSA and FFADO.
-6. [ ] Add a safe FireWire read after the target address is confirmed from protocol analysis.
+4. [x] Add and validate read-only configuration-ROM inspection on FW410 hardware.
+5. [x] Validate bootloader model/specifier identity against Linux `snd-bebob`.
+6. [ ] Add a safe FireWire read at a target confirmed from protocol analysis.
 7. [ ] Add isochronous capability probing.
+8. [ ] Repeat successful probes on Intel macOS Sonoma.
 
 Do not add arbitrary write operations to this probe until a specific FW410 register/command has been verified against the original M-Audio driver and/or another trusted implementation such as Linux `snd-bebob` or FFADO.
