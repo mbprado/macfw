@@ -277,13 +277,15 @@ static void dumpConfigROM(IOFireWireLibDeviceRef device) {
     (*directory)->Release(directory);
 }
 
-static void readInfoDate(IOFireWireLibDeviceRef device, UInt32 generation) {
+static void readInfoDate(IOFireWireLibDeviceRef device,
+                         UInt32 generation,
+                         UInt16 remoteNodeID) {
     constexpr UInt16 kAddressHi = 0xffff;
     constexpr UInt32 kAddressLo = 0xc8020020;
     constexpr UInt32 kLength = 8;
 
     FWAddress address = {};
-    address.nodeID = 0;
+    address.nodeID = remoteNodeID;
     address.addressHi = kAddressHi;
     address.addressLo = kAddressLo;
 
@@ -292,6 +294,7 @@ static void readInfoDate(IOFireWireLibDeviceRef device, UInt32 generation) {
 
     std::cout << "    BeBoB software build date probe:\n";
     std::cout << "        address: 0xffffc8020020\n";
+    std::cout << "        node:    0x" << std::hex << remoteNodeID << std::dec << '\n';
     std::cout << "        length:  8 bytes\n";
 
     const IOReturn kr = (*device)->Read(
@@ -418,22 +421,25 @@ int main(int argc, char **argv) {
         std::cout << "    interface version:  " << (*device)->version << '\n';
 
         UInt32 generation = 0;
-        kr = (*device)->GetBusGeneration(device, &generation);
-        if (kr == KERN_SUCCESS) {
+        const IOReturn generationResult = (*device)->GetBusGeneration(device, &generation);
+        if (generationResult == KERN_SUCCESS) {
             std::cout << "    bus generation:     " << generation << '\n';
         } else {
             std::cout << "    bus generation:     unavailable (0x"
-                      << std::hex << kr << std::dec << ")\n";
+                      << std::hex << generationResult << std::dec << ")\n";
         }
 
         UInt16 nodeID = 0;
-        kr = (*device)->GetRemoteNodeID(device, generation, &nodeID);
-        if (kr == KERN_SUCCESS) {
+        IOReturn nodeResult = kIOReturnError;
+        if (generationResult == KERN_SUCCESS) {
+            nodeResult = (*device)->GetRemoteNodeID(device, generation, &nodeID);
+        }
+        if (nodeResult == KERN_SUCCESS) {
             std::cout << "    remote node ID:     0x"
                       << std::hex << nodeID << std::dec << '\n';
         } else {
             std::cout << "    remote node ID:     unavailable (0x"
-                      << std::hex << kr << std::dec << ")\n";
+                      << std::hex << nodeResult << std::dec << ")\n";
         }
 
         if (dumpROM) {
@@ -441,11 +447,11 @@ int main(int argc, char **argv) {
         }
 
         if (infoDate) {
-            if (kr == KERN_SUCCESS) {
-                readInfoDate(device, generation);
+            if (generationResult == KERN_SUCCESS && nodeResult == KERN_SUCCESS) {
+                readInfoDate(device, generation, nodeID);
             } else {
                 std::cout << "    BeBoB software build date probe skipped: "
-                             "valid bus generation unavailable\n";
+                             "valid generation/node ID unavailable\n";
             }
         }
 
