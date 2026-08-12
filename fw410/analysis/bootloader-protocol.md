@@ -1,8 +1,8 @@
 # FW410 boot-from-flash protocol
 
-**Status:** Linux/FFADO correlation complete; hardware write not yet performed.
+**Status:** Linux/FFADO correlation complete; hardware cue write confirmed on Intel macOS Monterey.
 
-This note records the known M-Audio FireWire 410 boot-from-flash path used by Linux `snd-bebob` and correlated with the BeBoB/FreeBoB information-register layout used by FFADO.
+This note records the M-Audio FireWire 410 boot-from-flash path used by Linux `snd-bebob`, correlated with the BeBoB/FreeBoB information-register layout used by FFADO, and now confirmed for the cue write on physical FW410 hardware from macOS user space.
 
 ## Confirmed hardware state
 
@@ -88,7 +88,7 @@ Linux converts each value with `cpu_to_le32()` and sends the three quadlets in o
 0xffffc8021000
 ```
 
-Thus the 12 transmitted bytes are expected to be:
+Thus the 12 transmitted bytes are:
 
 ```text
 01 00 00 00  00 00 11 01  00 00 00 00
@@ -99,6 +99,28 @@ Interpretation from the Linux source comments:
 - cue 1: bootloader protocol version 1;
 - cue 2: initialize configuration to factory settings (`0x1101`), command code zero, zero operands;
 - cue 3: padding.
+
+## Confirmed macOS hardware write
+
+On Intel macOS Monterey, `fw410/tools/fwboot/fwboot --execute` passed all live preflight checks and performed exactly one 12-byte write to `0xffffc8021000`.
+
+Observed result:
+
+```text
+preflight:
+  protocol v1:       PASS (0x1)
+  bootloader active: PASS (0x2705)
+  software date:     PASS (20070504)
+  FW410 app ID:      PASS (0x10046)
+executing one-shot boot cue:
+  address:    0xffffc8021000
+  bytes:      01 00 00 00 00 00 11 01 00 00 00 00
+write result: success (12 bytes)
+```
+
+This confirms that the documented Linux boot cue can be issued successfully from macOS user space through `IOFireWireLib` without the original M-Audio kernel extension.
+
+The next validation is re-enumeration: confirm that the old bootloader unit disappears, the FireWire bus generation changes, and a new operational FW410 unit appears with model `0x00010046`.
 
 ## Expected transition
 
@@ -115,22 +137,6 @@ The node ID and bus generation must be treated as invalid after the reset and re
 
 ## macfw implementation strategy
 
-The first write-capable implementation should remain narrowly scoped. It should not expose arbitrary addresses or arbitrary payloads.
+Write-capable operations remain narrowly scoped. `fwprobe` stays read-only. `fwboot` performs only the documented FW410 flash-boot cue and only after verifying the exact known bootloader/application state.
 
-Before writing, it should verify:
-
-1. current device is the FW410 bootloader personality;
-2. BeBoB protocol version is `1`;
-3. bootloader version is non-zero;
-4. software date is at least `20070401`;
-5. software/application ID is `0x00010046`;
-6. target address is exactly `0xffffc8021000`;
-7. payload is exactly the 12 bytes documented above.
-
-After the write, it must release the old interface and wait for/re-discover the FireWire unit instead of continuing to use stale generation/node state.
-
-## Current safe test
-
-`fwprobe --boot-cue-check` performs the prerequisite checks and prints the exact would-be transaction, but performs **no write**.
-
-Only after this dry run is validated on the physical FW410 should a one-shot boot command be added.
+The next milestone is to characterize the operational firmware after re-enumeration: configuration ROM, BeBoB info registers, AV/C subunits/plugs, and eventually isochronous stream capabilities.
