@@ -14,7 +14,7 @@ namespace {
 
 constexpr UInt16 kAddressHi = 0xffff;
 constexpr UInt32 kFcpCommandLo = 0xf0000b00;
-constexpr UInt32 kFcpResponseInitialUnitsLo = 0x00000d00;
+constexpr UInt32 kFcpResponseInitialUnitsLo = 0xf0000d00;
 constexpr UInt32 kFcpResponseSize = 0x200;
 constexpr double kTimeoutSeconds = 1.0;
 
@@ -53,9 +53,8 @@ static void printProperty(io_registry_entry_t service, const char *key) {
 }
 
 static bool isOperationalFw410(io_registry_entry_t service) {
-    CFStringRef key = CFSTR("FireWire Product Name");
     CFTypeRef value = IORegistryEntryCreateCFProperty(
-        service, key, kCFAllocatorDefault, 0);
+        service, CFSTR("FireWire Product Name"), kCFAllocatorDefault, 0);
     if (!value) return false;
 
     bool result = false;
@@ -125,7 +124,6 @@ static const char *responseName(UInt8 response) {
 }
 
 static unsigned rateForSfc(UInt8 sfc) {
-    // IEC 61883 / Linux amdtp_rate_table ordering used by snd-firewire.
     static constexpr unsigned rates[] = {
         32000, 44100, 48000, 88200,
         96000, 176400, 192000, 0
@@ -188,8 +186,11 @@ static bool runOutputSignalFormatProbe(IOFireWireLibDeviceRef device,
               << localAddress.nodeID << " hi=0x" << localAddress.addressHi
               << " lo=0x" << localAddress.addressLo << std::dec << '\n';
 
-    // Linux avc_general_get_sig_fmt(), output plug 0:
-    // STATUS, UNIT, OUTPUT PLUG SIGNAL FORMAT, plug 0, AM824, unknown SFC/SYT.
+    if (localAddress.addressHi != 0xffff ||
+        localAddress.addressLo != kFcpResponseInitialUnitsLo) {
+        std::cout << "    response window mismatch: expected hi=0xffff lo=0xf0000d00\n";
+    }
+
     UInt8 command[8] = {0x01, 0xff, 0x18, 0x00,
                         0x90, 0xff, 0xff, 0xff};
     UInt32 commandSize = sizeof(command);
