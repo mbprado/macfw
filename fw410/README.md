@@ -42,64 +42,28 @@ A kernel component should only be considered if a required low-level capability 
 **Interface:** IEEE 1394 / FireWire  
 **Device family:** BeBoB-based FireWire audio device
 
-The FW410 provides FireWire audio streaming, multiple analog inputs/outputs, S/PDIF, MIDI, headphone output, hardware mixer/routing, multiple sample rates, and clock/source configuration.
+## Confirmed user-space result
 
-## Current research question
+On an Intel Mac running macOS Monterey, a normal user-space process using Apple's `IOFireWireLib` can:
 
-Before implementing the audio driver, we need to establish the lowest-level FireWire access path available to a user-space application on Intel macOS Sonoma and newer.
+- discover the FW410 bootloader;
+- read its configuration ROM;
+- perform direct asynchronous FireWire reads;
+- read and decode the BeBoB information registers;
+- issue the guarded M-Audio boot-from-flash cue;
+- survive the resulting FireWire bus reset by reacquiring generation/node state;
+- rediscover the device as the operational `FW 410` personality.
 
-Apple provides modern DriverKit and AudioDriverKit frameworks, but there is no public `FireWireDriverKit` family. Apple also documents legacy FireWire device interfaces exposed through IOKit. The project therefore needs to experimentally determine which asynchronous and isochronous FireWire operations remain usable from user space and which parts must be recreated.
-
-This is the first technical milestone.
-
-## Architecture candidates
-
-### A. User-space FireWire service + AudioDriverKit
-
-```text
-CoreAudio
-   │
-   ▼
-AudioDriverKit
-   │
-   │ IPC / shared memory
-   ▼
-macfw FireWire service
-   │
-   ▼
-IEEE 1394 controller
-   │
-   ▼
-FW410
-```
-
-### B. DriverKit-based FireWire stack
+Confirmed identity transition:
 
 ```text
-CoreAudio
-   │
-   ▼
-AudioDriverKit
-   │
-   ▼
-macfw FireWire stack
-   │
-   ▼
-OHCI / FireWire controller
-   │
-   ▼
-FW410
+before: FW Bootloader / model 0x00010058 / generation 144
+after:  FW 410        / model 0x00010046 / generation 145
 ```
 
-### C. Existing user-space FireWire interfaces
-
-If macOS exposes sufficient functionality through existing IOKit/FireWire device interfaces, those interfaces may be used initially to validate the protocol without building the complete transport stack.
-
-The selected architecture should provide reliable asynchronous and isochronous FireWire access while keeping the audio path in user space.
+The operational BeBoB information block reports bootloader version `0`, confirming that the application firmware is running.
 
 ## Protocol layers
-
-The implementation should eventually separate these layers:
 
 ```text
 ┌───────────────────────────────────────┐
@@ -109,7 +73,7 @@ The implementation should eventually separate these layers:
 │ streams / clock / controls / MIDI     │
 ├───────────────────────────────────────┤
 │ Device protocol                       │
-│ FW410 / BeBoB                         │
+│ FW410 / BeBoB / AV/C                  │
 ├───────────────────────────────────────┤
 │ FireWire audio transport              │
 │ CIP / isochronous / connections       │
@@ -126,11 +90,9 @@ Only the FW410-specific layers should contain M-Audio-specific assumptions.
 
 ## Reverse engineering
 
-The original M-Audio driver is treated as immutable reference material.
+The original M-Audio driver is treated as immutable reference material. Existing Linux `snd-bebob` and FFADO/FreeBoB implementations are used as independent protocol references.
 
-Initial analysis established that the supplied driver is an **x86_64 legacy kernel extension**, not a 32-bit binary. It contains substantial FireWire, audio, firmware, and FW410-specific implementation code.
-
-Important components discovered so far include:
+Important classes discovered in the original driver include:
 
 ```text
 FWIsochChannel
@@ -148,7 +110,7 @@ FW410
 com_m_audio_FW410Device
 ```
 
-See [`analysis/`](analysis/) for the reverse-engineering work.
+See [`analysis/`](analysis/) for reverse-engineering notes.
 
 ## Development milestones
 
@@ -162,36 +124,41 @@ See [`analysis/`](analysis/) for the reverse-engineering work.
 
 ### M1 — User-space FireWire proof of concept
 
-- [ ] Identify available FireWire device interfaces on Sonoma
-- [ ] Detect an attached FireWire controller from user space
-- [ ] Detect the FW410
-- [ ] Read the configuration ROM
-- [ ] Enumerate FireWire nodes
-- [ ] Perform a harmless asynchronous read
-- [ ] Perform a harmless asynchronous write if appropriate
+- [x] Detect an attached FireWire controller/device from user space
+- [x] Detect the FW410 bootloader
+- [x] Read the configuration ROM
+- [x] Read bus generation and remote node ID
+- [x] Perform harmless asynchronous reads
+- [x] Perform a narrowly scoped asynchronous write
+- [x] Start the FW410 operational firmware from flash
+- [x] Rediscover the operational FW410 after bus reset
 - [ ] Determine whether isochronous resources can be controlled from user space
+- [ ] Repeat the successful path on Intel macOS Sonoma or newer
 
-**Success criterion:** a standalone user-space diagnostic program communicates with the FW410 without loading the original M-Audio kext.
+**M1 core success criterion achieved:** a standalone user-space program communicates with and boots the FW410 without loading the original M-Audio kext.
 
 ### M2 — FireWire transport layer
 
-- [ ] Node discovery
-- [ ] Bus reset handling
-- [ ] Addressing
-- [ ] Asynchronous transactions
+- [x] Node discovery
+- [ ] Bus reset notification/recovery abstraction
+- [x] 64-bit asynchronous addressing
+- [x] Asynchronous block read/write primitives
+- [ ] FCP command/response transport
 - [ ] Isochronous channels
 - [ ] CIP handling
 - [ ] Bandwidth/channel allocation
 
 ### M3 — FW410 / BeBoB protocol
 
-- [ ] Device identification
-- [ ] Firmware version
-- [ ] Firmware loading / boot sequence
-- [ ] AVC commands
-- [ ] Clock
-- [ ] Sample rates
+- [x] Device identification
+- [x] Firmware information
+- [x] Firmware boot-from-flash sequence
+- [ ] AV/C commands
+- [ ] Plug discovery
+- [ ] Clock source discovery/control
+- [ ] Sample-rate discovery/control
 - [ ] Stream configuration
+- [ ] MIDI/control protocol mapping
 
 ### M4 — Audio DevKit
 
@@ -219,31 +186,24 @@ See [`analysis/`](analysis/) for the reverse-engineering work.
 - [ ] Routing
 - [ ] Headphone output
 - [ ] S/PDIF
-- [ ] ADAT
 - [ ] MIDI
 - [ ] Firmware management
 - [ ] Bus reset recovery
 
+## Current phase
+
+**M2/M3 boundary — operational-device protocol discovery.**
+
+The next task is to implement a minimal AV/C Function Control Protocol transport in user space and use read-only AV/C STATUS commands to discover the operational FW410's plug configuration and current sample rate before any audio streaming is attempted.
+
 ## External references
 
-Existing open-source implementations will be used to validate the protocol model:
+Existing open-source implementations are protocol references:
 
-- Linux FireWire / BeBoB support
+- Linux FireWire / `snd-bebob`
 - Linux M-Audio FireWire support
-- FFADO
-- Other BeBoB implementations
-
-These belong under [`reference/`](reference/) and are references, not assumptions that their architecture can be directly ported to macOS.
-
-## Research status
-
-**Current phase: M1 — User-space FireWire proof of concept**
-
-The next implementation is a small diagnostic tool, not an audio driver. It must answer:
-
-> **Can a normal user-space process on Intel macOS Sonoma communicate with the FW410 through the available FireWire interfaces, without the old M-Audio kext?**
-
-Everything else depends on this result.
+- FFADO / FreeBoB
+- IEEE 1394 / IEC 61883 / AV/C specifications where available
 
 ## Disclaimer
 
