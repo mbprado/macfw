@@ -6,9 +6,13 @@ Establish whether an ordinary user-space process on an Intel Mac running macOS S
 
 This milestone deliberately comes before AudioDriverKit work.
 
-## Important finding
+## Current status
 
-Apple's current IOKit documentation still exposes `IOFireWireLib` device interfaces, including `IOFireWireDeviceInterface`, asynchronous command interfaces, isochronous channel/port interfaces, configuration-ROM access, and synchronous read/write operations. This means the first hypothesis to test is **not** that we need to immediately rebuild the OHCI/FireWire stack. We should first determine how much of the existing user-space FireWire API remains operational on the target Sonoma installation.
+The first hardware proof has been completed on an Intel Mac running macOS Monterey. A normal user-space process can discover the FW410 bootloader, obtain `IOFireWireDeviceInterface` version 8, read the FireWire bus generation and node ID, and inspect the remote configuration ROM through `IOFireWireConfigDirectoryInterface`.
+
+This is a strong validation of the proposed user-space transport architecture, but it is **not yet proof for Sonoma**. Sonoma remains the final M1 compatibility target.
+
+The observed bootloader ROM and Linux correlation are documented in [`bootloader-rom.md`](bootloader-rom.md).
 
 ## Hypothesis
 
@@ -35,7 +39,7 @@ Apple FireWire stack
 FW410
 ```
 
-If this works, it gives us a much simpler path to the DevKit:
+If the same path remains operational on Sonoma, it gives us a much simpler path to the DevKit:
 
 ```text
 CoreAudio / AudioDriverKit
@@ -53,7 +57,7 @@ CoreAudio / AudioDriverKit
             FW410
 ```
 
-If it does not work, we then investigate a DriverKit-based FireWire transport implementation.
+If it does not work on Sonoma, we then investigate a DriverKit-based FireWire transport implementation.
 
 ## M1 tests
 
@@ -71,6 +75,8 @@ Record:
 - node information
 - controller properties
 
+**Monterey:** passed for the FW410 bootloader.
+
 ### Test 2 — User-space interface acquisition
 
 For an FW410-related FireWire service:
@@ -80,21 +86,26 @@ For an FW410-related FireWire service:
 3. Record the interface revision/version.
 4. Query the bus generation and remote node ID.
 
+**Monterey:** passed. `IOFireWireDeviceInterface` version 8 was acquired successfully.
+
 ### Test 3 — Configuration ROM
 
 Use the FireWire library configuration-directory interface to inspect the FW410's ROM and identify:
 
-- vendor
-- model
+- vendor/model identity
 - unit directories
 - firmware/software information
-- AV/C unit information
+- textual descriptors
+
+**Monterey:** passed. The bootloader unit directory reports specifier `0x00a02d`, software version `0x014001`, model `0x010058`, and descriptor `FW Bootloader`.
 
 ### Test 4 — Harmless asynchronous access
 
 After the previous tests succeed, perform a read from a known-safe FireWire address used by the FW410 protocol.
 
-Do **not** perform arbitrary writes during the initial probe.
+Linux `snd-bebob` gives us a strong candidate: an 8-byte read at absolute FireWire address `0xffffc8020020`, used to read the M-Audio bootloader firmware-build date before any write is attempted.
+
+Do **not** perform arbitrary writes during this probe.
 
 ### Test 5 — Isochronous capability
 
@@ -102,17 +113,21 @@ Determine whether the user-space library can create and operate the required iso
 
 ## Success criteria
 
-M1 is successful if we can demonstrate, without the M-Audio kext:
+### Proven on Monterey
 
-- [ ] FW410 is visible in the I/O Registry.
-- [ ] A user-space process obtains an `IOFireWireDeviceInterface`.
-- [ ] Bus generation can be read.
-- [ ] FW410 node ID can be read.
-- [ ] Configuration ROM can be inspected.
+- [x] FW410 is visible in the I/O Registry.
+- [x] A user-space process obtains an `IOFireWireDeviceInterface`.
+- [x] Bus generation can be read.
+- [x] FW410 node ID can be read.
+- [x] Configuration ROM can be inspected.
 - [ ] At least one safe asynchronous transaction can be completed.
-- [ ] Isochronous API availability is established.
+- [ ] Isochronous API availability is established by an actual runtime test.
 
-The last two items determine whether the first DevKit transport can wrap Apple's existing FireWire user-space API or whether we need to implement a new FireWire transport.
+### Still required for final M1
+
+- [ ] Repeat the successful user-space tests on Intel macOS Sonoma.
+
+The asynchronous and isochronous tests determine whether the first DevKit transport can wrap Apple's existing FireWire user-space API or whether we need to implement a new FireWire transport.
 
 ## Decision point
 
