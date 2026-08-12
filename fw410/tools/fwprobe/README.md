@@ -2,7 +2,7 @@
 
 Minimal user-space FireWire diagnostic for M1.
 
-The probe intentionally does **not** open the FW410 for exclusive access and does not perform arbitrary writes. It discovers FireWire services, obtains `IOFireWireDeviceInterface`, reports bus generation / node information, and can optionally inspect the device configuration ROM or perform narrowly scoped read-only BeBoB register probes.
+The probe intentionally does **not** open the FW410 for exclusive access except briefly around narrowly scoped direct FireWire transactions, and does not perform arbitrary writes. It discovers FireWire services, obtains `IOFireWireDeviceInterface`, reports bus generation / node information, and can optionally inspect the device configuration ROM or perform narrowly scoped read-only BeBoB register probes.
 
 ## Build
 
@@ -72,9 +72,20 @@ address: 0xffffc8020020
 length:  8 bytes
 ```
 
-Linux `snd-bebob` defines the BeBoB information register at `0xffffc8020000` and reads offset `0x20` before sending any M-Audio firmware-loader cue. The returned bytes are printed both as hexadecimal and ASCII. `fwprobe` deliberately does not interpret or byte-swap the value yet; the first goal is to observe the exact bytes returned by macOS and compare them with Linux and the original M-Audio driver.
+Linux `snd-bebob` defines the BeBoB information register at `0xffffc8020000` and reads offset `0x20` before sending any M-Audio firmware-loader cue.
 
-The request uses the current bus generation and remote node ID, and fails on a FireWire bus reset rather than retrying with stale addressing.
+The probe opens the FireWire device interface only for the duration of the direct transaction, performs the read using the current bus generation and remote node ID, and closes the interface immediately afterward.
+
+### Confirmed hardware result
+
+On Intel macOS Monterey, the FW410 bootloader returned:
+
+```text
+raw:   32 30 30 37 30 35 30 34
+ASCII: 20070504
+```
+
+This confirms direct user-space access to the BeBoB register space through `IOFireWireLib`.
 
 ### Safety
 
@@ -114,7 +125,7 @@ This result matches the Linux `snd-bebob` FW410 bootloader model. See [`../../an
 4. [x] Add and validate read-only configuration-ROM inspection on FW410 hardware.
 5. [x] Validate bootloader model/specifier identity against Linux `snd-bebob`.
 6. [x] Add a narrowly scoped read-only BeBoB information-register probe (`--info-date`).
-7. [ ] Validate the BeBoB information-register read on FW410 hardware.
+7. [x] Validate the BeBoB information-register read on FW410 hardware (`20070504`).
 8. [ ] Add isochronous capability probing.
 9. [ ] Repeat successful probes on Intel macOS Sonoma.
 
