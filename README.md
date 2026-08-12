@@ -8,12 +8,15 @@ The project starts with the **M-Audio FireWire 410**, but the repository is desi
 
 ## Goals
 
+- Develop a **user-space macOS FireWire audio driver / development kit**.
 - Support legacy FireWire audio interfaces on modern macOS.
 - Initially target **Intel Macs** and **macOS Sonoma and newer**.
 - Reverse engineer existing vendor drivers and hardware protocols where necessary.
 - Separate common FireWire functionality from device-specific implementations.
-- Prefer modern macOS driver architectures and minimize privileged code.
-- Build reusable protocol knowledge that can benefit multiple FireWire devices.
+- Prefer user-space and modern macOS APIs, minimizing or avoiding kernel extensions.
+- Build reusable protocol and transport components that can benefit multiple FireWire devices.
+
+The primary architectural goal is **not to port legacy kernel extensions**. The goal is to build a modern, reusable user-space FireWire audio stack / SDK for macOS.
 
 Apple Silicon is not currently a project target.
 
@@ -41,7 +44,9 @@ macfw/
 └── <future-device>/
 ```
 
-This organization intentionally keeps device-specific reverse engineering separate while leaving room for a common FireWire layer to emerge as the project develops.
+As reusable components emerge, common functionality may be promoted into shared project-level modules.
+
+This organization intentionally keeps device-specific reverse engineering separate while leaving room for a common FireWire transport and audio SDK to emerge as the project develops.
 
 ## Current target: M-Audio FireWire 410
 
@@ -72,13 +77,61 @@ Vendor driver / hardware
         Protocol specification
                  │
                  ▼
-       Modern macOS transport
+      User-space FireWire layer
+                 │
+                 ▼
+       User-space audio driver
                  │
                  ▼
              CoreAudio
 ```
 
 The objective is **hardware compatibility**, not a line-by-line port of obsolete vendor source code.
+
+## User-space driver / development kit
+
+The intended end state is a reusable user-space development kit for FireWire audio interfaces.
+
+Conceptually:
+
+```text
+                    macOS
+                      │
+                  CoreAudio
+                      │
+          ┌───────────▼───────────┐
+          │ User-space Audio API  │
+          └───────────┬───────────┘
+                      │
+          ┌───────────▼───────────┐
+          │    macfw audio SDK    │
+          ├───────────────────────┤
+          │ Device abstraction    │
+          │ Stream management     │
+          │ Clock/sample rates    │
+          │ Mixer/controls        │
+          │ MIDI                  │
+          └───────────┬───────────┘
+                      │
+          ┌───────────▼───────────┐
+          │ macfw FireWire layer  │
+          ├───────────────────────┤
+          │ IEEE 1394 transport   │
+          │ Async transactions    │
+          │ Isochronous streaming │
+          │ CIP                   │
+          │ AVC                   │
+          │ Bus reset/recovery    │
+          └───────────┬───────────┘
+                      │
+                   FireWire
+                      │
+          ┌───────────▼───────────┐
+          │ Legacy audio device   │
+          └───────────────────────┘
+```
+
+The exact CoreAudio integration mechanism is still under investigation. The architecture should be chosen based on what can be implemented reliably on Sonoma and newer macOS versions while keeping the FireWire and device logic reusable.
 
 ## Common vs. device-specific functionality
 
@@ -91,6 +144,8 @@ A major architectural goal is to identify which functionality can eventually be 
 - AVC commands
 - bus-reset handling
 - common BeBoB functionality
+- audio stream management
+- clock and sample-rate management
 - CoreAudio integration
 
 Device-specific code will remain under the corresponding device directory, for example:
@@ -107,9 +162,13 @@ until there is enough evidence that a component belongs in a shared layer.
 
 No functional modern macOS driver is available yet.
 
-The immediate priority is to understand the FW410's original driver, firmware behavior, FireWire transport, and device protocol before committing to a final Sonoma architecture.
+The immediate priority is to understand the FW410's original driver, firmware behavior, FireWire transport, and device protocol. We will then implement the smallest viable user-space FireWire/audio prototype before expanding it into a reusable development kit.
 
 ## Development principles
+
+### User space first
+
+The project should avoid kernel extensions whenever technically possible. Kernel-level components are not the primary architecture or goal.
 
 ### Preserve evidence
 
@@ -132,9 +191,9 @@ Protocol documentation should distinguish between:
 
 The goal is to understand what the hardware requires, not to reproduce the architecture of an obsolete vendor kext.
 
-### Minimize privileged code
+### Reusable components
 
-Modern macOS compatibility should use the smallest possible privileged component and prefer user-space / DriverKit mechanisms where technically possible.
+Device-specific implementations should expose reusable abstractions where practical so that additional FireWire interfaces can be added without duplicating the transport and audio infrastructure.
 
 ## Project roadmap
 
@@ -144,10 +203,12 @@ Modern macOS compatibility should use the smallest possible privileged component
 4. FireWire and BeBoB protocol reconstruction
 5. Comparison with Linux and FFADO
 6. Hardware traffic capture and validation
-7. Modern macOS transport prototype
-8. CoreAudio integration
-9. Device-specific controls and MIDI
-10. Generalize reusable components for additional FireWire devices
+7. User-space FireWire transport prototype
+8. Minimal user-space CoreAudio integration
+9. FW410 playback and capture
+10. Device-specific controls and MIDI
+11. Generalize reusable FireWire/audio SDK components
+12. Add additional FireWire interfaces
 
 ## Contributing
 
@@ -159,8 +220,9 @@ Useful contributions include:
 - Protocol documentation
 - Reverse engineering
 - Linux / FFADO research
-- DriverKit and AudioDriverKit development
+- macOS user-space development
 - CoreAudio development
+- DriverKit / AudioDriverKit research where appropriate
 - Testing on different Intel Macs and macOS versions
 - Testing different hardware and firmware revisions
 
