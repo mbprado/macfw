@@ -12,16 +12,59 @@ Example request shape:
 01 ff 2f c1 DIR 00 00 00 ff 00 EID 00
 ```
 
-where `DIR` is `01` for OUTPUT and `00` for INPUT.
+where `DIR` is device-relative: `01` is FW410 OUTPUT (host capture/input), while `00` is FW410 INPUT (host playback/output).
 
-The first version intentionally prints the returned format payload raw. We will decode it only after observing the FW410's actual entries and correlating them with Linux's formation parser.
+## Decoded mode
 
-## Build and run
+Default output decodes each supported formation into sample rate, PCM channel count, MIDI port count, and cluster count.
+
+The observed FW410 BridgeCo payload shape is:
+
+```text
+90 40 FREQ 01 CLUSTERS [CHANNELS FORMAT]...
+```
+
+For this device:
+
+- cluster format `0x06` is MBLA/PCM audio;
+- cluster format `0x0d` is MIDI-conformant data;
+- the BridgeCo frequency codes map through the same table used by Linux `snd-bebob`.
+
+Run:
+
+```bash
+./formatprobe
+```
+
+## Raw mode
+
+Use `--raw` to keep the decoded summary while also printing every AV/C command, response, format payload, and decoded cluster:
+
+```bash
+./formatprobe --raw
+```
+
+This is useful when comparing results with Linux/FFADO or when investigating another BeBoB device.
+
+## Build
+
+From this directory:
 
 ```bash
 make clean
 make
-./formatprobe
+```
+
+Or build every FW410 tool from `fw410/tools`:
+
+```bash
+make
+```
+
+and clean every tool with:
+
+```bash
+make clean
 ```
 
 ## Safety
