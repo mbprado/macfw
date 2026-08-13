@@ -13,6 +13,8 @@
 #include <string>
 #include <sys/mman.h>
 
+#include "../common/am824.h"
+
 namespace {
 
 constexpr UInt16 kAddressHi = 0xffff;
@@ -220,12 +222,19 @@ static void dumpCapture(
     const CaptureSlot *slots, bool raw) {
     size_t touched = 0;
     size_t data = 0;
+    macfw::am824::CaptureStats pcmStats;
 
     for (size_t i = 0; i < kCaptureSlots; ++i) {
         if (captureTouched(slots[i]))
             ++touched;
-        if (dataBearing(slots[i]))
+        if (dataBearing(slots[i])) {
             ++data;
+            const unsigned len = slots[i].isoHeader >> 16;
+            macfw::am824::accumulateCapture48k(
+                slots[i].payload,
+                len,
+                pcmStats);
+        }
     }
 
     std::cout << "capture summary:\n";
@@ -296,6 +305,9 @@ static void dumpCapture(
         std::cout
             << "result: FAIL - no capture ISO packets observed\n";
     }
+
+    std::cout << '\n';
+    macfw::am824::printCaptureStats(pcmStats, std::cout);
 }
 
 static void makePlaybackNoData(PlaybackSlot& slot) {
