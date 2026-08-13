@@ -20,7 +20,6 @@ public:
     FireWireDevice(FireWireDevice&& other) noexcept;
     FireWireDevice& operator=(FireWireDevice&& other) noexcept;
 
-    // Find the first IOFireWireUnit whose "FireWire Product Name" matches.
     static FireWireDevice findByProductName(const char* productName);
 
     explicit operator bool() const { return device_ != nullptr; }
@@ -41,6 +40,9 @@ public:
 
     IOReturn readQuadletBE(UInt16 addressHi, UInt32 addressLo,
                            std::uint32_t& value) const;
+    IOReturn compareSwapQuadletBE(UInt16 addressHi, UInt32 addressLo,
+                                  std::uint32_t expected,
+                                  std::uint32_t replacement) const;
 
 private:
     FireWireDevice(IOFireWireLibDeviceRef device,
