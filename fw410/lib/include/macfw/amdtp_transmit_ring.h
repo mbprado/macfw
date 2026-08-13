@@ -1,0 +1,51 @@
+#pragma once
+#include "macfw/am824_playback.h"
+#include "macfw/firewire_device.h"
+#include <IOKit/firewire/IOFireWireLibIsoch.h>
+#include <cstddef>
+#include <cstdint>
+
+namespace macfw {
+class AmdtpTransmitRing {
+public:
+    struct PacketSlot {
+        const std::uint8_t* payload = nullptr;
+        std::size_t length = 0;
+        UInt32 cycle = 0;
+        std::uint8_t dbc = 0;
+        std::uint16_t syt = 0xffffu;
+        bool dataBearing = false;
+    };
+
+    AmdtpTransmitRing() = default;
+    ~AmdtpTransmitRing();
+    AmdtpTransmitRing(const AmdtpTransmitRing&) = delete;
+    AmdtpTransmitRing& operator=(const AmdtpTransmitRing&) = delete;
+    AmdtpTransmitRing(AmdtpTransmitRing&& other) noexcept;
+    AmdtpTransmitRing& operator=(AmdtpTransmitRing&& other) noexcept;
+
+    static AmdtpTransmitRing createSilence48k(FireWireDevice& device,
+                                              UInt32 firstCycle,
+                                              std::size_t packetCount = 128);
+
+    explicit operator bool() const { return localPort_ != nullptr; }
+    IOFireWireLibLocalIsochPortRef nativeLocalPort() const { return localPort_; }
+    UInt32 firstCycle() const { return firstCycle_; }
+    std::size_t packetCount() const { return packetCount_; }
+    const PacketSlot& slot(std::size_t index) const;
+
+private:
+    struct StorageSlot;
+    void reset();
+    void moveFrom(AmdtpTransmitRing&& other) noexcept;
+
+    FireWireDevice* device_ = nullptr;
+    StorageSlot* storage_ = nullptr;
+    PacketSlot* slots_ = nullptr;
+    std::size_t packetCount_ = 0;
+    std::size_t mappedBytes_ = 0;
+    UInt32 firstCycle_ = 0;
+    IOFireWireLibNuDCLPoolRef pool_ = nullptr;
+    IOFireWireLibLocalIsochPortRef localPort_ = nullptr;
+};
+} // namespace macfw
