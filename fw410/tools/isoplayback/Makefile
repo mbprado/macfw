@@ -1,14 +1,19 @@
 CXX ?= c++
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Wpedantic
+CPPFLAGS := -I../../lib/include
+FRAMEWORKS := -framework IOKit -framework CoreFoundation
+TARGET := isoplayback
+LIB := ../../lib/libmacfw.a
 
-all: isoplayback
+.PHONY: all clean
 
-isoplayback: generated.cpp
-	$(CXX) $(CXXFLAGS) generated.cpp -framework IOKit -framework CoreFoundation -o isoplayback
+all: $(TARGET)
 
-generated.cpp: generate.py postprocess.py ../isoduplex/main.cpp ../common/am824_playback.h
-	python3 generate.py
-	python3 postprocess.py
+$(LIB):
+	$(MAKE) -C ../../lib libmacfw.a
+
+$(TARGET): main.cpp $(LIB)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) main.cpp $(LIB) $(FRAMEWORKS) -o $(TARGET)
 
 clean:
-	rm -f isoplayback generated.cpp
+	rm -f $(TARGET)
