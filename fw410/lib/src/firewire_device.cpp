@@ -2,6 +2,7 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOCFPlugIn.h>
+#include <libkern/OSByteOrder.h>
 
 #include <array>
 #include <utility>
@@ -60,7 +61,6 @@ FireWireDevice& FireWireDevice::operator=(FireWireDevice&& other) noexcept {
         return *this;
 
     reset();
-
     device_ = other.device_;
     plugin_ = other.plugin_;
     service_ = other.service_;
@@ -74,7 +74,6 @@ FireWireDevice& FireWireDevice::operator=(FireWireDevice&& other) noexcept {
     other.generation_ = 0;
     other.nodeID_ = 0;
     other.open_ = false;
-
     return *this;
 }
 
@@ -85,13 +84,11 @@ FireWireDevice FireWireDevice::findByProductName(const char* productName) {
 
     io_iterator_t iterator = IO_OBJECT_NULL;
     if (IOServiceGetMatchingServices(
-            kIOMainPortDefault, matching, &iterator) != KERN_SUCCESS) {
+            kIOMainPortDefault, matching, &iterator) != KERN_SUCCESS)
         return {};
-    }
 
     FireWireDevice result;
     io_registry_entry_t service = IO_OBJECT_NULL;
-
     while ((service = IOIteratorNext(iterator)) != IO_OBJECT_NULL) {
         if (!productNameMatches(service, productName)) {
             IOObjectRelease(service);
@@ -101,12 +98,8 @@ FireWireDevice FireWireDevice::findByProductName(const char* productName) {
         IOCFPlugInInterface** plugin = nullptr;
         SInt32 score = 0;
         const kern_return_t kr = IOCreatePlugInInterfaceForService(
-            service,
-            kIOFireWireLibTypeID,
-            kIOCFPlugInInterfaceID,
-            &plugin,
-            &score);
-
+            service, kIOFireWireLibTypeID, kIOCFPlugInInterfaceID,
+            &plugin, &score);
         if (kr != KERN_SUCCESS || !plugin) {
             IOObjectRelease(service);
             continue;
@@ -114,10 +107,8 @@ FireWireDevice FireWireDevice::findByProductName(const char* productName) {
 
         IOFireWireLibDeviceRef device = nullptr;
         const HRESULT hr = (*plugin)->QueryInterface(
-            plugin,
-            CFUUIDGetUUIDBytes(kIOFireWireDeviceInterfaceID),
+            plugin, CFUUIDGetUUIDBytes(kIOFireWireDeviceInterfaceID),
             reinterpret_cast<LPVOID*>(&device));
-
         if (hr != 0 || !device) {
             IODestroyPlugInInterface(plugin);
             IOObjectRelease(service);
@@ -149,7 +140,6 @@ IOReturn FireWireDevice::open() {
 void FireWireDevice::close() {
     if (!device_ || !open_)
         return;
-
     (*device_)->Close(device_);
     open_ = false;
 }
@@ -184,7 +174,6 @@ IOReturn FireWireDevice::read(UInt16 addressHi, UInt32 addressLo,
     address.nodeID = nodeID_;
     address.addressHi = addressHi;
     address.addressLo = addressLo;
-
     return (*device_)->Read(
         device_, 0, &address, buffer, &size, true, generation_);
 }
@@ -200,7 +189,6 @@ IOReturn FireWireDevice::write(UInt16 addressHi, UInt32 addressLo,
     address.nodeID = nodeID_;
     address.addressHi = addressHi;
     address.addressLo = addressLo;
-
     return (*device_)->Write(
         device_, 0, &address, buffer, &size, true, generation_);
 }
@@ -214,29 +202,42 @@ IOReturn FireWireDevice::readQuadletBE(UInt16 addressHi, UInt32 addressLo,
         return kr;
     if (size != bytes.size())
         return kIOReturnUnderrun;
-
     value = decodeBe32(bytes);
     return kIOReturnSuccess;
 }
 
+IOReturn FireWireDevice::compareSwapQuadletBE(
+    UInt16 addressHi, UInt32 addressLo,
+    std::uint32_t expected, std::uint32_t replacement) const {
+    if (!device_)
+        return kIOReturnNoDevice;
+
+    FWAddress address = {};
+    address.nodeID = nodeID_;
+    address.addressHi = addressHi;
+    address.addressLo = addressLo;
+
+    const UInt32 expectedBus = OSSwapHostToBigInt32(expected);
+    const UInt32 replacementBus = OSSwapHostToBigInt32(replacement);
+    return (*device_)->CompareSwap(
+        device_, 0, &address, expectedBus, replacementBus,
+        true, generation_);
+}
+
 void FireWireDevice::reset() {
     close();
-
     if (device_) {
         (*device_)->Release(device_);
         device_ = nullptr;
     }
-
     if (plugin_) {
         IODestroyPlugInInterface(plugin_);
         plugin_ = nullptr;
     }
-
     if (service_ != IO_OBJECT_NULL) {
         IOObjectRelease(service_);
         service_ = IO_OBJECT_NULL;
     }
-
     generation_ = 0;
     nodeID_ = 0;
 }
