@@ -5,7 +5,7 @@ CPPFLAGS ?= -Iinclude
 FRAMEWORKS := -framework IOKit -framework CoreFoundation
 
 LIB := libmacfw.a
-LIB_OBJS := src/firewire_device.o src/cmp.o src/isoch_allocation.o
+LIB_OBJS := src/firewire_device.o src/cmp.o src/isoch_allocation.o src/amdtp_receive_ring.o
 
 all: $(LIB) smoke
 
@@ -19,6 +19,9 @@ src/cmp.o: src/cmp.cpp include/macfw/cmp.h include/macfw/firewire_device.h
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
 src/isoch_allocation.o: src/isoch_allocation.cpp include/macfw/isoch_allocation.h include/macfw/firewire_device.h
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+src/amdtp_receive_ring.o: src/amdtp_receive_ring.cpp include/macfw/amdtp_receive_ring.h include/macfw/amdtp_packet.h include/macfw/firewire_device.h
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
 smoke: src/smoke.cpp include/macfw/channel_map.h include/macfw/am824.h include/macfw/amdtp_packet.h
