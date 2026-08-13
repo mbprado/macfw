@@ -282,6 +282,7 @@ static bool run(IOFireWireLibDeviceRef device, UInt32 generation,
     IOFireWireLibRemoteIsochPortRef playbackRemote = nullptr;
     IOFireWireLibIsochChannelRef captureChannel = nullptr;
     IOFireWireLibIsochChannelRef playbackChannel = nullptr;
+    NuDCLRef last = nullptr;
 
     bool captureAllocated = false;
     bool playbackAllocated = false;
@@ -300,7 +301,6 @@ static bool run(IOFireWireLibDeviceRef device, UInt32 generation,
         goto cleanup;
     }
 
-    NuDCLRef last = nullptr;
     for (size_t i = 0; i < kPacketCount; ++i) {
         IOVirtualRange ranges[2] = {
             {reinterpret_cast<IOVirtualAddress>(&slots[i].isoHeader), sizeof(slots[i].isoHeader)},
