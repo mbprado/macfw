@@ -17,9 +17,12 @@ s = path.read_text()
 #   96 DATA packets * 8 frames = 768 frames = 0 mod 256 DBC
 #   128 cycles = 0 mod 16 SYT cycle phase
 old_slots = "constexpr size_t kPlaybackSlots = 64;"
-if old_slots not in s:
-    sys.exit("expected 64-slot playback declaration not found")
-s = s.replace(old_slots, "constexpr size_t kPlaybackSlots = 128;", 1)
+new_slots = "constexpr size_t kPlaybackSlots = 128;"
+
+if old_slots in s:
+    s = s.replace(old_slots, new_slots, 1)
+elif new_slots not in s:
+    sys.exit("playback slot declaration not found")
 
 # Tone synthesis uses std::sin only while prebuilding the static ring.
 if "#include <cmath>" not in s:
@@ -150,6 +153,7 @@ cli_new = '''        else if (arg == "--raw")
                 std::cerr << "--tone-channel must be 1..10\\n";
                 return 64;
             }
+        }
 '''
 if cli not in s:
     sys.exit("CLI raw option block changed; update postprocess.py")

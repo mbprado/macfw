@@ -2,7 +2,7 @@
 """Generate isoplayback.cpp from the proven isoduplex transport scaffold.
 
 The generated experiment keeps the working duplex/CMP/IRM/capture plumbing but
-replaces callback-driven TX mutation with a completely prebuilt 64-cycle AM824
+replaces callback-driven TX mutation with a completely prebuilt 128-cycle AM824
 silence ring.  The local playback port is armed with kFWDCLCycleEvent so the SYT
 values are computed for the same cycle at which DMA is told to start.
 """
@@ -12,6 +12,16 @@ import sys
 src_path = Path(__file__).resolve().parent.parent / "isoduplex" / "main.cpp"
 out_path = Path(__file__).resolve().parent / "generated.cpp"
 s = src_path.read_text()
+
+# isoplayback needs a static ring whose DBC and SYT phase close exactly.
+# 128 cycles -> 96 DATA packets -> 96 * 8 = 768 data blocks -> DBC wraps to 0.
+slot_decl = "constexpr size_t kPlaybackSlots = 64;"
+if slot_decl not in s:
+    sys.exit("isoduplex kPlaybackSlots declaration changed; update generator")
+s = s.replace(
+    slot_decl,
+    "constexpr size_t kPlaybackSlots = 128;",
+    1)
 
 # A global is sufficient for this small experimental tool and avoids perturbing
 # the well-tested run()/device-discovery signatures inherited from isoduplex.
@@ -23,7 +33,7 @@ s = s.replace(
     'std::cout << "preflight (48 kHz callback-free prebuilt playback):\\n";', 1)
 s = s.replace(
     '        << "    playback startup: first 64 cycles NODATA, then timed AM824 silence\\n";',
-    '        << "    playback: prebuilt 64-cycle AM824 silence ring\\n"\n'
+    '        << "    playback: prebuilt 128-cycle AM824 silence ring\\n"\n'
     '        << "    start lead: " << gCycleLead << " cycles\\n";', 1)
 
 # Show a real bus-relative packet plan even in dry-run mode.
