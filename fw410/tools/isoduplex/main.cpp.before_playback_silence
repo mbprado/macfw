@@ -14,7 +14,6 @@
 #include <sys/mman.h>
 
 #include "../common/am824.h"
-#include "../common/am824_playback.h"
 
 namespace {
 
@@ -41,8 +40,6 @@ constexpr size_t kCaptureSlots = 256;
 constexpr size_t kCaptureBufferBytes = kCaptureMaxPacket48k;
 constexpr size_t kPlaybackSlots = 64;
 constexpr size_t kPlaybackNoDataBytes = 8;
-constexpr size_t kPlaybackBufferBytes =
-    macfw::am824::kPlayback48kDataPacketBytes;
 
 struct CaptureSlot {
     UInt32 isoHeader;
@@ -54,19 +51,7 @@ struct CaptureSlot {
 struct PlaybackSlot {
     UInt32 status;
     UInt32 timestamp;
-    UInt8 payload[kPlaybackBufferBytes];
-};
-
-struct TxDclContext {
-    IOFireWireLibNuDCLPoolRef pool = nullptr;
-    IOFireWireLibLocalIsochPortRef *localPort = nullptr;
-    PlaybackSlot *slot = nullptr;
-    std::size_t slotIndex = 0;
-    std::uint8_t nextDbc = 0;
-    std::uint64_t callbacks = 0;
-    std::uint64_t updates = 0;
-    std::uint64_t zeroTimestamps = 0;
-    std::uint64_t updateFailures = 0;
+    UInt8 payload[kPlaybackNoDataBytes];
 };
 
 struct PortContext {
@@ -74,68 +59,6 @@ struct PortContext {
     IOFWSpeed speed = kFWSpeed100MBit;
     UInt32 channel = 0;
 };
-
-static std::uint8_t playbackDbcForSlot(std::size_t slot) {
-    const std::size_t nodataBefore = slot / 4;
-    const std::size_t dataBefore = slot - nodataBefore;
-    return static_cast<std::uint8_t>((dataBefore * 8) & 0xff);
-}
-
-static void playbackDclComplete(void *refcon, NuDCLRef dcl) {
-    auto *ctx = static_cast<TxDclContext *>(refcon);
-    if (!ctx || !ctx->pool || !ctx->localPort ||
-        !*ctx->localPort || !ctx->slot) {
-        return;
-    }
-
-    ++ctx->callbacks;
-
-    const UInt32 timestamp = ctx->slot->timestamp;
-    if (timestamp == 0) {
-        ++ctx->zeroTimestamps;
-        return;
-    }
-
-    const std::uint32_t cycle = (timestamp >> 12) & 0x1fffu;
-
-    macfw::am824::Playback48kState state;
-    state.dbc = ctx->nextDbc;
-    state.phase = static_cast<std::uint8_t>(ctx->slotIndex & 3u);
-
-    const auto packet =
-        macfw::am824::buildPlayback48kSilence(cycle, state);
-
-    std::memcpy(
-        ctx->slot->payload, packet.bytes.data(), packet.length);
-
-    IOVirtualRange range = {
-        reinterpret_cast<IOVirtualAddress>(ctx->slot->payload),
-        packet.length
-    };
-
-    if ((*ctx->pool)->SetDCLRanges(
-            dcl, 1, &range) != kIOReturnSuccess) {
-        ++ctx->updateFailures;
-        return;
-    }
-
-    void *changed[1] = {reinterpret_cast<void *>(dcl)};
-    if ((**ctx->localPort)->Notify(
-            *ctx->localPort,
-            kFWNuDCLModifyNotification,
-            changed,
-            1) != kIOReturnSuccess) {
-        ++ctx->updateFailures;
-        return;
-    }
-
-    ++ctx->updates;
-
-    // One 64-cycle ring contains 48 data packets.  At 8 data
-    // blocks each, DBC advances 384 == 128 modulo 256 per ring.
-    ctx->nextDbc =
-        static_cast<std::uint8_t>(ctx->nextDbc + 128u);
-}
 
 static bool isOperationalFw410(io_registry_entry_t service) {
     CFTypeRef value = IORegistryEntryCreateCFProperty(
@@ -417,7 +340,7 @@ static bool run(
         return false;
     }
 
-    std::cout << "preflight (48 kHz timed-silence duplex):\n";
+    std::cout << "preflight (48 kHz NODATA duplex):\n";
     std::cout << "    oPCR[0]: 0x"
               << std::hex << opcr0 << std::dec << '\n';
     std::cout << "    iPCR[0]: 0x"
@@ -427,7 +350,7 @@ static bool run(
     std::cout << "    playback max packet: "
               << kPlaybackMaxPacket48k << " bytes\n";
     std::cout
-        << "    playback startup: first 64 cycles NODATA, then timed AM824 silence\n";
+        << "    playback stream: 8-byte AM824 NODATA packets\n";
 
     if (!pcrReady(opcr0) || !pcrReady(ipcr0)) {
         std::cout
@@ -470,11 +393,8 @@ static bool run(
     }
 
     std::memset(capture, 0, captureBytes);
-    std::memset(playback, 0, playbackBytes);
     for (size_t i = 0; i < kPlaybackSlots; ++i)
         makePlaybackNoData(playback[i]);
-
-    std::array<TxDclContext, kPlaybackSlots> txContexts{};
 
     PortContext captureRemoteCtx{};
     PortContext playbackRemoteCtx{};
@@ -553,13 +473,10 @@ static bool run(
     (*txPool)->SetCurrentTagAndSync(txPool, 1, 0);
 
     for (size_t i = 0; i < kPlaybackSlots; ++i) {
-        // First ring: proven NODATA behavior.  Each DCL callback then
-        // rewrites this same packet for the next ring using its actual
-        // FireWire completion timestamp.
         IOVirtualRange range = {
             reinterpret_cast<IOVirtualAddress>(
                 playback[i].payload),
-            kPlaybackNoDataBytes
+            sizeof(playback[i].payload)
         };
 
         auto dcl = (*txPool)->AllocateSendPacket(
@@ -569,23 +486,10 @@ static bool run(
 
         NuDCLRef ref =
             reinterpret_cast<NuDCLRef>(dcl);
-
-        txContexts[i].pool = txPool;
-        txContexts[i].localPort = &localPlayback;
-        txContexts[i].slot = &playback[i];
-        txContexts[i].slotIndex = i;
-        txContexts[i].nextDbc = playbackDbcForSlot(i);
-
         (*txPool)->SetDCLStatusPtr(
             ref, &playback[i].status);
         (*txPool)->SetDCLTimeStampPtr(
             ref, &playback[i].timestamp);
-        (*txPool)->SetDCLCallback(
-            ref, playbackDclComplete);
-        (*txPool)->SetDCLRefcon(
-            ref, &txContexts[i]);
-        (*txPool)->SetDCLFlags(
-            ref, kNuDCLDynamic | kNuDCLUpdateBeforeCallback);
 
         if (!txFirst)
             txFirst = ref;
@@ -761,7 +665,7 @@ static bool run(
 
     std::cout
         << "duplex ISO: started "
-           "(first TX ring NODATA; later rings timed PCM silence)\n";
+           "(playback NODATA + capture receive)\n";
     std::cout
         << "observation window: 2.0 s\n";
 
@@ -776,49 +680,6 @@ static bool run(
     }
 
     dumpCapture(capture, raw);
-
-    {
-        std::uint64_t callbacks = 0;
-        std::uint64_t updates = 0;
-        std::uint64_t zeroTimestamps = 0;
-        std::uint64_t updateFailures = 0;
-
-        for (const auto &ctx : txContexts) {
-            callbacks += ctx.callbacks;
-            updates += ctx.updates;
-            zeroTimestamps += ctx.zeroTimestamps;
-            updateFailures += ctx.updateFailures;
-        }
-
-        std::cout << "\nplayback TX timing/update statistics:\n";
-        std::cout << "    DCL callbacks:   " << callbacks << '\n';
-        std::cout << "    dynamic updates: " << updates << '\n';
-        std::cout << "    zero timestamps: " << zeroTimestamps << '\n';
-        std::cout << "    update failures: " << updateFailures << '\n';
-
-        std::size_t shown = 0;
-        for (std::size_t i = 0;
-             i < kPlaybackSlots && shown < 8; ++i) {
-            if (playback[i].timestamp == 0)
-                continue;
-
-            const std::uint32_t q0 = be32(playback[i].payload);
-            const std::uint32_t q1 = be32(playback[i].payload + 4);
-            std::cout
-                << "    slot " << i
-                << ": timestamp=0x" << std::hex
-                << playback[i].timestamp
-                << " dbs=" << ((q0 >> 16) & 0xff)
-                << " dbc=" << (q0 & 0xff)
-                << " fdf=0x" << ((q1 >> 16) & 0xff)
-                << " syt=0x" << (q1 & 0xffff)
-                << std::dec
-                << ((i & 3u) == 3u ? " NODATA" : " SILENCE")
-                << '\n';
-            ++shown;
-        }
-    }
-
     ok = true;
 
 cleanup:
