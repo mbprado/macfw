@@ -131,9 +131,85 @@ static unsigned rateForSfc(UInt8 sfc) {
     return sfc < sizeof(rates) / sizeof(rates[0]) ? rates[sfc] : 0;
 }
 
-static bool runOutputSignalFormatProbe(IOFireWireLibDeviceRef device,
-                                       UInt32 generation,
-                                       UInt16 remoteNodeID) {
+static void resetResponse(ResponseContext &ctx) {
+    ctx.received = false;
+    ctx.sourceNode = 0;
+    ctx.length = 0;
+    ctx.bytes.fill(0);
+}
+
+static bool runTransaction(IOFireWireLibDeviceRef device,
+                           UInt32 generation,
+                           UInt16 remoteNodeID,
+                           ResponseContext &ctx,
+                           const char *label,
+                           const UInt8 command[8]) {
+    resetResponse(ctx);
+    UInt32 commandSize = 8;
+
+    std::cout << "    " << label << ":\n"
+              << "        command: ";
+    printBytes(command, commandSize);
+    std::cout << '\n';
+
+    const IOReturn writeResult = writeAbsolute(device, generation, remoteNodeID,
+                                               command, commandSize);
+    if (writeResult != kIOReturnSuccess) {
+        std::cout << "        write: failed (0x" << std::hex << writeResult
+                  << std::dec << ")\n";
+        return false;
+    }
+
+    std::cout << "        write: success (" << commandSize << " bytes)\n";
+    const CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + kTimeoutSeconds;
+    while (!ctx.received && CFAbsoluteTimeGetCurrent() < deadline) {
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, true);
+    }
+
+    if (!ctx.received) {
+        std::cout << "        response: timeout\n";
+        return false;
+    }
+
+    std::cout << "        response source: 0x" << std::hex << ctx.sourceNode
+              << std::dec << '\n';
+    std::cout << "        response (" << ctx.length << " bytes): ";
+    printBytes(ctx.bytes.data(), ctx.length);
+    std::cout << '\n';
+
+    if (ctx.length >= 1) {
+        std::cout << "        AV/C response: 0x" << std::hex
+                  << static_cast<unsigned>(ctx.bytes[0]) << std::dec
+                  << " (" << responseName(ctx.bytes[0]) << ")\n";
+    }
+    return true;
+}
+
+static bool decodeSignalFormat(const ResponseContext &ctx,
+                               UInt8 expectedOpcode,
+                               const char *direction,
+                               unsigned &rateOut) {
+    if (ctx.length < 8 ||
+        ctx.bytes[1] != 0xff ||
+        ctx.bytes[2] != expectedOpcode ||
+        ctx.bytes[3] != 0x00 ||
+        ctx.bytes[4] != 0x90) {
+        std::cout << "        signal-format response shape: unexpected\n";
+        return false;
+    }
+
+    const UInt8 sfc = ctx.bytes[5] & 0x07;
+    rateOut = rateForSfc(sfc);
+    std::cout << "        " << direction << " AM824 SFC: 0x" << std::hex
+              << static_cast<unsigned>(sfc) << std::dec;
+    if (rateOut) std::cout << " -> " << rateOut << " Hz";
+    std::cout << '\n';
+    return rateOut != 0;
+}
+
+static bool runDiscovery(IOFireWireLibDeviceRef device,
+                         UInt32 generation,
+                         UInt16 remoteNodeID) {
     ResponseContext ctx;
     ctx.expectedNode = remoteNodeID;
 
@@ -191,64 +267,62 @@ static bool runOutputSignalFormatProbe(IOFireWireLibDeviceRef device,
         std::cout << "    response window mismatch: expected hi=0xffff lo=0xf0000d00\n";
     }
 
-    UInt8 command[8] = {0x01, 0xff, 0x18, 0x00,
-                        0x90, 0xff, 0xff, 0xff};
-    UInt32 commandSize = sizeof(command);
+    std::cout << "    FCP command address: 0xfffff0000b00\n";
 
-    std::cout << "    FCP command address: 0xfffff0000b00\n"
-              << "    AV/C command:        ";
-    printBytes(command, commandSize);
-    std::cout << '\n';
+    const UInt8 outputCommand[8] = {
+        0x01, 0xff, 0x18, 0x00, 0x90, 0xff, 0xff, 0xff
+    };
+    const UInt8 inputCommand[8] = {
+        0x01, 0xff, 0x19, 0x00, 0x90, 0xff, 0xff, 0xff
+    };
+    const UInt8 plugInfoCommand[8] = {
+        0x01, 0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00
+    };
 
-    const IOReturn writeResult = writeAbsolute(device, generation, remoteNodeID,
-                                               command, commandSize);
-    if (writeResult != kIOReturnSuccess) {
-        std::cout << "    command write: failed (0x" << std::hex << writeResult
-                  << std::dec << ")\n";
-    } else {
-        std::cout << "    command write: success (" << commandSize << " bytes)\n";
-        const CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + kTimeoutSeconds;
-        while (!ctx.received && CFAbsoluteTimeGetCurrent() < deadline) {
-            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, true);
-        }
+    unsigned outputRate = 0;
+    unsigned inputRate = 0;
 
-        if (!ctx.received) {
-            std::cout << "    response: timeout\n";
-        } else {
-            std::cout << "    response source: 0x" << std::hex << ctx.sourceNode
-                      << std::dec << '\n';
-            std::cout << "    response (" << ctx.length << " bytes): ";
-            printBytes(ctx.bytes.data(), ctx.length);
-            std::cout << '\n';
+    bool outputOk = runTransaction(device, generation, remoteNodeID, ctx,
+                                   "OUTPUT PLUG SIGNAL FORMAT / plug 0",
+                                   outputCommand);
+    if (outputOk) {
+        outputOk = decodeSignalFormat(ctx, 0x18, "output", outputRate);
+    }
 
-            if (ctx.length >= 1) {
-                std::cout << "    AV/C response: 0x" << std::hex
-                          << static_cast<unsigned>(ctx.bytes[0]) << std::dec
-                          << " (" << responseName(ctx.bytes[0]) << ")\n";
-            }
+    bool inputOk = runTransaction(device, generation, remoteNodeID, ctx,
+                                  "INPUT PLUG SIGNAL FORMAT / plug 0",
+                                  inputCommand);
+    if (inputOk) {
+        inputOk = decodeSignalFormat(ctx, 0x19, "input", inputRate);
+    }
 
-            if (ctx.length >= 8 &&
-                ctx.bytes[1] == 0xff &&
-                ctx.bytes[2] == 0x18 &&
-                ctx.bytes[3] == 0x00 &&
-                ctx.bytes[4] == 0x90) {
-                const UInt8 sfc = ctx.bytes[5] & 0x07;
-                const unsigned rate = rateForSfc(sfc);
-                std::cout << "    AM824 SFC: 0x" << std::hex
-                          << static_cast<unsigned>(sfc) << std::dec;
-                if (rate) std::cout << " -> " << rate << " Hz";
-                std::cout << '\n';
-            } else if (ctx.length >= 8) {
-                std::cout << "    signal-format response shape: unexpected\n";
-            }
-        }
+    if (outputOk && inputOk) {
+        std::cout << "    duplex sample-rate agreement: "
+                  << (outputRate == inputRate ? "PASS" : "MISMATCH")
+                  << " (out=" << outputRate << " Hz, in=" << inputRate
+                  << " Hz)\n";
+    }
+
+    bool plugInfoOk = runTransaction(device, generation, remoteNodeID, ctx,
+                                     "UNIT PLUG INFO / subfunction 0",
+                                     plugInfoCommand);
+    if (plugInfoOk && ctx.length >= 8 &&
+        ctx.bytes[1] == 0xff && ctx.bytes[2] == 0x02) {
+        std::cout << "        plug-info operands [4..7]: "
+                  << static_cast<unsigned>(ctx.bytes[4]) << ' '
+                  << static_cast<unsigned>(ctx.bytes[5]) << ' '
+                  << static_cast<unsigned>(ctx.bytes[6]) << ' '
+                  << static_cast<unsigned>(ctx.bytes[7]) << '\n';
+        std::cout << "        note: these are AV/C unit plug-count fields; "
+                     "stream channel counts require BridgeCo extended discovery\n";
     }
 
     (*responseSpace)->TurnOffNotification(responseSpace);
     (*responseSpace)->Release(responseSpace);
     (*device)->RemoveCallbackDispatcherFromRunLoop(device);
     (*device)->Close(device);
-    return writeResult == kIOReturnSuccess && ctx.received;
+
+    return outputOk && inputOk && plugInfoOk;
 }
 
 } // namespace
@@ -325,7 +399,7 @@ int main() {
             std::cout << "    generation:        " << generation << '\n'
                       << "    remote node:       0x" << std::hex << nodeID
                       << std::dec << '\n';
-            runOutputSignalFormatProbe(device, generation, nodeID);
+            runDiscovery(device, generation, nodeID);
         } else {
             std::cout << "    unable to obtain generation/node ID\n";
         }
