@@ -1,6 +1,6 @@
 # FW410 operational stream topology
 
-Confirmed on Intel macOS Monterey using the read-only `streamprobe` and `formatprobe` BridgeCo/BeBoB AV/C queries.
+Confirmed on Intel macOS Monterey using `streamprobe`, `formatprobe`, and the later `isoduplex` isochronous transport experiment.
 
 ## Direction convention
 
@@ -28,13 +28,20 @@ No 32 kHz formation is advertised by the tested FW410 firmware.
 
 The BridgeCo formation payload uses MBLA/PCM cluster code `0x06` and MIDI-conformant cluster code `0x0d`. The reduced payload at 176.4/192 kHz corresponds to the reduced PCM counts above.
 
-## Current operating state
+## Current validated operating state
 
 - Product: `FW 410`
 - GUID: `0x000d6c01005833e6`
 - Current duplex sample rate: 48000 Hz
 - Output and input plug 0 both report `IMPLEMENTED/STABLE`
 - Both unit plug 0 endpoints report BridgeCo plug type `0x00` (isochronous)
+- User-space IRM allocation works on macOS
+- Both CMP directions can be established simultaneously
+- Mac -> FW410 isochronous packet transmission works
+- FW410 -> Mac isochronous packet reception works
+- Full duplex packet flow causes the FW410 to transition from AM824 NODATA to sample-bearing packets
+
+See `isochronous-transport.md` for the packet-level evidence.
 
 ## BridgeCo OUTPUT unit isochronous plug 0
 
@@ -64,6 +71,8 @@ position 5  MIDI
 ```
 
 So from the Mac/CoreAudio point of view this is **4 audio input channels**, plus one MIDI data slot in the AMDTP stream.
+
+This mapping is now also confirmed in live 48 kHz packets. Data-bearing packets report `DBS=5`, contain eight events, and the fifth position is observed as MIDI no-data (`0x80000000`) when idle.
 
 ## BridgeCo INPUT unit isochronous plug 0
 
@@ -104,10 +113,12 @@ position 11  MIDI
 
 So from the Mac/CoreAudio point of view this is **10 audio output channels**, plus one MIDI data slot in the AMDTP stream.
 
+The first successful duplex transport test transmitted only AM824 NODATA packets in this direction. That was sufficient to make the FW410 start its data-bearing capture stream, confirming that actual duplex isochronous packet flow is required.
+
 ## Interpretation
 
 This matches Linux `snd-bebob`'s channel-mapping model: BridgeCo channel-position data provides the AMDTP slot number and section-local location, while section type distinguishes PCM-like audio from MIDI-conformant data.
 
 The important distinction is that BridgeCo `OUTPUT`/`INPUT` describe the **FW410 endpoint direction**, while user-facing audio APIs normally describe direction relative to the **computer**.
 
-No isochronous connection has been established yet. These results come entirely from AV/C STATUS discovery.
+The topology is no longer only inferred from AV/C STATUS discovery: the 48 kHz capture layout has been observed in live isochronous AM824 packets.
