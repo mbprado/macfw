@@ -1,4 +1,4 @@
-TOOLS := avcprobe cmpconnect cmpprobe fcpprobe formatprobe fwboot fwprobe isocapture streamprobe
+TOOLS := avcprobe cmpconnect cmpprobe fcpprobe formatprobe fwboot fwprobe isocapture isoduplex streamprobe
 
 .PHONY: all clean $(TOOLS)
 
