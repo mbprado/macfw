@@ -21,7 +21,7 @@ src/cmp.o: src/cmp.cpp include/macfw/cmp.h include/macfw/firewire_device.h
 src/isoch_allocation.o: src/isoch_allocation.cpp include/macfw/isoch_allocation.h include/macfw/firewire_device.h
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
-smoke: src/smoke.cpp include/macfw/channel_map.h include/macfw/am824.h
+smoke: src/smoke.cpp include/macfw/channel_map.h include/macfw/am824.h include/macfw/amdtp_packet.h
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) src/smoke.cpp -o $@
 
 check: $(LIB) smoke
