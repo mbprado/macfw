@@ -80,8 +80,12 @@ struct CaptureStats {
 // Decode one FW410 host-capture AMDTP payload. `payload` begins at the
 // 8-byte CIP header and `length` is the complete CIP+AM824 payload length.
 // At 48 kHz the expected data formation is DBS=5:
-//   pos 0 S/PDIF 1, pos 1 Line 1, pos 2 S/PDIF 2,
-//   pos 3 Line 2, pos 4 MIDI.
+//   pos 0 S/PDIF L, pos 1 Analog Input 1, pos 2 S/PDIF R,
+//   pos 3 Analog Input 2, pos 4 MIDI.
+//
+// "Analog Input 1/2" is intentionally used instead of "Line 1/2": on the
+// FW410 each logical analog input can be fed from the front Mic/Inst connector
+// or the corresponding rear Line Input, depending on the hardware selector.
 inline void accumulateCapture48k(
     const std::uint8_t *payload,
     std::size_t length,
@@ -125,7 +129,7 @@ inline void accumulateCapture48k(
 
 inline void printCaptureStats(const CaptureStats& stats, std::ostream& os) {
     static constexpr const char *names[kCapturePcmChannels] = {
-        "S/PDIF 1", "Line 1", "S/PDIF 2", "Line 2"
+        "S/PDIF L", "Analog Input 1", "S/PDIF R", "Analog Input 2"
     };
 
     os << "PCM capture statistics:\n";
