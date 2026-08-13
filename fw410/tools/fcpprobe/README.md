@@ -1,17 +1,19 @@
 # fcpprobe
 
-Read-only AV/C status probe for the operational M-Audio FireWire 410.
+Read-only AV/C/FCP discovery probe for the operational M-Audio FireWire 410.
 
 `fcpprobe` exists because the FW410 operational personality (`Unit_SW_Version = 0x14001`) does not match Apple's generic `IOFireWireAVCUnit` personality, so `IOFireWireAVCLibUnitInterface::AVCCommand()` is not available for this device.
 
 Instead, the tool implements the minimum standard FCP transport directly with `IOFireWireLib`:
 
 - opens the operational `FW 410` unit;
-- creates a local pseudo address space for the standard FCP response register in initial-units space (`0xfffff0000d00`);
+- creates a local pseudo address space at the standard FCP response CSR (`0xfffff0000d00`);
 - enables write callbacks on that response window;
-- sends an AV/C STATUS command to the remote FCP command register (`0xfffff0000b00`);
-- waits for the response and prints the raw bytes;
-- decodes the AM824 sample-frequency code when the response matches the expected OUTPUT PLUG SIGNAL FORMAT shape.
+- sends AV/C STATUS commands to the remote FCP command CSR (`0xfffff0000b00`);
+- receives and prints the raw FCP response frames;
+- decodes current AM824 sample-frequency codes for output plug 0 and input plug 0;
+- checks whether the two directions agree on sample rate;
+- queries AV/C unit `PLUG INFO` subfunction 0 and prints the four returned plug-count operands.
 
 ## Build
 
@@ -25,28 +27,17 @@ make
 ./fcpprobe
 ```
 
-The initial query is the same read-only signal-format STATUS command used by Linux `snd-firewire` for output plug 0:
+The probe currently sends these read-only AV/C STATUS commands:
 
 ```text
-01 ff 18 00 90 ff ff ff
-```
-
-Meaning:
-
-```text
-01  AV/C STATUS
-ff  UNIT
-18  OUTPUT PLUG SIGNAL FORMAT
-00  plug 0
-90  AM824 format
-ff  unknown/current SFC requested
-ff  SYT high unused
-ff  SYT low unused
+01 ff 18 00 90 ff ff ff   OUTPUT PLUG SIGNAL FORMAT, plug 0
+01 ff 19 00 90 ff ff ff   INPUT PLUG SIGNAL FORMAT, plug 0
+01 ff 02 00 00 00 00 00   UNIT PLUG INFO, subfunction 0
 ```
 
 ## Confirmed hardware result
 
-On the tested Intel Mac / macOS Monterey system, the operational FW410 responded successfully through the raw user-space FCP transport:
+On the tested Intel Mac / macOS Monterey system, the operational FW410 already responded successfully through the raw user-space FCP transport to the output-plug query:
 
 ```text
 command:  01 ff 18 00 90 ff ff ff
@@ -73,18 +64,12 @@ macfw <- local FCP response CSR  <- FW410
 
 The first successful transaction reported the current output plug 0 sample rate as **48 kHz**.
 
-## Next discovery step
+Linux `snd-bebob` queries both output and input plug 0 and expects their current rates to agree before stream setup. The extended probe now performs that same read-only comparison.
 
-Linux `snd-bebob` queries both output plug 0 and input plug 0 and expects the two rates to agree before streaming. The next read-only probe should therefore send:
-
-```text
-01 ff 19 00 90 ff ff ff
-```
-
-for `INPUT PLUG SIGNAL FORMAT`, followed by AV/C `PLUG INFO` discovery of the unit's streaming plug counts.
+The `PLUG INFO` response gives AV/C unit plug-count fields. It is intentionally not treated as PCM/MIDI channel topology; the channel layout inside the AMDTP stream requires BridgeCo extended stream-format and channel-position discovery.
 
 ## Safety
 
-These are STATUS queries. They do not change sample rate, clock source, mixer state, routing, firmware, or streaming state.
+All commands currently exposed by this tool are AV/C STATUS queries. They do not change sample rate, clock source, mixer state, routing, firmware, CMP connections, or streaming state.
 
 No arbitrary FCP command interface is exposed yet.
