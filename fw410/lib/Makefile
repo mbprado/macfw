@@ -5,7 +5,7 @@ CPPFLAGS ?= -Iinclude
 FRAMEWORKS := -framework IOKit -framework CoreFoundation
 
 LIB := libmacfw.a
-LIB_OBJS := src/firewire_device.o
+LIB_OBJS := src/firewire_device.o src/cmp.o
 
 all: $(LIB) smoke
 
@@ -13,6 +13,9 @@ $(LIB): $(LIB_OBJS)
 	$(AR) rcs $@ $^
 
 src/firewire_device.o: src/firewire_device.cpp include/macfw/firewire_device.h
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+src/cmp.o: src/cmp.cpp include/macfw/cmp.h include/macfw/firewire_device.h
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
 smoke: src/smoke.cpp include/macfw/channel_map.h include/macfw/am824.h
