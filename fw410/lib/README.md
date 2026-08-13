@@ -1,10 +1,12 @@
 # FW410 reusable backend
 
-This directory is the beginning of the reusable user-space backend extracted from the proven FW410 diagnostic tools.
+This directory is the reusable user-space backend being extracted from the
+proven FW410 diagnostic tools.
 
-The initial extraction is deliberately conservative: only side-effect-free protocol knowledge and AM824 helpers live here. The working tools remain unchanged until each subsystem can be migrated and re-tested independently.
+The extraction is deliberately incremental. The working tools remain the
+regression suite while reusable pieces move here one subsystem at a time.
 
-## Layout
+## Current layout
 
 ```text
 lib/
@@ -12,24 +14,32 @@ lib/
 │   ├── am824.h
 │   └── channel_map.h
 ├── src/
-│   └── channel_map.cpp
+│   └── smoke.cpp
 └── Makefile
 ```
 
-## Current scope
+## Extracted so far
 
-- Confirmed FW410 48 kHz capture/playback channel maps.
-- AM824 MBLA24 decode/statistics helpers.
-- A small `libmacfw.a` target to give later CMP, FireWire-device, BeBoB, and AMDTP transport code a stable home.
+- confirmed FW410 48 kHz capture channel map
+- physically validated 48 kHz playback/output map
+- proven AM824 MBLA24 capture decode/statistics helper
+- standalone compile/smoke check
+
+Run:
+
+```bash
+cd fw410/lib
+make check
+```
 
 ## Planned extraction order
 
-1. channel maps and packet helpers
+1. channel maps and AM824 packet helpers
 2. FireWire device/session wrapper
 3. CMP/IRM connection management
 4. BeBoB/AV/C discovery and clock/sample-rate control
 5. AMDTP receive/transmit transport
-6. FW410-specific boot/application state handling
+6. FW410-specific boot/application-state handling
 7. macOS audio-facing layer
 
-The `tools/` directory remains the regression/diagnostic suite throughout this migration.
+`tools/` remains the diagnostic/regression suite during the migration.
