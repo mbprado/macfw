@@ -172,13 +172,12 @@ static uint32_t makeConnectedOpcr(uint32_t old, UInt32 channel, IOFWSpeed speed)
     return v;
 }
 
-static bool clearConnection(IOFireWireLibDeviceRef device, UInt32 generation,
-                            UInt16 nodeID, UInt32 lo) {
+static bool restorePcr(IOFireWireLibDeviceRef device, UInt32 generation,
+                       UInt16 nodeID, UInt32 lo, uint32_t original) {
     uint32_t current = 0;
     if (!readReg(device, generation, nodeID, lo, current)) return false;
-    const uint32_t cleared = current & ~(kPcrBroadcast | kPcrP2PMask);
-    if (cleared == current) return true;
-    return compareSwapReg(device, generation, nodeID, lo, current, cleared);
+    if (current == original) return true;
+    return compareSwapReg(device, generation, nodeID, lo, current, original);
 }
 
 static bool run(IOFireWireLibDeviceRef device, UInt32 generation,
@@ -297,13 +296,13 @@ static bool run(IOFireWireLibDeviceRef device, UInt32 generation,
 
 cleanup:
     if (ipcrConnected) {
-        std::cout << "teardown iPCR[0]: "
-                  << (clearConnection(device, generation, nodeID, kIpcr0Lo) ? "success" : "failed")
+        std::cout << "restore iPCR[0]: "
+                  << (restorePcr(device, generation, nodeID, kIpcr0Lo, ipcr0) ? "success" : "failed")
                   << '\n';
     }
     if (opcrConnected) {
-        std::cout << "teardown oPCR[0]: "
-                  << (clearConnection(device, generation, nodeID, kOpcr0Lo) ? "success" : "failed")
+        std::cout << "restore oPCR[0]: "
+                  << (restorePcr(device, generation, nodeID, kOpcr0Lo, opcr0) ? "success" : "failed")
                   << '\n';
     }
 
@@ -328,6 +327,8 @@ cleanup:
             std::cout << "post-test PCR state:\n";
             printPcr("oPCR[0]", op);
             printPcr("iPCR[0]", ip);
+            std::cout << "    exact restore: "
+                      << ((op == opcr0 && ip == ipcr0) ? "PASS" : "FAIL") << '\n';
         }
     }
 
