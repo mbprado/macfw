@@ -27,6 +27,16 @@ struct ResponseContext {
     std::array<UInt8, kFcpResponseSize> bytes{};
 };
 
+struct Formation {
+    unsigned rate = 0;
+    unsigned pcmChannels = 0;
+    unsigned midiPorts = 0;
+    unsigned otherChannels = 0;
+    unsigned clusters = 0;
+};
+
+static bool gRaw = false;
+
 static bool isOperationalFw410(io_registry_entry_t service) {
     CFTypeRef value = IORegistryEntryCreateCFProperty(
         service, CFSTR("FireWire Product Name"), kCFAllocatorDefault, 0);
@@ -74,6 +84,27 @@ static const char *responseName(UInt8 r) {
         case 0x0b: return "IN TRANSITION";
         case 0x0c: return "IMPLEMENTED/STABLE";
         default: return "other";
+    }
+}
+
+static const char *clusterFormatName(UInt8 code) {
+    switch (code) {
+        case 0x06: return "MBLA/PCM";
+        case 0x0d: return "MIDI conformant";
+        default: return "other/unknown";
+    }
+}
+
+static unsigned rateForBridgeCoCode(UInt8 code) {
+    switch (code) {
+        case 0x02: return 32000;
+        case 0x03: return 44100;
+        case 0x04: return 48000;
+        case 0x0a: return 88200;
+        case 0x05: return 96000;
+        case 0x06: return 176400;
+        case 0x07: return 192000;
+        default: return 0;
     }
 }
 
@@ -134,42 +165,112 @@ static bool transaction(IOFireWireLibDeviceRef device, UInt32 generation,
     return ctx.received;
 }
 
+static bool decodeFormation(const UInt8 *payload, UInt32 length,
+                            Formation &formation, bool printClusters) {
+    // BridgeCo extended stream-format payload observed/used by snd-bebob:
+    //   90 40 <freq> 01 <cluster-count> [<channels> <format>]...
+    // For FW410, cluster format 0x06 is MBLA/PCM and 0x0d is MIDI conformant.
+    if (length < 5 || payload[0] != 0x90 || payload[1] != 0x40)
+        return false;
+
+    formation.rate = rateForBridgeCoCode(payload[2]);
+    formation.clusters = payload[4];
+
+    const UInt32 required = 5 + formation.clusters * 2;
+    if (length < required)
+        return false;
+
+    for (unsigned i = 0; i < formation.clusters; ++i) {
+        const UInt8 channels = payload[5 + i * 2];
+        const UInt8 format = payload[6 + i * 2];
+
+        if (format == 0x06)
+            formation.pcmChannels += channels;
+        else if (format == 0x0d)
+            formation.midiPorts += channels;
+        else
+            formation.otherChannels += channels;
+
+        if (printClusters) {
+            std::cout << "            cluster " << i << ": "
+                      << static_cast<unsigned>(channels) << " channel(s), format=0x"
+                      << std::hex << static_cast<unsigned>(format) << std::dec
+                      << " (" << clusterFormatName(format) << ")\n";
+        }
+    }
+
+    return formation.rate != 0;
+}
+
 static void enumerateDirection(IOFireWireLibDeviceRef device, UInt32 generation,
                                UInt16 remoteNodeID, ResponseContext &ctx,
-                               UInt8 direction, const char *name) {
-    std::cout << "    BridgeCo " << name << " stream-format list:\n";
+                               UInt8 direction, const char *deviceDirection,
+                               const char *hostDirection) {
+    std::cout << "    BridgeCo " << deviceDirection << " stream-format list"
+              << " (host " << hostDirection << "):\n";
+
     for (unsigned eid = 0; eid < kMaxEntries; ++eid) {
         const auto command = formatCommand(direction, static_cast<UInt8>(eid));
-        std::cout << "        entry " << eid << " command: ";
-        printBytes(command.data(), command.size());
-        std::cout << '\n';
+
+        if (gRaw) {
+            std::cout << "        entry " << eid << " command: ";
+            printBytes(command.data(), command.size());
+            std::cout << '\n';
+        }
 
         if (!transaction(device, generation, remoteNodeID, ctx, command)) {
-            std::cout << "        response: timeout\n";
+            std::cout << "        entry " << eid << ": response timeout\n";
             break;
         }
 
-        std::cout << "        response (" << ctx.length << " bytes): ";
-        printBytes(ctx.bytes.data(), ctx.length);
-        std::cout << '\n';
-        if (!ctx.length) break;
+        if (gRaw) {
+            std::cout << "        response (" << ctx.length << " bytes): ";
+            printBytes(ctx.bytes.data(), ctx.length);
+            std::cout << '\n';
+            if (ctx.length) {
+                std::cout << "        AV/C response: 0x" << std::hex
+                          << static_cast<unsigned>(ctx.bytes[0]) << std::dec
+                          << " (" << responseName(ctx.bytes[0]) << ")\n";
+            }
+        }
 
-        std::cout << "        AV/C response: 0x" << std::hex
-                  << static_cast<unsigned>(ctx.bytes[0]) << std::dec
-                  << " (" << responseName(ctx.bytes[0]) << ")\n";
+        if (!ctx.length)
+            break;
 
         if (ctx.bytes[0] != 0x0c) {
-            std::cout << "        end of list / entry unavailable\n";
-            break;
-        }
-        if (ctx.length < 12 || ctx.bytes[10] != eid) {
-            std::cout << "        response shape: unexpected\n";
+            if (gRaw)
+                std::cout << "        end of list / entry unavailable\n";
             break;
         }
 
-        std::cout << "        format payload [11..]: ";
-        printBytes(ctx.bytes.data() + 11, ctx.length - 11);
-        std::cout << '\n';
+        if (ctx.length < 12 || ctx.bytes[10] != eid) {
+            std::cout << "        entry " << eid << ": unexpected response shape\n";
+            break;
+        }
+
+        const UInt8 *payload = ctx.bytes.data() + 11;
+        const UInt32 payloadLength = ctx.length - 11;
+
+        if (gRaw) {
+            std::cout << "        format payload [11..]: ";
+            printBytes(payload, payloadLength);
+            std::cout << '\n';
+        }
+
+        Formation formation;
+        if (!decodeFormation(payload, payloadLength, formation, gRaw)) {
+            std::cout << "        entry " << eid << ": unable to decode formation";
+            if (gRaw) std::cout << " (raw shown above)";
+            std::cout << '\n';
+            continue;
+        }
+
+        std::cout << "        entry " << eid << ": " << formation.rate << " Hz"
+                  << ", PCM=" << formation.pcmChannels
+                  << ", MIDI=" << formation.midiPorts;
+        if (formation.otherChannels)
+            std::cout << ", other=" << formation.otherChannels;
+        std::cout << ", clusters=" << formation.clusters << '\n';
     }
 }
 
@@ -209,8 +310,13 @@ static bool runProbe(IOFireWireLibDeviceRef device, UInt32 generation,
         return false;
     }
 
-    enumerateDirection(device, generation, remoteNodeID, ctx, 0x01, "OUTPUT");
-    enumerateDirection(device, generation, remoteNodeID, ctx, 0x00, "INPUT");
+    // BridgeCo directions are device-relative:
+    // OUTPUT = FW410 -> host = capture/input to CoreAudio.
+    // INPUT  = host -> FW410 = playback/output from CoreAudio.
+    enumerateDirection(device, generation, remoteNodeID, ctx,
+                       0x01, "OUTPUT", "capture/input");
+    enumerateDirection(device, generation, remoteNodeID, ctx,
+                       0x00, "INPUT", "playback/output");
 
     (*responseSpace)->TurnOffNotification(responseSpace);
     (*responseSpace)->Release(responseSpace);
@@ -219,10 +325,31 @@ static bool runProbe(IOFireWireLibDeviceRef device, UInt32 generation,
     return true;
 }
 
+static void usage(const char *argv0) {
+    std::cout << "usage: " << argv0 << " [--raw]\n"
+              << "  default  decode supported rates and PCM/MIDI formations\n"
+              << "  --raw    also print raw AV/C commands, responses, payloads, and clusters\n";
+}
+
 } // namespace
 
-int main() {
-    std::cout << "macfw formatprobe — BridgeCo/BeBoB stream-format enumeration\n\n";
+int main(int argc, char **argv) {
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--raw")
+            gRaw = true;
+        else if (arg == "--help" || arg == "-h") {
+            usage(argv[0]);
+            return 0;
+        } else {
+            usage(argv[0]);
+            return 1;
+        }
+    }
+
+    std::cout << "macfw formatprobe — BridgeCo/BeBoB stream-format enumeration";
+    if (gRaw) std::cout << " (raw mode)";
+    std::cout << "\n\n";
 
     CFMutableDictionaryRef matching = IOServiceMatching("IOFireWireUnit");
     if (!matching) return 1;
