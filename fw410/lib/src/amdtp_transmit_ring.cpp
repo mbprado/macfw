@@ -6,6 +6,8 @@
 
 namespace macfw {
 struct AmdtpTransmitRing::StorageSlot {
+    UInt32 status = 0;
+    UInt32 timestamp = 0;
     std::uint8_t payload[am824::kPlayback48kDataPacketBytes];
 };
 
