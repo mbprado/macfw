@@ -1,5 +1,6 @@
 #pragma once
 
+#include <IOKit/IOCFPlugIn.h>
 #include <IOKit/IOKitLib.h>
 #include <IOKit/firewire/IOFireWireLib.h>
 
