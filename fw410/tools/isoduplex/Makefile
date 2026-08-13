@@ -4,7 +4,7 @@ FRAMEWORKS := -framework IOKit -framework CoreFoundation
 
 all: isoduplex
 
-isoduplex: main.cpp
+isoduplex: main.cpp ../common/am824.h
 	$(CXX) $(CXXFLAGS) main.cpp $(FRAMEWORKS) -o $@
 
 clean:
