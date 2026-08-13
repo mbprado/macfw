@@ -61,16 +61,19 @@ public:
 private:
     struct RawSlot;
 
-    static void onComplete(void* refcon, NuDCLRef dcl);
+    static void onComplete(AmdtpReceiveRing* ring, NuDCLRef dcl);
     void reset();
     void moveFrom(AmdtpReceiveRing&& other) noexcept;
+    void syncSlot(std::size_t index) const;
 
     FireWireDevice* device_ = nullptr;
     RawSlot* rawSlots_ = nullptr;
-    PacketSlot* slots_ = nullptr;
+    std::uint8_t* payloadBase_ = nullptr;
+    mutable PacketSlot* slots_ = nullptr;
     std::size_t packetCount_ = 0;
     std::size_t packetCapacity_ = 0;
-    std::size_t mappedBytes_ = 0;
+    std::size_t metadataBytes_ = 0;
+    std::size_t payloadBytes_ = 0;
     bool completed_ = false;
 
     IOFireWireLibNuDCLPoolRef pool_ = nullptr;
