@@ -16,14 +16,16 @@ The following path is now experimentally confirmed:
 8. A local NuDCL receive program receives FW410 isochronous packets.
 9. With only CMP established, the FW410 transmits AM824 NODATA packets.
 10. When the Mac also transmits a valid isochronous AM824 NODATA stream to the FW410, the FW410 immediately transitions to data-bearing capture packets.
+11. Capture MBLA words are decoded as signed 24-bit PCM and accumulated per channel.
+12. A controlled signal on the front Analog Input 1 is confirmed on the expected PCM stream position.
 
-The last point confirms the FireWire 410 duplex-stream requirement observed by Linux `snd-bebob`: actual packet flow is needed in both directions, not merely two established CMP connections.
+The duplex result confirms the FireWire 410 behavior observed by Linux `snd-bebob`: actual packet flow is needed in both directions, not merely two established CMP connections.
 
 ## Confirmed 48 kHz transport
 
 ### Host capture / FW410 device OUTPUT
 
-Allocated FireWire channel in the successful test: `0`.
+Allocated FireWire channel in the successful tests: `0`.
 
 Data-bearing packets are 168 bytes:
 
@@ -51,10 +53,10 @@ Decoded:
 The stream uses the previously discovered position order:
 
 ```text
-position 1  S/PDIF 1
-position 2  Line 1
-position 3  S/PDIF 2
-position 4  Line 2
+position 1  S/PDIF L
+position 2  Analog Input 1
+position 3  S/PDIF R
+position 4  Analog Input 2
 position 5  MIDI
 ```
 
@@ -63,14 +65,39 @@ The first four positions contain AM824 MBLA words with label byte `0x40`. The fi
 Example first event:
 
 ```text
-0x40000000  S/PDIF 1
-0x40ffffbd  Line 1
-0x40000000  S/PDIF 2
-0x40ffff81  Line 2
+0x40000000  S/PDIF L
+0x40ffffbd  Analog Input 1
+0x40000000  S/PDIF R
+0x40ffff81  Analog Input 2
 0x80000000  MIDI no-data
 ```
 
 For MBLA audio the low 24 bits are the signed PCM sample payload. Thus `0x40ffffbd` represents signed 24-bit sample `-67`, and `0x40ffff81` represents `-127`.
+
+## Physical input validation
+
+A controlled signal was connected to the **front Analog Input 1** while `isoduplex --execute` captured 256 FireWire packet slots.
+
+The run produced:
+
+```text
+PCM capture statistics:
+    decoded events: 1536
+    malformed packets: 0
+    ch 1 (S/PDIF L): samples=1536 min=0 max=0 peak=0 rms=0
+    ch 2 (Analog Input 1): samples=1536 min=-1697036 max=1527585 peak=1697036 rms=717516
+    ch 3 (S/PDIF R): samples=1536 min=0 max=0 peak=0 rms=0
+    ch 4 (Analog Input 2): samples=1536 min=-259 max=264 peak=264 rms=73.4459
+```
+
+This is a conclusive physical-to-stream mapping result:
+
+- front Analog Input 1 -> PCM channel 2 / stream position 2
+- Analog Input 2 remained at a very small noise floor
+- both S/PDIF capture positions were exactly zero in this test
+- all 1536 expected sample events were decoded with zero malformed packets
+
+The front Mic/Inst connector and rear Line Input 1 are alternate physical sources for the same logical Analog Input 1 path depending on the FW410 hardware selector. For driver-facing naming, `Analog Input 1` is therefore preferable to naming the stream position after only one physical connector.
 
 ### Host playback / FW410 device INPUT
 
@@ -82,9 +109,9 @@ The first duplex test deliberately transmitted only 8-byte AM824 NODATA packets:
 00 0b 00 00 90 02 ff ff
 ```
 
-This was sufficient to cause the FW410 to begin sending real capture samples. No playback PCM samples were transmitted in this milestone test.
+This was sufficient to cause the FW410 to begin sending real capture samples. No playback PCM samples have yet been transmitted.
 
-The maximum 48 kHz blocking-mode playback packet remains:
+The maximum 48 kHz blocking-mode playback packet is:
 
 ```text
 8-byte CIP header
@@ -128,7 +155,7 @@ The periodic NODATA packet retains the next expected DBC value and does not cons
 
 ## Cleanup behavior
 
-All current transport experiments save the exact original oPCR0/iPCR0 values and restore them on exit. The successful duplex test ended with:
+All current transport experiments save the exact original oPCR0/iPCR0 values and restore them on exit. Successful duplex tests end with:
 
 ```text
 restore iPCR[0]: success
@@ -140,9 +167,9 @@ This property should be preserved as the streaming engine evolves.
 
 ## Next steps
 
-1. Decode capture MBLA words into signed PCM values and collect per-channel statistics.
-2. Verify the logical channel-to-position map with controlled physical input signals.
-3. Implement correctly timed data-bearing host playback packets, initially silence.
-4. Validate DBC/SYT generation and long-running duplex continuity.
+1. Implement correctly timed data-bearing host playback packets, initially digital silence.
+2. Validate playback DBC/SYT generation against the FireWire cycle clock.
+3. Send a low-level test tone to one playback channel and verify the corresponding physical FW410 output.
+4. Validate long-running duplex continuity and recovery across bus resets.
 5. Refactor the experimental transport into reusable library classes.
 6. Build the CoreAudio-facing user-space device layer on top of the validated transport.
