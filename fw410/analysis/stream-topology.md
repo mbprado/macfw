@@ -1,6 +1,6 @@
 # FW410 operational stream topology
 
-Confirmed on Intel macOS Monterey using the read-only `streamprobe` BridgeCo/BeBoB AV/C queries.
+Confirmed on Intel macOS Monterey using the read-only `streamprobe` and `formatprobe` BridgeCo/BeBoB AV/C queries.
 
 ## Direction convention
 
@@ -11,12 +11,22 @@ BridgeCo/AV/C plug directions are **device-relative**:
 
 This matches Linux `snd-bebob`: the device's CMP OUTPUT connection is paired with an `AMDTP_IN_STREAM` on the host, while the device's CMP INPUT connection is paired with an `AMDTP_OUT_STREAM` on the host.
 
-Therefore the confirmed 48 kHz topology is:
+## Supported host-facing format matrix
 
-- host/CoreAudio input (capture): **4 audio channels + 1 MIDI data slot**
-- host/CoreAudio output (playback): **10 audio channels + 1 MIDI data slot**
+`formatprobe` successfully enumerated six BridgeCo stream-format entries in both directions. Entry 6 is rejected, which terminates the list.
 
-This also matches the FW410's documented 4-input / 10-output host audio interface configuration.
+| Sample rate | Host capture/input | Host playback/output | MIDI |
+|---|---:|---:|---:|
+| 44.1 kHz | 4 PCM | 10 PCM | 1 each direction |
+| 48 kHz | 4 PCM | 10 PCM | 1 each direction |
+| 88.2 kHz | 4 PCM | 10 PCM | 1 each direction |
+| 96 kHz | 4 PCM | 10 PCM | 1 each direction |
+| 176.4 kHz | 2 PCM | 8 PCM | 1 each direction |
+| 192 kHz | 2 PCM | 8 PCM | 1 each direction |
+
+No 32 kHz formation is advertised by the tested FW410 firmware.
+
+The BridgeCo formation payload uses MBLA/PCM cluster code `0x06` and MIDI-conformant cluster code `0x0d`. The reduced payload at 176.4/192 kHz corresponds to the reduced PCM counts above.
 
 ## Current operating state
 
@@ -30,7 +40,7 @@ This also matches the FW410's documented 4-input / 10-output host audio interfac
 
 **Host perspective: input / capture stream**
 
-Reported AMDTP data-channel count: **5**
+Reported AMDTP data-channel count at 48 kHz: **5**
 
 Sections:
 
@@ -59,7 +69,7 @@ So from the Mac/CoreAudio point of view this is **4 audio input channels**, plus
 
 **Host perspective: output / playback stream**
 
-Reported AMDTP data-channel count: **11**
+Reported AMDTP data-channel count at 48 kHz: **11**
 
 Sections:
 
@@ -98,6 +108,6 @@ So from the Mac/CoreAudio point of view this is **10 audio output channels**, pl
 
 This matches Linux `snd-bebob`'s channel-mapping model: BridgeCo channel-position data provides the AMDTP slot number and section-local location, while section type distinguishes PCM-like audio from MIDI-conformant data.
 
-The important distinction is that BridgeCo `OUTPUT`/`INPUT` describe the **FW410 endpoint direction**, while user-facing audio APIs normally describe direction relative to the **computer**. Thus the device's 5-slot OUTPUT stream corresponds to 4 host input audio channels + MIDI, and the device's 11-slot INPUT stream corresponds to 10 host output audio channels + MIDI.
+The important distinction is that BridgeCo `OUTPUT`/`INPUT` describe the **FW410 endpoint direction**, while user-facing audio APIs normally describe direction relative to the **computer**.
 
 No isochronous connection has been established yet. These results come entirely from AV/C STATUS discovery.
