@@ -33,6 +33,10 @@ public:
     UInt32 channel() const { return channelNumber_; }
     IOFWSpeed speed() const { return speed_; }
 
+    IOFireWireLibIsochChannelRef nativeChannel() const {
+        return channel_;
+    }
+
 private:
     struct PortState { IsochAllocation* owner = nullptr; };
 
