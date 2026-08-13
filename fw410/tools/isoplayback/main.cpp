@@ -203,17 +203,18 @@ bool run(bool execute, bool raw, UInt32 cycleLead) {
         goto cleanup;
     ipConnected = true;
 
-    if ((*capture.nativeChannel())->Start(capture.nativeChannel()) != kIOReturnSuccess) {
-        std::cout << "capture start failed\n";
-        goto cleanup;
-    }
-    captureStarted = true;
-
+    // Match the proven/Linux ordering: host playback first, then capture.
     if ((*playback.nativeChannel())->Start(playback.nativeChannel()) != kIOReturnSuccess) {
         std::cout << "playback start failed\n";
         goto cleanup;
     }
     playbackStarted = true;
+
+    if ((*capture.nativeChannel())->Start(capture.nativeChannel()) != kIOReturnSuccess) {
+        std::cout << "capture start failed\n";
+        goto cleanup;
+    }
+    captureStarted = true;
 
     std::cout << "duplex ISO: started (reusable prebuilt timed PCM silence)\n";
     std::cout << "observation window: 2.0 s\n";

@@ -60,6 +60,12 @@ AmdtpTransmitRing AmdtpTransmitRing::createSilence48k(FireWireDevice& device,
         CFUUIDGetUUIDBytes(kIOFireWireNuDCLPoolInterfaceID));
     if (!ring.pool_) { ring.reset(); return ring; }
 
+    // AMDTP/CIP uses FireWire isoch tag 1 and sync 0.
+    (*ring.pool_)->SetCurrentTagAndSync(ring.pool_, 1, 0);
+
+    NuDCLRef first = nullptr;
+    NuDCLRef last = nullptr;
+
     for (std::size_t i = 0; i < packetCount; ++i) {
         IOVirtualRange range = {
             reinterpret_cast<IOVirtualAddress>(ring.storage_[i].payload),
@@ -67,6 +73,17 @@ AmdtpTransmitRing AmdtpTransmitRing::createSilence48k(FireWireDevice& device,
         };
         auto dcl = (*ring.pool_)->AllocateSendPacket(ring.pool_, nullptr, 1, &range);
         if (!dcl) { ring.reset(); return ring; }
+
+        const NuDCLRef ref = reinterpret_cast<NuDCLRef>(dcl);
+        if (!first) first = ref;
+        last = ref;
+    }
+
+    // Repeat continuously; otherwise this is only a 128-packet one-shot list.
+    if (!first || !last ||
+        (*ring.pool_)->SetDCLBranch(last, first) != kIOReturnSuccess) {
+        ring.reset();
+        return ring;
     }
 
     DCLCommand* program = (*ring.pool_)->GetProgram(ring.pool_);
