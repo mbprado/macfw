@@ -26,13 +26,13 @@ constexpr uint32_t kOpcrXSpeedMask = 0x00c00000u;
 constexpr uint32_t kOpcrSpeedMask = 0x0000c000u;
 constexpr uint32_t kOpcrOverheadMask = 0x00003c00u;
 
-constexpr UInt32 kCapturePayload48k = 128;   // 5 AMDTP positions * 6 frames * 4 + 8-byte CIP
-constexpr UInt32 kPlaybackPayload48k = 272;  // 11 AMDTP positions * 6 frames * 4 + 8-byte CIP
+constexpr UInt32 kCapturePayload48k = 128;
+constexpr UInt32 kPlaybackPayload48k = 272;
 
 struct PortContext {
     const char *name = nullptr;
     bool allocated = false;
-    IOFWSpeed speed = kFWSpeed100;
+    IOFWSpeed speed = kFWSpeed100MBit;
     UInt32 channel = 0;
 };
 
@@ -79,9 +79,6 @@ static bool compareSwapReg(IOFireWireLibDeviceRef device, UInt32 generation,
     address.nodeID = nodeID;
     address.addressHi = kAddressHi;
     address.addressLo = lo;
-
-    // IOFireWireLib treats lock data as bus bytes. On Intel/little-endian,
-    // pass swapped UInt32 values so memory contains the big-endian PCR bytes.
     const UInt32 expectedBus = OSSwapHostToBigInt32(expectedHost);
     const UInt32 newBus = OSSwapHostToBigInt32(newHost);
     const IOReturn kr = (*device)->CompareSwap(device, 0, &address,
@@ -112,7 +109,7 @@ static void printPcr(const char *name, uint32_t v) {
 static IOReturn remoteGetSupported(IOFireWireLibIsochPortRef,
                                    IOFWSpeed *outMaxSpeed,
                                    UInt64 *outChannels) {
-    if (outMaxSpeed) *outMaxSpeed = kFWSpeed400;
+    if (outMaxSpeed) *outMaxSpeed = kFWSpeed400MBit;
     if (outChannels) *outChannels = ~static_cast<UInt64>(0);
     return kIOReturnSuccess;
 }
@@ -141,7 +138,8 @@ static IOReturn remoteNoop(IOFireWireLibIsochPortRef) {
 static bool configureRemotePort(IOFireWireLibRemoteIsochPortRef port,
                                 PortContext *ctx) {
     if (!port) return false;
-    (*port)->SetRefCon(port, ctx);
+    auto basePort = reinterpret_cast<IOFireWireLibIsochPortRef>(port);
+    (*basePort)->SetRefCon(basePort, ctx);
     (*port)->SetGetSupportedHandler(port, remoteGetSupported);
     (*port)->SetAllocatePortHandler(port, remoteAllocate);
     (*port)->SetReleasePortHandler(port, remoteRelease);
@@ -153,7 +151,7 @@ static bool configureRemotePort(IOFireWireLibRemoteIsochPortRef port,
 static IOFireWireLibIsochChannelRef makeChannel(IOFireWireLibDeviceRef device,
                                                  UInt32 payloadBytes) {
     return (*device)->CreateIsochChannel(
-        device, true, payloadBytes, kFWSpeed400,
+        device, true, payloadBytes, kFWSpeed400MBit,
         CFUUIDGetUUIDBytes(kIOFireWireIsochChannelInterfaceID));
 }
 
@@ -169,13 +167,8 @@ static uint32_t makeConnectedOpcr(uint32_t old, UInt32 channel, IOFWSpeed speed)
                          kOpcrXSpeedMask | kOpcrSpeedMask | kOpcrOverheadMask);
     v |= (1u << 24);
     v |= (channel & 0x3f) << 16;
-
-    // This first experiment is intentionally restricted to S400 or slower.
     const UInt32 speedCode = static_cast<UInt32>(speed) & 0x3;
     v |= speedCode << 14;
-
-    // overhead ID 0 is the conservative/worst-case encoding; no AMDTP
-    // packets are started during this test.
     return v;
 }
 
@@ -345,17 +338,13 @@ cleanup:
 } // namespace
 
 int main(int argc, char **argv) {
-    bool execute = false;
-    for (int i = 1; i < argc; ++i) {
-        const std::string arg = argv[i];
-        if (arg == "--execute") execute = true;
-        else {
-            std::cerr << "usage: " << argv[0] << " [--execute]\n";
-            return 64;
-        }
+    const bool execute = (argc == 2 && std::string(argv[1]) == "--execute");
+    if (argc > 2 || (argc == 2 && !execute)) {
+        std::cerr << "usage: " << argv[0] << " [--execute]\n";
+        return 64;
     }
 
-    std::cout << "macfw cmpconnect — guarded FW410 CMP connection test\n\n";
+    std::cout << "macfw cmpconnect — guarded dual CMP connection test\n\n";
 
     CFMutableDictionaryRef matching = IOServiceMatching("IOFireWireUnit");
     if (!matching) return 1;
@@ -364,7 +353,7 @@ int main(int argc, char **argv) {
         return 1;
 
     bool found = false;
-    int result = 2;
+    bool success = false;
     io_registry_entry_t service = IO_OBJECT_NULL;
     while ((service = IOIteratorNext(iterator)) != IO_OBJECT_NULL) {
         if (!isOperationalFw410(service)) {
@@ -375,9 +364,9 @@ int main(int argc, char **argv) {
 
         IOCFPlugInInterface **plugin = nullptr;
         SInt32 score = 0;
-        kern_return_t kr = IOCreatePlugInInterfaceForService(
-            service, kIOFireWireLibTypeID, kIOCFPlugInInterfaceID, &plugin, &score);
-        if (kr != KERN_SUCCESS || !plugin) {
+        if (IOCreatePlugInInterfaceForService(service, kIOFireWireLibTypeID,
+                                              kIOCFPlugInInterfaceID,
+                                              &plugin, &score) != KERN_SUCCESS || !plugin) {
             IOObjectRelease(service);
             continue;
         }
@@ -394,17 +383,18 @@ int main(int argc, char **argv) {
                 std::cout << "FW410 operational unit:\n";
                 std::cout << "    generation: " << generation << '\n';
                 std::cout << "    remote node: 0x" << std::hex << nodeID << std::dec << '\n';
-                result = run(device, generation, nodeID, execute) ? 0 : 1;
+                success = run(device, generation, nodeID, execute);
             }
             (*device)->Release(device);
         }
-
         IODestroyPlugInInterface(plugin);
         IOObjectRelease(service);
-        break;
     }
 
     IOObjectRelease(iterator);
-    if (!found) std::cout << "No operational FW 410 unit found.\n";
-    return result;
+    if (!found) {
+        std::cout << "No operational FW 410 unit found.\n";
+        return 2;
+    }
+    return success ? 0 : 1;
 }
