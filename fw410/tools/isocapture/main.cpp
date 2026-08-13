@@ -66,7 +66,7 @@ static uint32_t be32(const UInt8 *p) {
            static_cast<uint32_t>(p[3]);
 }
 
-static uint32_t be32(const std::array<UInt8,4>& b) {
+static uint32_t be32(const std::array<UInt8, 4>& b) {
     return be32(b.data());
 }
 
@@ -76,7 +76,7 @@ static bool readReg(IOFireWireLibDeviceRef device, UInt32 generation,
     address.nodeID = nodeID;
     address.addressHi = kAddressHi;
     address.addressLo = lo;
-    std::array<UInt8,4> bytes{};
+    std::array<UInt8, 4> bytes{};
     UInt32 size = static_cast<UInt32>(bytes.size());
     const IOReturn kr = (*device)->Read(device, 0, &address, bytes.data(), &size,
                                        true, generation);
@@ -185,6 +185,18 @@ static void captureDone(CaptureContext *ctx, NuDCLRef) {
     CFRunLoopStop(CFRunLoopGetCurrent());
 }
 
+static bool packetTouched(const PacketSlot& p) {
+    return p.isoHeader != 0 || p.status != 0 || p.timestamp != 0;
+}
+
+static size_t countTouched(const PacketSlot *slots) {
+    size_t count = 0;
+    for (size_t i = 0; i < kPacketCount; ++i) {
+        if (packetTouched(slots[i])) ++count;
+    }
+    return count;
+}
+
 static void dumpPacket(size_t index, const PacketSlot& p, bool raw) {
     const UInt32 iso = p.isoHeader;
     const unsigned packetLen = iso >> 16;
@@ -226,6 +238,29 @@ static void dumpPacket(size_t index, const PacketSlot& p, bool raw) {
         std::cout << std::dec << std::setfill(' ');
         if (shown < packetLen) std::cout << " ...";
         std::cout << '\n';
+    }
+}
+
+static void dumpPartial(const PacketSlot *slots, bool raw) {
+    const size_t touched = countTouched(slots);
+    std::cout << "capture diagnostics:\n";
+    std::cout << "    touched NuDCL slots: " << touched << " / " << kPacketCount << '\n';
+
+    size_t shown = 0;
+    for (size_t i = 0; i < kPacketCount && shown < 16; ++i) {
+        if (!packetTouched(slots[i])) continue;
+        dumpPacket(i, slots[i], raw);
+        ++shown;
+    }
+
+    if (touched == 0) {
+        std::cout << "    interpretation: no receive slot was modified by the ISO DMA engine\n";
+        std::cout << "    next suspect: FW410 may require an active host->device AMDTP stream,\n";
+        std::cout << "                  or the local receive program is not armed for this stream\n";
+    } else if (touched < kPacketCount) {
+        std::cout << "    interpretation: ISO receive is active, but the finite NuDCL burst did not complete\n";
+    } else {
+        std::cout << "    interpretation: all slots changed; callback/finalization is the likely issue\n";
     }
 }
 
@@ -414,12 +449,22 @@ static bool run(IOFireWireLibDeviceRef device, UInt32 generation,
 
     std::cout << "CMP: both directions connected\n";
     {
+        uint32_t opConnected = 0, ipConnected = 0;
+        if (readReg(device, generation, nodeID, kOpcr0Lo, opConnected) &&
+            readReg(device, generation, nodeID, kIpcr0Lo, ipConnected)) {
+            std::cout << "    connected oPCR[0]: 0x" << std::hex << opConnected << '\n';
+            std::cout << "    connected iPCR[0]: 0x" << ipConnected << std::dec << '\n';
+        }
+    }
+
+    {
         const IOReturn kr = (*captureChannel)->Start(captureChannel);
         if (kr != kIOReturnSuccess) {
             std::cout << "capture channel start failed: 0x" << std::hex << kr << std::dec << '\n';
             goto cleanup;
         }
         captureStarted = true;
+        std::cout << "capture local isoch channel: started\n";
     }
 
     std::cout << "capture: waiting for " << kPacketCount << " ISO packets (2 s timeout)\n";
@@ -432,6 +477,7 @@ static bool run(IOFireWireLibDeviceRef device, UInt32 generation,
 
     if (!captureState.done) {
         std::cout << "capture: timeout before NuDCL burst completed\n";
+        dumpPartial(slots, raw);
         goto cleanup;
     }
 
