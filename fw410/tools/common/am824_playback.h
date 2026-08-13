@@ -27,7 +27,7 @@ struct Playback48kState {
 
 struct Playback48kPacket {
     std::array<std::uint8_t, kPlayback48kDataPacketBytes> bytes{};
-    std::size_t length = 0;
+    std::uint32_t length = 0;
     bool dataBearing = false;
     std::uint8_t dbc = 0;
     std::uint16_t syt = 0xffffu;
@@ -86,7 +86,7 @@ inline Playback48kPacket buildPlayback48kSilence(
             putBe32Playback(packet.bytes.data() + offset, kMidiNoData);
             offset += 4;
         }
-        packet.length = offset;
+        packet.length = static_cast<std::uint32_t>(offset);
     }
 
     return packet;
