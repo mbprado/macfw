@@ -28,6 +28,13 @@ public:
                                               UInt32 firstCycle,
                                               std::size_t packetCount = 128);
 
+    static AmdtpTransmitRing createTone48k(FireWireDevice& device,
+                                           UInt32 firstCycle,
+                                           std::size_t pcmPosition,
+                                           double frequencyHz = 1000.0,
+                                           double amplitude = 131072.0,
+                                           std::size_t packetCount = 128);
+
     explicit operator bool() const { return localPort_ != nullptr; }
     IOFireWireLibLocalIsochPortRef nativeLocalPort() const { return localPort_; }
     UInt32 firstCycle() const { return firstCycle_; }
@@ -36,6 +43,12 @@ public:
 
 private:
     struct StorageSlot;
+    static AmdtpTransmitRing create48k(FireWireDevice& device,
+                                       UInt32 firstCycle,
+                                       std::size_t tonePcmPosition,
+                                       double frequencyHz,
+                                       double amplitude,
+                                       std::size_t packetCount);
     void reset();
     void moveFrom(AmdtpTransmitRing&& other) noexcept;
 
