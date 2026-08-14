@@ -1,5 +1,4 @@
 #include "macfw/amdtp_receive_ring.h"
-#include <CoreFoundation/CoreFoundation.h>
 #include <cstring>
 #include <new>
 #include <sys/mman.h>
@@ -8,212 +7,110 @@
 namespace macfw {
 
 struct AmdtpReceiveRing::RawSlot {
-    UInt32 isoHeader = 0;
-    UInt32 status = 0;
-    UInt32 timestamp = 0;
-};
-
-struct AmdtpReceiveRing::CallbackState {
-    AmdtpReceiveRing* owner = nullptr;
+    UInt32 isoHeader;
+    UInt32 status;
+    UInt32 timestamp;
 };
 
 AmdtpReceiveRing::~AmdtpReceiveRing() { reset(); }
 
-AmdtpReceiveRing::AmdtpReceiveRing(AmdtpReceiveRing&& other) noexcept {
-    moveFrom(std::move(other));
-}
-
+AmdtpReceiveRing::AmdtpReceiveRing(AmdtpReceiveRing&& other) noexcept { moveFrom(std::move(other)); }
 AmdtpReceiveRing& AmdtpReceiveRing::operator=(AmdtpReceiveRing&& other) noexcept {
-    if (this != &other) {
-        reset();
-        moveFrom(std::move(other));
-    }
+    if (this != &other) { reset(); moveFrom(std::move(other)); }
     return *this;
 }
 
 void AmdtpReceiveRing::moveFrom(AmdtpReceiveRing&& other) noexcept {
-    device_ = other.device_;
-    rawSlots_ = other.rawSlots_;
-    payloadBase_ = other.payloadBase_;
-    slots_ = other.slots_;
-    callbackState_ = other.callbackState_;
-    packetCount_ = other.packetCount_;
-    packetCapacity_ = other.packetCapacity_;
-    metadataBytes_ = other.metadataBytes_;
-    payloadBytes_ = other.payloadBytes_;
-    completed_ = other.completed_;
-    pool_ = other.pool_;
-    localPort_ = other.localPort_;
-    if (callbackState_) callbackState_->owner = this;
-
-    other.device_ = nullptr;
-    other.rawSlots_ = nullptr;
-    other.payloadBase_ = nullptr;
-    other.slots_ = nullptr;
-    other.callbackState_ = nullptr;
-    other.packetCount_ = 0;
-    other.packetCapacity_ = 0;
-    other.metadataBytes_ = 0;
-    other.payloadBytes_ = 0;
-    other.completed_ = false;
-    other.pool_ = nullptr;
-    other.localPort_ = nullptr;
+    device_ = other.device_; storage_ = other.storage_; slots_ = other.slots_;
+    packetCount_ = other.packetCount_; packetCapacity_ = other.packetCapacity_;
+    rawSlotBytes_ = other.rawSlotBytes_; storageBytes_ = other.storageBytes_;
+    completed_ = other.completed_; pool_ = other.pool_; localPort_ = other.localPort_;
+    other.device_ = nullptr; other.storage_ = nullptr; other.slots_ = nullptr;
+    other.packetCount_ = 0; other.packetCapacity_ = 0; other.rawSlotBytes_ = 0;
+    other.storageBytes_ = 0; other.completed_ = false; other.pool_ = nullptr; other.localPort_ = nullptr;
 }
 
-void AmdtpReceiveRing::onComplete(CallbackState* state, NuDCLRef) {
-    if (state && state->owner) state->owner->completed_ = true;
-    CFRunLoopStop(CFRunLoopGetCurrent());
-}
-
-AmdtpReceiveRing AmdtpReceiveRing::create(FireWireDevice& device,
-                                          std::size_t packetCount,
+AmdtpReceiveRing AmdtpReceiveRing::create(FireWireDevice& device, std::size_t packetCount,
                                           std::size_t packetCapacity) {
     AmdtpReceiveRing ring;
-    if (!device.nativeHandle() || packetCount == 0 || packetCapacity < 8)
-        return ring;
+    if (!device.nativeHandle() || packetCount == 0 || packetCapacity < 8) return ring;
+    ring.device_ = &device; ring.packetCount_ = packetCount; ring.packetCapacity_ = packetCapacity;
+    ring.rawSlotBytes_ = sizeof(RawSlot) + packetCapacity;
+    ring.storageBytes_ = ring.rawSlotBytes_ * packetCount;
 
-    ring.device_ = &device;
-    ring.packetCount_ = packetCount;
-    ring.packetCapacity_ = packetCapacity;
-    ring.metadataBytes_ = sizeof(RawSlot) * packetCount;
-    ring.payloadBytes_ = packetCapacity * packetCount;
-
-    ring.rawSlots_ = static_cast<RawSlot*>(mmap(nullptr, ring.metadataBytes_,
+    // Match the known-good probe: every receive slot lives in one contiguous
+    // DMA mapping as [isoHeader,status,timestamp,payload].
+    ring.storage_ = static_cast<std::uint8_t*>(mmap(nullptr, ring.storageBytes_,
         PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED, -1, 0));
-    if (ring.rawSlots_ == MAP_FAILED) {
-        ring.rawSlots_ = nullptr;
-        ring.reset();
-        return ring;
-    }
-
-    ring.payloadBase_ = static_cast<std::uint8_t*>(mmap(nullptr, ring.payloadBytes_,
-        PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED, -1, 0));
-    if (ring.payloadBase_ == MAP_FAILED) {
-        ring.payloadBase_ = nullptr;
-        ring.reset();
-        return ring;
-    }
-
-    std::memset(ring.rawSlots_, 0, ring.metadataBytes_);
-    std::memset(ring.payloadBase_, 0, ring.payloadBytes_);
+    if (ring.storage_ == MAP_FAILED) { ring.storage_ = nullptr; ring.reset(); return ring; }
+    std::memset(ring.storage_, 0, ring.storageBytes_);
     ring.slots_ = new (std::nothrow) PacketSlot[packetCount];
-    ring.callbackState_ = new (std::nothrow) CallbackState{&ring};
-    if (!ring.slots_ || !ring.callbackState_) {
-        ring.reset();
-        return ring;
-    }
+    if (!ring.slots_) { ring.reset(); return ring; }
 
     for (std::size_t i = 0; i < packetCount; ++i) {
-        ring.slots_[i].payload = ring.payloadBase_ + i * packetCapacity;
+        auto* raw = reinterpret_cast<RawSlot*>(ring.storage_ + i * ring.rawSlotBytes_);
+        ring.slots_[i].payload = reinterpret_cast<std::uint8_t*>(raw) + sizeof(RawSlot);
         ring.slots_[i].capacity = packetCapacity;
     }
 
     auto native = device.nativeHandle();
     ring.pool_ = (*native)->CreateNuDCLPool(native, static_cast<UInt32>(packetCount),
         CFUUIDGetUUIDBytes(kIOFireWireNuDCLPoolInterfaceID));
-    if (!ring.pool_) {
-        ring.reset();
-        return ring;
-    }
+    if (!ring.pool_) { ring.reset(); return ring; }
 
-    NuDCLRef first = nullptr;
-    NuDCLRef last = nullptr;
+    NuDCLRef first = nullptr, last = nullptr;
     for (std::size_t i = 0; i < packetCount; ++i) {
+        auto* raw = reinterpret_cast<RawSlot*>(ring.storage_ + i * ring.rawSlotBytes_);
+        auto* payload = reinterpret_cast<std::uint8_t*>(raw) + sizeof(RawSlot);
         IOVirtualRange ranges[2] = {
-            {reinterpret_cast<IOVirtualAddress>(&ring.rawSlots_[i].isoHeader),
-             sizeof(ring.rawSlots_[i].isoHeader)},
-            {reinterpret_cast<IOVirtualAddress>(ring.payloadBase_ + i * packetCapacity),
-             static_cast<IOByteCount>(packetCapacity)}
+            {reinterpret_cast<IOVirtualAddress>(&raw->isoHeader), static_cast<IOByteCount>(sizeof(raw->isoHeader))},
+            {reinterpret_cast<IOVirtualAddress>(payload), static_cast<IOByteCount>(packetCapacity)}
         };
-        NuDCLReceivePacketRef dcl = (*ring.pool_)->AllocateReceivePacket(
-            ring.pool_, nullptr, 4, 2, ranges);
-        if (!dcl) {
-            ring.reset();
-            return ring;
-        }
+        auto dcl = (*ring.pool_)->AllocateReceivePacket(ring.pool_, nullptr, 4, 2, ranges);
+        if (!dcl) { ring.reset(); return ring; }
         const NuDCLRef ref = reinterpret_cast<NuDCLRef>(dcl);
-        if (!first)
-            first = ref;
+        if (!first) first = ref;
         last = ref;
-        (*ring.pool_)->SetDCLStatusPtr(ref, &ring.rawSlots_[i].status);
-        (*ring.pool_)->SetDCLTimeStampPtr(ref, &ring.rawSlots_[i].timestamp);
+        (*ring.pool_)->SetDCLStatusPtr(ref, &raw->status);
+        (*ring.pool_)->SetDCLTimeStampPtr(ref, &raw->timestamp);
     }
-
-    // Continuous AMDTP capture must loop. Without this branch the receive
-    // program stops after packetCount packets (256 slots ~= 32 ms at 8 kHz),
-    // which is too early to observe the FW410 transition from NODATA to data.
-    if (!first || !last ||
-        (*ring.pool_)->SetDCLBranch(last, first) != kIOReturnSuccess) {
-        ring.reset();
-        return ring;
+    if (!first || !last || (*ring.pool_)->SetDCLBranch(last, first) != kIOReturnSuccess) {
+        ring.reset(); return ring;
     }
-
-    // Do not stop the run loop at the end of the first ring. The old one-shot
-    // capture probe used a tail callback, but a duplex streaming ring must run
-    // continuously for the full observation window.
 
     DCLCommand* program = (*ring.pool_)->GetProgram(ring.pool_);
-    if (!program) {
-        ring.reset();
-        return ring;
-    }
-
-    IOVirtualRange mappedRanges[2] = {
-        {reinterpret_cast<IOVirtualAddress>(ring.rawSlots_),
-         static_cast<IOByteCount>(ring.metadataBytes_)},
-        {reinterpret_cast<IOVirtualAddress>(ring.payloadBase_),
-         static_cast<IOByteCount>(ring.payloadBytes_)}
-    };
-
-    // Match the known-good duplex implementation: the receive port is not
-    // armed with a SY-bits event. The isoch channel start drives the RX DCLs.
+    if (!program) { ring.reset(); return ring; }
+    IOVirtualRange mappedRange = {reinterpret_cast<IOVirtualAddress>(ring.storage_),
+        static_cast<IOByteCount>(ring.storageBytes_)};
     ring.localPort_ = (*native)->CreateLocalIsochPort(native, false, program,
-        0, 0, 0, nullptr, 0, mappedRanges, 2,
+        0, 0, 0, nullptr, 0, &mappedRange, 1,
         CFUUIDGetUUIDBytes(kIOFireWireLocalIsochPortInterfaceID));
-    if (!ring.localPort_) {
-        ring.reset();
-        return ring;
-    }
-
+    if (!ring.localPort_) { ring.reset(); return ring; }
     return ring;
 }
 
 void AmdtpReceiveRing::syncSlot(std::size_t index) const {
-    if (!slots_ || !rawSlots_ || index >= packetCount_) return;
-    slots_[index].isoHeader = rawSlots_[index].isoHeader;
-    slots_[index].status = rawSlots_[index].status;
-    slots_[index].timestamp = rawSlots_[index].timestamp;
+    if (!slots_ || !storage_ || index >= packetCount_) return;
+    const auto* raw = reinterpret_cast<const RawSlot*>(storage_ + index * rawSlotBytes_);
+    slots_[index].isoHeader = raw->isoHeader; slots_[index].status = raw->status;
+    slots_[index].timestamp = raw->timestamp;
 }
-
 const AmdtpReceiveRing::PacketSlot& AmdtpReceiveRing::slot(std::size_t index) const {
-    static const PacketSlot empty{};
-    if (!slots_ || index >= packetCount_) return empty;
-    syncSlot(index);
-    return slots_[index];
+    static const PacketSlot empty{}; if (!slots_ || index >= packetCount_) return empty;
+    syncSlot(index); return slots_[index];
 }
-
 std::size_t AmdtpReceiveRing::touchedCount() const {
-    std::size_t count = 0;
-    for (std::size_t i = 0; i < packetCount_; ++i) {
-        syncSlot(i);
-        if (slots_[i].touched()) ++count;
-    }
-    return count;
+    std::size_t count = 0; for (std::size_t i = 0; i < packetCount_; ++i) {
+        syncSlot(i); if (slots_[i].touched()) ++count;
+    } return count;
 }
-
 void AmdtpReceiveRing::reset() {
     if (localPort_) { (*localPort_)->Release(localPort_); localPort_ = nullptr; }
     if (pool_) { (*pool_)->Release(pool_); pool_ = nullptr; }
-    delete callbackState_; callbackState_ = nullptr;
     delete[] slots_; slots_ = nullptr;
-    if (payloadBase_) { munmap(payloadBase_, payloadBytes_); payloadBase_ = nullptr; }
-    if (rawSlots_) { munmap(rawSlots_, metadataBytes_); rawSlots_ = nullptr; }
-    device_ = nullptr;
-    packetCount_ = 0;
-    packetCapacity_ = 0;
-    metadataBytes_ = 0;
-    payloadBytes_ = 0;
-    completed_ = false;
+    if (storage_) { munmap(storage_, storageBytes_); storage_ = nullptr; }
+    device_ = nullptr; packetCount_ = 0; packetCapacity_ = 0; rawSlotBytes_ = 0;
+    storageBytes_ = 0; completed_ = false;
 }
 
 } // namespace macfw
