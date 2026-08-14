@@ -116,6 +116,7 @@ AmdtpReceiveRing AmdtpReceiveRing::create(FireWireDevice& device,
         return ring;
     }
 
+    NuDCLRef first = nullptr;
     NuDCLRef last = nullptr;
     for (std::size_t i = 0; i < packetCount; ++i) {
         IOVirtualRange ranges[2] = {
@@ -130,14 +131,26 @@ AmdtpReceiveRing AmdtpReceiveRing::create(FireWireDevice& device,
             ring.reset();
             return ring;
         }
-        last = reinterpret_cast<NuDCLRef>(dcl);
-        (*ring.pool_)->SetDCLStatusPtr(last, &ring.rawSlots_[i].status);
-        (*ring.pool_)->SetDCLTimeStampPtr(last, &ring.rawSlots_[i].timestamp);
+        const NuDCLRef ref = reinterpret_cast<NuDCLRef>(dcl);
+        if (!first)
+            first = ref;
+        last = ref;
+        (*ring.pool_)->SetDCLStatusPtr(ref, &ring.rawSlots_[i].status);
+        (*ring.pool_)->SetDCLTimeStampPtr(ref, &ring.rawSlots_[i].timestamp);
     }
 
-    (*ring.pool_)->SetDCLRefcon(last, ring.callbackState_);
-    (*ring.pool_)->SetDCLCallback(last,
-        reinterpret_cast<NuDCLCallback>(onComplete));
+    // Continuous AMDTP capture must loop. Without this branch the receive
+    // program stops after packetCount packets (256 slots ~= 32 ms at 8 kHz),
+    // which is too early to observe the FW410 transition from NODATA to data.
+    if (!first || !last ||
+        (*ring.pool_)->SetDCLBranch(last, first) != kIOReturnSuccess) {
+        ring.reset();
+        return ring;
+    }
+
+    // Do not stop the run loop at the end of the first ring. The old one-shot
+    // capture probe used a tail callback, but a duplex streaming ring must run
+    // continuously for the full observation window.
 
     DCLCommand* program = (*ring.pool_)->GetProgram(ring.pool_);
     if (!program) {
