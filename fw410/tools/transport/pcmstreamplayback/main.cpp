@@ -8,11 +8,14 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -58,6 +61,22 @@ struct Producer {
 void fillProducerAhead(macfw::PcmRingBuffer& ring, Producer& producer) {
     while (ring.freeFrames() >= 256) {
         if (!producer.fill(ring)) break;
+    }
+}
+
+void producerLoop(macfw::PcmRingBuffer& ring,
+                  Producer& producer,
+                  std::atomic<bool>& stop,
+                  std::atomic<std::uint64_t>& fillCalls,
+                  std::atomic<std::uint64_t>& idleSleeps) {
+    while (!stop.load(std::memory_order_acquire)) {
+        const std::size_t written = producer.fill(ring);
+        if (written) {
+            fillCalls.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            idleSleeps.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
     }
 }
 
@@ -108,6 +127,7 @@ bool run(bool execute) {
               << "    PCM FIFO:           " << kPcmCapacityFrames << " frames\n"
               << "    TX ring:            128 packets, two 64-packet refill halves\n"
               << "    scheduler:          reusable AmdtpPcmStream48k\n"
+              << "    PCM producer:       independent std::thread\n"
               << "    cycle source:       host polls FireWire cycle timer\n"
               << "    payload update:     mmap data only; DCL metadata unchanged\n"
               << "    Analog Output 1:    alternating 440 / 880 Hz every 0.5 s\n"
@@ -121,6 +141,7 @@ bool run(bool execute) {
 
     macfw::PcmRingBuffer pcm(kPcmCapacityFrames, kPcmChannels);
     Producer producer;
+    // Prime synchronously so the transport can start with a full source FIFO.
     fillProducerAhead(pcm, producer);
 
     auto rx = macfw::AmdtpReceiveRing::create(device, kCaptureSlots, kCaptureMaxPacket48k);
@@ -148,6 +169,10 @@ bool run(bool execute) {
     bool callbackDispatcher = false, isochDispatcher = false, notifications = false;
     bool captureStarted = false, playbackStarted = false, opConnected = false, ipConnected = false;
     bool ok = false;
+    std::atomic<bool> producerStop{false};
+    std::atomic<std::uint64_t> producerFillCalls{0};
+    std::atomic<std::uint64_t> producerIdleSleeps{0};
+    std::thread producerThread;
 
     if ((*native)->AddCallbackDispatcherToRunLoop(native, CFRunLoopGetCurrent()) == kIOReturnSuccess)
         callbackDispatcher = true;
@@ -173,21 +198,26 @@ bool run(bool execute) {
     if ((*capture.nativeChannel())->Start(capture.nativeChannel()) != kIOReturnSuccess) goto cleanup;
     captureStarted = true;
 
-    std::cout << "duplex ISO: started (library-managed live PCM refill)\n"
+    producerThread = std::thread(producerLoop, std::ref(pcm), std::ref(producer),
+                                 std::ref(producerStop), std::ref(producerFillCalls),
+                                 std::ref(producerIdleSleeps));
+
+    std::cout << "duplex ISO: started (asynchronous PCM producer + library-managed refill)\n"
               << "listen for Output 1 to alternate low/high pitch every 0.5 s\n";
 
     {
         const CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + kRunSeconds;
         while (CFAbsoluteTimeGetCurrent() < deadline) {
             CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.002, false);
-            fillProducerAhead(pcm, producer);
 
             UInt32 ct = 0;
             if ((*native)->GetCycleTime(native, &ct) != kIOReturnSuccess) continue;
             streamer.service(cycleCount(ct));
-            fillProducerAhead(pcm, producer);
         }
     }
+
+    producerStop.store(true, std::memory_order_release);
+    if (producerThread.joinable()) producerThread.join();
 
     dumpCapture(rx);
     {
@@ -200,11 +230,16 @@ bool run(bool execute) {
                   << "    refill PCM frames:    " << stats.framesFromBuffer << '\n'
                   << "    refill silence frames:" << stats.framesSilenced << '\n'
                   << "    PCM underrun frames:  " << pcm.underrunFrames() << '\n'
-                  << "    late cycle polls:     " << stats.lateCyclePolls << '\n';
+                  << "    late cycle polls:     " << stats.lateCyclePolls << '\n'
+                  << "    producer fill calls:  " << producerFillCalls.load() << '\n'
+                  << "    producer idle sleeps: " << producerIdleSleeps.load() << '\n';
     }
     ok = true;
 
 cleanup:
+    producerStop.store(true, std::memory_order_release);
+    if (producerThread.joinable()) producerThread.join();
+
     if (playbackStarted) (*playback.nativeChannel())->Stop(playback.nativeChannel());
     if (captureStarted) (*capture.nativeChannel())->Stop(capture.nativeChannel());
     if (ipConnected) {
@@ -237,6 +272,6 @@ int main(int argc, char** argv) {
         if (arg == "--execute") execute = true;
         else { std::cerr << "usage: ./pcmstreamplayback [--execute]\n"; return 64; }
     }
-    std::cout << "macfw pcmstreamplayback — reusable live FW410 PCM streaming test\n\n";
+    std::cout << "macfw pcmstreamplayback — asynchronous live FW410 PCM streaming test\n\n";
     return run(execute) ? 0 : 1;
 }
