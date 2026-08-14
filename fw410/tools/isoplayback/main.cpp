@@ -205,6 +205,21 @@ bool run(bool execute, bool raw, UInt32 cycleLead) {
         goto cleanup;
     ipConnected = true;
 
+    UInt32 startCycleTime = 0;
+    if ((*native)->GetCycleTime(native, &startCycleTime) == kIOReturnSuccess) {
+        const UInt32 startNow = (startCycleTime >> 12) & 0x1fffu;
+        const UInt32 forward = (firstCycle - startNow) & 0x1fffu;
+        std::cout << "TX start timing:\n";
+        std::cout << "    scheduled cycle: " << firstCycle << '\n';
+        std::cout << "    current cycle:   " << startNow << '\n';
+        std::cout << "    forward delta:   " << forward << " cycles\n";
+        std::cout << "    interpretation:  "
+                  << (forward <= 4096
+                          ? "scheduled cycle still ahead"
+                          : "scheduled cycle already missed")
+                  << '\n';
+    }
+
     // Match the proven/Linux ordering: host playback first, then capture.
     if ((*playback.nativeChannel())->Start(playback.nativeChannel()) != kIOReturnSuccess) {
         std::cout << "playback start failed\n";
