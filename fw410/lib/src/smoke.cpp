@@ -3,6 +3,7 @@
 #include "macfw/amdtp_packet.h"
 #include "macfw/am824_playback.h"
 #include "macfw/pcm_buffer.h"
+#include "macfw/pcm_ring_buffer.h"
 
 #include <cstdint>
 #include <iostream>
@@ -73,6 +74,53 @@ int main() {
     if (looped.sample(2, 0) != 100 || looped.sample(3, 1) != -200)
         return 9;
     std::cout << "PCM buffer view: PASS\n";
+
+    macfw::PcmRingBuffer ring(4, 2);
+    if (!ring.valid() || ring.capacityFrames() != 4 || ring.channelCount() != 2)
+        return 10;
+
+    const std::int32_t firstWrite[] = {
+        1, 101,
+        2, 102,
+        3, 103,
+    };
+    if (ring.write(firstWrite, 3) != 3 || ring.availableFrames() != 3 || ring.freeFrames() != 1)
+        return 11;
+
+    std::int32_t firstRead[4] = {};
+    const auto r1 = ring.read(firstRead, 2);
+    if (r1.framesFromBuffer != 2 || r1.framesSilenced != 0 ||
+        firstRead[0] != 1 || firstRead[1] != 101 ||
+        firstRead[2] != 2 || firstRead[3] != 102)
+        return 12;
+
+    const std::int32_t secondWrite[] = {
+        4, 104,
+        5, 105,
+        6, 106,
+    };
+    if (ring.write(secondWrite, 3) != 3 || ring.availableFrames() != 4)
+        return 13;
+
+    std::int32_t wrapRead[10] = {};
+    const auto r2 = ring.read(wrapRead, 5);
+    if (r2.framesFromBuffer != 4 || r2.framesSilenced != 1 ||
+        wrapRead[0] != 3 || wrapRead[1] != 103 ||
+        wrapRead[2] != 4 || wrapRead[3] != 104 ||
+        wrapRead[4] != 5 || wrapRead[5] != 105 ||
+        wrapRead[6] != 6 || wrapRead[7] != 106 ||
+        wrapRead[8] != 0 || wrapRead[9] != 0 ||
+        ring.underrunFrames() != 1)
+        return 14;
+
+    if (ring.producedFrames() != 6 || ring.consumedFrames() != 6 || ring.availableFrames() != 0)
+        return 15;
+
+    ring.reset();
+    if (ring.producedFrames() != 0 || ring.consumedFrames() != 0 || ring.underrunFrames() != 0)
+        return 16;
+
+    std::cout << "PCM ring buffer: PASS\n";
 
     return 0;
 }
