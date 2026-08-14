@@ -55,4 +55,14 @@ inline constexpr const StreamChannel *playbackChannelForPosition(
         : nullptr;
 }
 
+inline constexpr const StreamChannel *playbackAnalogOutput(
+    std::size_t output) {
+    for (const auto& channel : kPlayback48k) {
+        if (channel.kind == ChannelKind::Analog &&
+            channel.physicalChannel == output)
+            return &channel;
+    }
+    return nullptr;
+}
+
 } // namespace macfw::fw410
