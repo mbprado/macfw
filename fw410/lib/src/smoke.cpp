@@ -2,7 +2,9 @@
 #include "macfw/am824.h"
 #include "macfw/amdtp_packet.h"
 #include "macfw/am824_playback.h"
+#include "macfw/pcm_buffer.h"
 
+#include <cstdint>
 #include <iostream>
 
 int main() {
@@ -57,6 +59,20 @@ int main() {
     const auto tx3 = macfw::am824::buildPlayback48kSilence(103, txState);
     if (tx3.dataBearing || tx3.length != 8 || tx3.dbc != 24 || tx3.syt != 0xffff) return 7;
     std::cout << "AMDTP playback packet builder: PASS\n";
+
+    const std::int32_t pcmSamples[] = {
+        100, -100,
+        200, -200,
+    };
+    const macfw::PcmBufferView pcm{pcmSamples, 2, 2, false};
+    if (!pcm.valid() || pcm.sample(0, 0) != 100 || pcm.sample(1, 1) != -200 ||
+        pcm.sample(2, 0) != 0 || pcm.sample(0, 2) != 0)
+        return 8;
+
+    const macfw::PcmBufferView looped{pcmSamples, 2, 2, true};
+    if (looped.sample(2, 0) != 100 || looped.sample(3, 1) != -200)
+        return 9;
+    std::cout << "PCM buffer view: PASS\n";
 
     return 0;
 }
