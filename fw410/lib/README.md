@@ -14,6 +14,7 @@ lib/
 │   ├── am824.h
 │   ├── am824_playback.h
 │   ├── amdtp_packet.h
+│   ├── amdtp_pcm_stream.h
 │   ├── amdtp_receive_ring.h
 │   ├── amdtp_transmit_ring.h
 │   ├── channel_map.h
@@ -23,6 +24,7 @@ lib/
 │   ├── pcm_buffer.h
 │   └── pcm_ring_buffer.h
 ├── src/
+│   ├── amdtp_pcm_stream.cpp
 │   ├── amdtp_receive_ring.cpp
 │   ├── amdtp_transmit_ring.cpp
 │   ├── cmp.cpp
@@ -42,6 +44,7 @@ lib/
 - callback-free prebuilt 48 kHz playback ring
 - reusable interleaved PCM-buffer packetization path
 - single-producer/single-consumer PCM ring buffer for continuous sources
+- reusable cycle-driven live TX half-ring refill scheduler
 - standalone compile/smoke check
 
 ## PCM playback contract
@@ -60,24 +63,29 @@ frames, playback is zero-filled unless `loop` is set, in which case frames wrap.
 constructing its prebuilt NuDCL ring; the source buffer does not need to remain
 alive afterward.
 
-The diagnostic `createTone48k()` factory now generates a temporary PCM buffer
-and passes it through this same PCM packetization path, so the tone test also
+The diagnostic `createTone48k()` factory generates a temporary PCM buffer and
+passes it through this same PCM packetization path, so the tone test also
 regresses the generic PCM implementation.
 
-## Continuous-source buffer
+## Continuous PCM streaming
 
-`PcmRingBuffer` is the producer/consumer layer that will sit between the future
-CoreAudio-facing code and the AMDTP packet engine. It stores interleaved frames,
-tracks absolute produced/consumed frame counters, supports wraparound, reports
-available/free frames, and zero-fills consumer underruns while counting the
-number of silenced frames.
+`PcmRingBuffer` is the producer/consumer layer intended to sit between the
+future CoreAudio-facing code and the AMDTP packet engine. It stores interleaved
+frames, tracks absolute produced/consumed frame counters, supports wraparound,
+reports available/free frames, and zero-fills consumer underruns while counting
+the number of silenced frames.
 
-The design follows the same separation used by Linux FireWire AMDTP: PCM buffer
-position/accounting is kept independent from the isochronous packet queue, and
-the AM824 layer consumes PCM frames as packets are prepared. The macOS transport
-still uses the proven callback-free prebuilt NuDCL ring; dynamic packet refill is
-the next transport milestone and will be connected only after the PCM ring
-semantics are validated independently.
+`AmdtpPcmStream48k` is the live TX refill scheduler. It does not own the FireWire
+channel and does not require a NuDCL completion callback. The caller supplies
+observed IEEE 1394 cycle numbers; the scheduler tracks progress from the planned
+TX start, determines when a 64-packet half-ring has been consumed, and refills
+only the half DMA has just left behind from `PcmRingBuffer`. The NuDCL program,
+packet lengths, CIP timing, DBC and SYT remain unchanged while only the mmap-backed
+AM824 PCM payload words are replaced.
+
+The separation is inspired by the Linux FireWire AMDTP model—PCM accounting is
+kept independent from the isochronous packet queue—but the running refill
+mechanism is macOS-specific and uses the behavior validated with IOFireWireLib.
 
 Run:
 
@@ -86,21 +94,16 @@ cd fw410/lib
 make check
 ```
 
-Then validate the transport with the existing playback tools:
+Then validate the live path:
 
 ```bash
-cd ../tools/transport/isoplayback
+cd ../tools/transport/pcmstreamplayback
 make
-./isoplayback --execute --tone-output 1
+./pcmstreamplayback --execute
 ```
 
-or the direct PCM-buffer test:
-
-```bash
-cd ../pcmbufferplayback
-make
-./pcmbufferplayback --execute
-```
+The test should continuously alternate 440 Hz and 880 Hz on Analog Output 1
+while reporting zero PCM underrun/silence frames under normal operation.
 
 ## Planned extraction order
 
