@@ -9,6 +9,7 @@
 #include <AudioUnit/AudioUnit.h>
 #include <CoreAudio/CoreAudio.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <AvailabilityMacros.h>
 
 #include <algorithm>
 #include <atomic>
@@ -30,8 +31,16 @@ constexpr std::size_t kPcmChannels = 10;
 constexpr std::size_t kPcmCapacityFrames = 8192;
 constexpr UInt32 kCycleLead = 256;
 constexpr UInt32 kCyclesPerSecond = 8000;
+constexpr double kFireWireSampleRate = 48000.0;
 constexpr double kRunSeconds = 8.0;
 constexpr UInt32 kMaxAudioFrames = 4096;
+constexpr UInt32 kMaxResampledFrames = 8192;
+
+#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 120000
+constexpr AudioObjectPropertyElement kMainElement = kAudioObjectPropertyElementMain;
+#else
+constexpr AudioObjectPropertyElement kMainElement = kAudioObjectPropertyElementMaster;
+#endif
 
 UInt32 cycleCount(UInt32 cycleTime) { return (cycleTime >> 12) & 0x1fffu; }
 
@@ -51,13 +60,17 @@ struct CoreAudioInput {
     AudioUnit unit = nullptr;
     AudioDeviceID device = kAudioObjectUnknown;
     macfw::PcmRingBuffer* ring = nullptr;
+    double nativeRate = 0.0;
+    double sourcePosition = 0.0;
     std::vector<Float32> mono;
     std::vector<std::int32_t> mapped;
     std::atomic<std::uint64_t> callbacks{0};
     std::atomic<std::uint64_t> renderedFrames{0};
+    std::atomic<std::uint64_t> resampledFrames{0};
     std::atomic<std::uint64_t> writtenFrames{0};
     std::atomic<std::uint64_t> droppedFrames{0};
     std::atomic<std::uint64_t> renderErrors{0};
+    std::atomic<std::int32_t> firstRenderError{0};
 
     ~CoreAudioInput() { stop(); }
 
@@ -70,7 +83,7 @@ struct CoreAudioInput {
         auto* self = static_cast<CoreAudioInput*>(refCon);
         ++self->callbacks;
         if (!self->ring || !self->unit || frames == 0) return noErr;
-        if (frames > kMaxAudioFrames) {
+        if (frames > kMaxAudioFrames || self->nativeRate <= 0.0) {
             self->droppedFrames += frames;
             return noErr;
         }
@@ -84,29 +97,50 @@ struct CoreAudioInput {
         const OSStatus err = AudioUnitRender(self->unit, flags, ts, 1, frames, &abl);
         if (err != noErr) {
             ++self->renderErrors;
+            std::int32_t expected = 0;
+            self->firstRenderError.compare_exchange_strong(expected, static_cast<std::int32_t>(err));
             return err;
         }
         self->renderedFrames += frames;
 
-        std::fill(self->mapped.begin(), self->mapped.begin() + frames * kPcmChannels, 0);
-        for (UInt32 i = 0; i < frames; ++i) {
-            const double x = std::max(-1.0, std::min(1.0, static_cast<double>(self->mono[i])));
+        // Stateful linear SRC from the CoreAudio device clock to the FW410's
+        // fixed 48 kHz playback clock. sourcePosition is carried between
+        // callbacks so fractional-rate progress is preserved.
+        const double sourceStep = self->nativeRate / kFireWireSampleRate;
+        UInt32 outFrames = 0;
+        while (self->sourcePosition < static_cast<double>(frames) &&
+               outFrames < kMaxResampledFrames) {
+            const UInt32 i0 = static_cast<UInt32>(self->sourcePosition);
+            const UInt32 i1 = (i0 + 1u < frames) ? i0 + 1u : i0;
+            const double frac = self->sourcePosition - static_cast<double>(i0);
+            const double sample = static_cast<double>(self->mono[i0]) +
+                                  (static_cast<double>(self->mono[i1]) -
+                                   static_cast<double>(self->mono[i0])) * frac;
+            const double x = std::max(-1.0, std::min(1.0, sample));
             const auto s24 = static_cast<std::int32_t>(x * 8388607.0);
-            // Duplicate default CoreAudio mono input to FW410 physical Analog Outputs 1/2.
-            self->mapped[i * kPcmChannels + 1] = s24; // PCM position 2 -> Analog Out 1.
-            self->mapped[i * kPcmChannels + 6] = s24; // PCM position 7 -> Analog Out 2.
-        }
 
-        const std::size_t written = self->ring->write(self->mapped.data(), frames);
+            const std::size_t base = static_cast<std::size_t>(outFrames) * kPcmChannels;
+            std::fill_n(self->mapped.data() + base, kPcmChannels, 0);
+            self->mapped[base + 1] = s24; // PCM position 2 -> Analog Out 1.
+            self->mapped[base + 6] = s24; // PCM position 7 -> Analog Out 2.
+
+            ++outFrames;
+            self->sourcePosition += sourceStep;
+        }
+        self->sourcePosition -= static_cast<double>(frames);
+        if (self->sourcePosition < 0.0) self->sourcePosition = 0.0;
+        self->resampledFrames += outFrames;
+
+        const std::size_t written = self->ring->write(self->mapped.data(), outFrames);
         self->writtenFrames += written;
-        self->droppedFrames += (frames - written);
+        self->droppedFrames += (outFrames - written);
         return noErr;
     }
 
     bool configure(macfw::PcmRingBuffer& target) {
         ring = &target;
         mono.assign(kMaxAudioFrames, 0.0f);
-        mapped.assign(static_cast<std::size_t>(kMaxAudioFrames) * kPcmChannels, 0);
+        mapped.assign(static_cast<std::size_t>(kMaxResampledFrames) * kPcmChannels, 0);
 
         AudioComponentDescription desc{};
         desc.componentType = kAudioUnitType_Output;
@@ -125,13 +159,13 @@ struct CoreAudioInput {
                                    kAudioUnitScope_Output, 0, &zero, sizeof(zero));
         if (err != noErr) { std::cerr << "disable AUHAL output: " << osStatusText(err) << '\n'; return false; }
 
-        AudioObjectPropertyAddress addr{
+        AudioObjectPropertyAddress defaultAddr{
             kAudioHardwarePropertyDefaultInputDevice,
             kAudioObjectPropertyScopeGlobal,
-            kAudioObjectPropertyElementMaster
+            kMainElement
         };
         UInt32 size = sizeof(device);
-        err = AudioObjectGetPropertyData(kAudioObjectSystemObject, &addr, 0, nullptr, &size, &device);
+        err = AudioObjectGetPropertyData(kAudioObjectSystemObject, &defaultAddr, 0, nullptr, &size, &device);
         if (err != noErr || device == kAudioObjectUnknown) {
             std::cerr << "default CoreAudio input device unavailable: " << osStatusText(err) << '\n';
             return false;
@@ -140,8 +174,22 @@ struct CoreAudioInput {
                                    kAudioUnitScope_Global, 0, &device, sizeof(device));
         if (err != noErr) { std::cerr << "bind AUHAL input device: " << osStatusText(err) << '\n'; return false; }
 
+        AudioObjectPropertyAddress formatAddr{
+            kAudioDevicePropertyStreamFormat,
+            kAudioDevicePropertyScopeInput,
+            kMainElement
+        };
+        AudioStreamBasicDescription deviceAsbd{};
+        size = sizeof(deviceAsbd);
+        err = AudioObjectGetPropertyData(device, &formatAddr, 0, nullptr, &size, &deviceAsbd);
+        if (err != noErr || deviceAsbd.mSampleRate <= 0.0) {
+            std::cerr << "read input device format: " << osStatusText(err) << '\n';
+            return false;
+        }
+        nativeRate = deviceAsbd.mSampleRate;
+
         AudioStreamBasicDescription asbd{};
-        asbd.mSampleRate = 48000.0;
+        asbd.mSampleRate = nativeRate;
         asbd.mFormatID = kAudioFormatLinearPCM;
         asbd.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagsNativeEndian;
         asbd.mBytesPerPacket = sizeof(Float32);
@@ -152,7 +200,7 @@ struct CoreAudioInput {
         err = AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat,
                                    kAudioUnitScope_Output, 1, &asbd, sizeof(asbd));
         if (err != noErr) {
-            std::cerr << "set AUHAL client format 48k mono Float32: " << osStatusText(err) << '\n';
+            std::cerr << "set AUHAL native-rate mono Float32 format: " << osStatusText(err) << '\n';
             return false;
         }
 
@@ -169,6 +217,13 @@ struct CoreAudioInput {
 
         err = AudioUnitInitialize(unit);
         if (err != noErr) { std::cerr << "AudioUnitInitialize: " << osStatusText(err) << '\n'; return false; }
+
+        std::cout << "CoreAudio input device:\n"
+                  << "    device id:          " << device << '\n'
+                  << "    native rate:        " << nativeRate << " Hz\n"
+                  << "    hardware channels:  " << deviceAsbd.mChannelsPerFrame << '\n'
+                  << "    AUHAL client:       " << nativeRate << " Hz mono Float32\n"
+                  << "    bridge SRC:         " << nativeRate << " -> 48000 Hz linear\n";
         return true;
     }
 
@@ -227,8 +282,8 @@ bool run(bool execute) {
     const UInt32 firstCycle = (initialCycle + kCycleLead) % kCyclesPerSecond;
 
     std::cout << "CoreAudio bridge:\n"
-              << "    CoreAudio source:   default input device\n"
-              << "    client format:      48000 Hz mono Float32\n"
+              << "    CoreAudio source:   default input device, native sample rate\n"
+              << "    FW410 clock domain: 48000 Hz\n"
               << "    FW410 destinations: Analog Out 1 + Analog Out 2 (duplicated mono)\n"
               << "    PCM FIFO:           " << kPcmCapacityFrames << " frames\n"
               << "    scheduler:          AmdtpPcmStream48k\n"
@@ -301,16 +356,20 @@ bool run(bool execute) {
     dumpCapture(rx);
     {
         const auto& stats = streamer.stats();
+        const auto firstError = static_cast<OSStatus>(input.firstRenderError.load());
         std::cout << "bridge statistics:\n"
                   << "    CoreAudio callbacks: " << input.callbacks.load() << '\n'
-                  << "    CoreAudio frames:    " << input.renderedFrames.load() << '\n'
-                  << "    PCM written frames:  " << input.writtenFrames.load() << '\n'
-                  << "    PCM dropped frames:  " << input.droppedFrames.load() << '\n'
-                  << "    CoreAudio errors:    " << input.renderErrors.load() << '\n'
-                  << "    PCM consumed frames: " << pcm.consumedFrames() << '\n'
-                  << "    PCM underrun frames: " << pcm.underrunFrames() << '\n'
-                  << "    TX halves refilled:  " << stats.halvesRefilled << '\n'
-                  << "    late cycle polls:    " << stats.lateCyclePolls << '\n';
+                  << "    CoreAudio input frames: " << input.renderedFrames.load() << '\n'
+                  << "    SRC output frames:    " << input.resampledFrames.load() << '\n'
+                  << "    PCM written frames:   " << input.writtenFrames.load() << '\n'
+                  << "    PCM dropped frames:   " << input.droppedFrames.load() << '\n'
+                  << "    CoreAudio errors:     " << input.renderErrors.load() << '\n'
+                  << "    first render error:   "
+                  << (firstError == noErr ? "none" : osStatusText(firstError)) << '\n'
+                  << "    PCM consumed frames:  " << pcm.consumedFrames() << '\n'
+                  << "    PCM underrun frames:  " << pcm.underrunFrames() << '\n'
+                  << "    TX halves refilled:   " << stats.halvesRefilled << '\n'
+                  << "    late cycle polls:     " << stats.lateCyclePolls << '\n';
     }
     ok = true;
 
