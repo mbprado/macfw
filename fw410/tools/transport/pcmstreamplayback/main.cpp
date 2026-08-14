@@ -1,3 +1,4 @@
+#include "macfw/amdtp_pcm_stream.h"
 #include "macfw/amdtp_receive_ring.h"
 #include "macfw/amdtp_transmit_ring.h"
 #include "macfw/cmp.h"
@@ -30,9 +31,6 @@ constexpr double kAmplitude = 131072.0;
 constexpr std::uint64_t kToneSegmentFrames = 24000; // 0.5 s at 48 kHz.
 
 UInt32 cycleCount(UInt32 cycleTime) { return (cycleTime >> 12) & 0x1fffu; }
-UInt32 cycleDelta(UInt32 newer, UInt32 older) {
-    return (newer + kCyclesPerSecond - older) % kCyclesPerSecond;
-}
 
 struct Producer {
     std::uint64_t nextFrame = 0;
@@ -109,7 +107,8 @@ bool run(bool execute) {
               << "    stream positions:   10\n"
               << "    PCM FIFO:           " << kPcmCapacityFrames << " frames\n"
               << "    TX ring:            128 packets, two 64-packet refill halves\n"
-              << "    scheduling:         cycle-timer polled; no TX completion callback\n"
+              << "    scheduler:          reusable AmdtpPcmStream48k\n"
+              << "    cycle source:       host polls FireWire cycle timer\n"
               << "    payload update:     mmap data only; DCL metadata unchanged\n"
               << "    Analog Output 1:    alternating 440 / 880 Hz every 0.5 s\n"
               << "    observation window: " << kRunSeconds << " s\n";
@@ -134,13 +133,11 @@ bool run(bool execute) {
         std::cout << "transport object creation failed\n"; return false;
     }
 
-    // Prime both halves before DMA starts. Each 64-packet half carries 384 PCM frames.
-    auto prime0 = tx.refillPcm48k(pcm, 0, kHalfPackets);
-    auto prime1 = tx.refillPcm48k(pcm, kHalfPackets, kHalfPackets);
-    fillProducerAhead(pcm, producer);
-    if (prime0.dataPacketsRefilled == 0 || prime1.dataPacketsRefilled == 0) {
-        std::cout << "TX prime failed\n"; return false;
+    macfw::AmdtpPcmStream48k streamer(tx, pcm, initialCycle, firstCycle, kHalfPackets);
+    if (!streamer.valid() || !streamer.prime()) {
+        std::cout << "TX stream scheduler prime failed\n"; return false;
     }
+    fillProducerAhead(pcm, producer);
 
     (*capture.nativeChannel())->AddListener(
         capture.nativeChannel(), reinterpret_cast<IOFireWireLibIsochPortRef>(rx.nativeLocalPort()));
@@ -151,8 +148,6 @@ bool run(bool execute) {
     bool callbackDispatcher = false, isochDispatcher = false, notifications = false;
     bool captureStarted = false, playbackStarted = false, opConnected = false, ipConnected = false;
     bool ok = false;
-    std::uint64_t refillHalves = 0, refillPackets = 0, refillFrames = 0, refillSilenced = 0;
-    std::uint64_t latePolls = 0;
 
     if ((*native)->AddCallbackDispatcherToRunLoop(native, CFRunLoopGetCurrent()) == kIOReturnSuccess)
         callbackDispatcher = true;
@@ -178,60 +173,35 @@ bool run(bool execute) {
     if ((*capture.nativeChannel())->Start(capture.nativeChannel()) != kIOReturnSuccess) goto cleanup;
     captureStarted = true;
 
-    std::cout << "duplex ISO: started (cycle-polled live PCM refill)\n"
+    std::cout << "duplex ISO: started (library-managed live PCM refill)\n"
               << "listen for Output 1 to alternate low/high pitch every 0.5 s\n";
 
     {
-        UInt32 lastCycle = initialCycle;
-        std::uint64_t cyclesObserved = 0;
-        std::uint64_t lastHalfNumber = 0;
-        bool streamReached = false;
         const CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + kRunSeconds;
-
         while (CFAbsoluteTimeGetCurrent() < deadline) {
             CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.002, false);
             fillProducerAhead(pcm, producer);
 
             UInt32 ct = 0;
             if ((*native)->GetCycleTime(native, &ct) != kIOReturnSuccess) continue;
-            const UInt32 nowCycle = cycleCount(ct);
-            const UInt32 delta = cycleDelta(nowCycle, lastCycle);
-            lastCycle = nowCycle;
-            if (delta > 32) ++latePolls; // >4 ms between observations.
-            cyclesObserved += delta;
-
-            if (!streamReached) {
-                if (cyclesObserved < kCycleLead) continue;
-                streamReached = true;
-            }
-
-            const std::uint64_t sinceStart = cyclesObserved - kCycleLead;
-            const std::uint64_t halfNumber = sinceStart / kHalfPackets;
-            while (lastHalfNumber < halfNumber) {
-                // A boundary was crossed. Refill the half DMA just left behind.
-                const std::size_t consumedHalf = static_cast<std::size_t>(lastHalfNumber & 1u);
-                const std::size_t firstPacket = consumedHalf * kHalfPackets;
-                const auto rr = tx.refillPcm48k(pcm, firstPacket, kHalfPackets);
-                ++refillHalves;
-                refillPackets += rr.dataPacketsRefilled;
-                refillFrames += rr.framesFromBuffer;
-                refillSilenced += rr.framesSilenced;
-                fillProducerAhead(pcm, producer);
-                ++lastHalfNumber;
-            }
+            streamer.service(cycleCount(ct));
+            fillProducerAhead(pcm, producer);
         }
     }
 
     dumpCapture(rx);
-    std::cout << "streaming statistics:\n"
-              << "    PCM produced frames: " << pcm.producedFrames() << '\n'
-              << "    PCM consumed frames: " << pcm.consumedFrames() << '\n'
-              << "    TX halves refilled:   " << refillHalves << '\n'
-              << "    TX data packets:      " << refillPackets << '\n'
-              << "    refill PCM frames:    " << refillFrames << '\n'
-              << "    refill silence frames:" << refillSilenced << '\n'
-              << "    PCM underrun frames:  " << pcm.underrunFrames() << '\n'
-              << "    late cycle polls:     " << latePolls << '\n';
+    {
+        const auto& stats = streamer.stats();
+        std::cout << "streaming statistics:\n"
+                  << "    PCM produced frames: " << pcm.producedFrames() << '\n'
+                  << "    PCM consumed frames: " << pcm.consumedFrames() << '\n'
+                  << "    TX halves refilled:   " << stats.halvesRefilled << '\n'
+                  << "    TX data packets:      " << stats.dataPacketsRefilled << '\n'
+                  << "    refill PCM frames:    " << stats.framesFromBuffer << '\n'
+                  << "    refill silence frames:" << stats.framesSilenced << '\n'
+                  << "    PCM underrun frames:  " << pcm.underrunFrames() << '\n'
+                  << "    late cycle polls:     " << stats.lateCyclePolls << '\n';
+    }
     ok = true;
 
 cleanup:
@@ -267,6 +237,6 @@ int main(int argc, char** argv) {
         if (arg == "--execute") execute = true;
         else { std::cerr << "usage: ./pcmstreamplayback [--execute]\n"; return 64; }
     }
-    std::cout << "macfw pcmstreamplayback — live FW410 PCM ring-buffer refill experiment\n\n";
+    std::cout << "macfw pcmstreamplayback — reusable live FW410 PCM streaming test\n\n";
     return run(execute) ? 0 : 1;
 }
