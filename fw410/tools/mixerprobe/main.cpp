@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -101,21 +102,32 @@ static IOReturn writeFcp(IOFireWireLibDeviceRef device,
                             true, generation);
 }
 
-static std::array<UInt8, 12> selectorStatusCommand(UInt8 subunitId,
-                                                   UInt8 fbId) {
-    // AV/C Audio Subunit FUNCTION BLOCK, selector, CURRENT attribute.
-    // Read-only STATUS query, matching Linux avc_audio_get_selector().
+static std::vector<UInt8> selectorStatusCommand(UInt8 subunitId, UInt8 fbId) {
     return {
-        0x01,                              // AV/C STATUS
-        static_cast<UInt8>(0x08 | (subunitId & 0x07)),
-        0xb8,                              // FUNCTION BLOCK
-        0x80,                              // selector function block
-        fbId,                              // function block ID
-        0x10,                              // CURRENT
-        0x02,                              // selector data length
-        0xff,                              // queried input plug number
-        0x01,                              // SELECTOR_CONTROL
-        0x00, 0x00, 0x00
+        0x01, static_cast<UInt8>(0x08 | (subunitId & 0x07)), 0xb8,
+        0x80, fbId, 0x10, 0x02, 0xff, 0x01, 0x00, 0x00, 0x00
+    };
+}
+
+static std::vector<UInt8> featureMuteStatusCommand(UInt8 subunitId,
+                                                   UInt8 fbId,
+                                                   UInt8 channel) {
+    // FUNCTION BLOCK / Feature / CURRENT / Mute. Linux oxfw-spkr.c uses
+    // selector 0x01 and one-byte mute data; STATUS uses 0xff as query value.
+    return {
+        0x01, static_cast<UInt8>(0x08 | (subunitId & 0x07)), 0xb8,
+        0x81, fbId, 0x10, 0x02, channel, 0x01, 0x01, 0xff
+    };
+}
+
+static std::vector<UInt8> featureVolumeStatusCommand(UInt8 subunitId,
+                                                     UInt8 fbId,
+                                                     UInt8 channel) {
+    // FUNCTION BLOCK / Feature / CURRENT / Volume. Selector 0x02, signed
+    // 16-bit volume value. STATUS queries with ff ff.
+    return {
+        0x01, static_cast<UInt8>(0x08 | (subunitId & 0x07)), 0xb8,
+        0x81, fbId, 0x10, 0x02, channel, 0x02, 0x02, 0xff, 0xff
     };
 }
 
@@ -123,21 +135,18 @@ static bool transaction(IOFireWireLibDeviceRef device,
                         UInt32 generation,
                         UInt16 remoteNodeID,
                         ResponseContext& ctx,
-                        const std::array<UInt8, 12>& command,
+                        const std::vector<UInt8>& command,
                         bool raw) {
     resetResponse(ctx);
     UInt32 size = static_cast<UInt32>(command.size());
     const IOReturn kr = writeFcp(device, generation, remoteNodeID,
                                  command.data(), size);
-    if (kr != kIOReturnSuccess)
-        return false;
+    if (kr != kIOReturnSuccess) return false;
 
     const CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + kTimeoutSeconds;
     while (!ctx.received && CFAbsoluteTimeGetCurrent() < deadline)
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.02, true);
-
-    if (!ctx.received)
-        return false;
+    if (!ctx.received) return false;
 
     if (raw) {
         std::cout << "        command:  ";
@@ -149,6 +158,90 @@ static bool transaction(IOFireWireLibDeviceRef device,
     return true;
 }
 
+static bool stable(const ResponseContext& ctx) {
+    return ctx.length > 0 && ctx.bytes[0] == 0x0c;
+}
+
+static void probeSelectors(IOFireWireLibDeviceRef device,
+                           UInt32 generation,
+                           UInt16 remoteNodeID,
+                           ResponseContext& ctx,
+                           bool raw) {
+    std::cout << "    Audio subunit 0 selector function blocks (read-only):\n";
+    unsigned implemented = 0;
+    unsigned responded = 0;
+    for (unsigned fb = 0; fb <= kMaxFunctionBlockId; ++fb) {
+        const auto command = selectorStatusCommand(0, static_cast<UInt8>(fb));
+        if (!transaction(device, generation, remoteNodeID, ctx, command, raw))
+            continue;
+        ++responded;
+        if (ctx.length < 9 || !stable(ctx)) continue;
+        ++implemented;
+        std::cout << "        selector fb " << fb
+                  << ": current input plug=" << static_cast<unsigned>(ctx.bytes[7])
+                  << " response=" << responseName(ctx.bytes[0]) << '\n';
+    }
+    std::cout << "    selector responses: " << responded
+              << ", implemented: " << implemented << '\n';
+}
+
+static void probeFeatures(IOFireWireLibDeviceRef device,
+                          UInt32 generation,
+                          UInt16 remoteNodeID,
+                          ResponseContext& ctx,
+                          bool raw) {
+    std::cout << "    Audio subunit 0 feature function blocks (read-only):\n";
+    unsigned implementedBlocks = 0;
+
+    for (unsigned fb = 0; fb <= kMaxFunctionBlockId; ++fb) {
+        bool blockPrinted = false;
+
+        const auto mute = featureMuteStatusCommand(0, static_cast<UInt8>(fb), 0);
+        if (transaction(device, generation, remoteNodeID, ctx, mute, raw) &&
+            stable(ctx) && ctx.length >= 11) {
+            ++implementedBlocks;
+            blockPrinted = true;
+            const UInt8 v = ctx.bytes[10];
+            std::cout << "        feature fb " << fb
+                      << ": master mute raw=0x" << std::hex
+                      << static_cast<unsigned>(v) << std::dec;
+            if (v == 0x70) std::cout << " (muted)";
+            else if (v == 0x60) std::cout << " (unmuted)";
+            std::cout << '\n';
+        }
+
+        const auto vol = featureVolumeStatusCommand(0, static_cast<UInt8>(fb), 0);
+        if (transaction(device, generation, remoteNodeID, ctx, vol, raw) &&
+            stable(ctx) && ctx.length >= 12) {
+            if (!blockPrinted) ++implementedBlocks;
+            blockPrinted = true;
+            const std::int16_t value = static_cast<std::int16_t>(
+                (static_cast<std::uint16_t>(ctx.bytes[10]) << 8) | ctx.bytes[11]);
+            std::cout << "        feature fb " << fb
+                      << ": master volume raw=" << value
+                      << " (0x" << std::hex
+                      << static_cast<unsigned>(static_cast<std::uint16_t>(value))
+                      << std::dec << ")\n";
+
+            for (UInt8 ch = 1; ch <= 2; ++ch) {
+                const auto chVol = featureVolumeStatusCommand(
+                    0, static_cast<UInt8>(fb), ch);
+                if (transaction(device, generation, remoteNodeID, ctx, chVol, raw) &&
+                    stable(ctx) && ctx.length >= 12) {
+                    const std::int16_t chValue = static_cast<std::int16_t>(
+                        (static_cast<std::uint16_t>(ctx.bytes[10]) << 8) |
+                        ctx.bytes[11]);
+                    std::cout << "            channel " << static_cast<unsigned>(ch)
+                              << " volume raw=" << chValue << '\n';
+                }
+            }
+        }
+    }
+
+    std::cout << "    feature blocks with mute/volume controls: "
+              << implementedBlocks << '\n';
+}
+
 static bool runProbe(IOFireWireLibDeviceRef device,
                      UInt32 generation,
                      UInt16 remoteNodeID,
@@ -156,16 +249,9 @@ static bool runProbe(IOFireWireLibDeviceRef device,
     ResponseContext ctx;
     ctx.expectedNode = remoteNodeID;
 
-    const IOReturn openResult = (*device)->Open(device);
-    if (openResult != kIOReturnSuccess) {
-        std::cout << "    open: failed (0x" << std::hex << openResult
-                  << std::dec << ")\n";
-        return false;
-    }
-
-    const IOReturn dispatcherResult =
-        (*device)->AddCallbackDispatcherToRunLoop(device, CFRunLoopGetCurrent());
-    if (dispatcherResult != kIOReturnSuccess) {
+    if ((*device)->Open(device) != kIOReturnSuccess) return false;
+    if ((*device)->AddCallbackDispatcherToRunLoop(
+            device, CFRunLoopGetCurrent()) != kIOReturnSuccess) {
         (*device)->Close(device);
         return false;
     }
@@ -189,36 +275,8 @@ static bool runProbe(IOFireWireLibDeviceRef device,
         return false;
     }
 
-    std::cout << "    Audio subunit 0 selector function blocks (read-only):\n";
-
-    unsigned implemented = 0;
-    unsigned responded = 0;
-    for (unsigned fb = 0; fb <= kMaxFunctionBlockId; ++fb) {
-        const auto command = selectorStatusCommand(0, static_cast<UInt8>(fb));
-        if (!transaction(device, generation, remoteNodeID, ctx, command, raw))
-            continue;
-
-        ++responded;
-        if (ctx.length < 9)
-            continue;
-
-        const UInt8 response = ctx.bytes[0];
-        if (response != 0x0c)
-            continue;
-
-        ++implemented;
-        std::cout << "        selector fb " << fb
-                  << ": current input plug="
-                  << static_cast<unsigned>(ctx.bytes[7])
-                  << " response=" << responseName(response) << '\n';
-    }
-
-    if (!implemented) {
-        std::cout << "        no implemented selector blocks found in IDs 0.."
-                  << kMaxFunctionBlockId << '\n';
-    }
-    std::cout << "    selector responses: " << responded
-              << ", implemented: " << implemented << '\n';
+    probeSelectors(device, generation, remoteNodeID, ctx, raw);
+    probeFeatures(device, generation, remoteNodeID, ctx, raw);
     std::cout << "    note: this probe sends AV/C STATUS only; it performs no CONTROL writes\n";
 
     (*responseSpace)->TurnOffNotification(responseSpace);
@@ -241,15 +299,14 @@ int main(int argc, char** argv) {
         }
     }
 
-    std::cout << "macfw mixerprobe — read-only FW410 AV/C mixer selector probe\n\n";
-
+    std::cout << "macfw mixerprobe — read-only FW410 AV/C mixer probe\n\n";
     CFMutableDictionaryRef matching = IOServiceMatching("IOFireWireUnit");
     if (!matching) return 1;
 
     io_iterator_t iterator = IO_OBJECT_NULL;
-    kern_return_t kr = IOServiceGetMatchingServices(kIOMainPortDefault,
-                                                    matching, &iterator);
-    if (kr != KERN_SUCCESS) return 1;
+    if (IOServiceGetMatchingServices(kIOMainPortDefault,
+                                     matching, &iterator) != KERN_SUCCESS)
+        return 1;
 
     bool found = false;
     io_registry_entry_t service = IO_OBJECT_NULL;
@@ -262,10 +319,9 @@ int main(int argc, char** argv) {
 
         IOCFPlugInInterface** plugin = nullptr;
         SInt32 score = 0;
-        kr = IOCreatePlugInInterfaceForService(service,
-                                               kIOFireWireLibTypeID,
-                                               kIOCFPlugInInterfaceID,
-                                               &plugin, &score);
+        const kern_return_t kr = IOCreatePlugInInterfaceForService(
+            service, kIOFireWireLibTypeID, kIOCFPlugInInterfaceID,
+            &plugin, &score);
         if (kr != KERN_SUCCESS || !plugin) {
             IOObjectRelease(service);
             continue;
@@ -273,8 +329,7 @@ int main(int argc, char** argv) {
 
         IOFireWireLibDeviceRef device = nullptr;
         const HRESULT hr = (*plugin)->QueryInterface(
-            plugin,
-            CFUUIDGetUUIDBytes(kIOFireWireDeviceInterfaceID),
+            plugin, CFUUIDGetUUIDBytes(kIOFireWireDeviceInterfaceID),
             reinterpret_cast<LPVOID*>(&device));
         if (hr != 0 || !device) {
             IODestroyPlugInInterface(plugin);
@@ -286,7 +341,6 @@ int main(int argc, char** argv) {
         UInt16 nodeID = 0;
         (*device)->GetBusGeneration(device, &generation);
         (*device)->GetRemoteNodeID(device, generation, &nodeID);
-
         std::cout << "FW410 operational unit:\n";
         std::cout << "    generation: " << generation << '\n';
         std::cout << "    remote node: 0x" << std::hex << nodeID
