@@ -1,6 +1,7 @@
 #include <AudioUnit/AudioUnit.h>
 #include <CoreAudio/CoreAudio.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <AvailabilityMacros.h>
 
 #include <atomic>
 #include <cstdint>
@@ -9,6 +10,12 @@
 #include <vector>
 
 namespace {
+#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 120000
+constexpr AudioObjectPropertyElement kMainElement = kAudioObjectPropertyElementMain;
+#else
+constexpr AudioObjectPropertyElement kMainElement = kAudioObjectPropertyElementMaster;
+#endif
+
 std::string statusText(OSStatus s) {
     char t[5] = {};
     const UInt32 u = static_cast<UInt32>(s);
@@ -82,7 +89,7 @@ int main() {
     AudioDeviceID device = kAudioObjectUnknown;
     AudioObjectPropertyAddress addr{kAudioHardwarePropertyDefaultInputDevice,
                                     kAudioObjectPropertyScopeGlobal,
-                                    kAudioObjectPropertyElementMaster};
+                                    kMainElement};
     UInt32 size = sizeof(device);
     err = AudioObjectGetPropertyData(kAudioObjectSystemObject, &addr, 0, nullptr, &size, &device);
     if (err != noErr) { std::cerr << "default input: " << statusText(err) << '\n'; return 1; }
