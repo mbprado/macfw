@@ -20,13 +20,15 @@ lib/
 │   ├── cmp.h
 │   ├── firewire_device.h
 │   ├── isoch_allocation.h
-│   └── pcm_buffer.h
+│   ├── pcm_buffer.h
+│   └── pcm_ring_buffer.h
 ├── src/
 │   ├── amdtp_receive_ring.cpp
 │   ├── amdtp_transmit_ring.cpp
 │   ├── cmp.cpp
 │   ├── firewire_device.cpp
 │   ├── isoch_allocation.cpp
+│   ├── pcm_ring_buffer.cpp
 │   └── smoke.cpp
 └── Makefile
 ```
@@ -39,6 +41,7 @@ lib/
 - reusable FireWire device/session, CMP/IRM and AMDTP RX/TX transport
 - callback-free prebuilt 48 kHz playback ring
 - reusable interleaved PCM-buffer packetization path
+- single-producer/single-consumer PCM ring buffer for continuous sources
 - standalone compile/smoke check
 
 ## PCM playback contract
@@ -61,6 +64,21 @@ The diagnostic `createTone48k()` factory now generates a temporary PCM buffer
 and passes it through this same PCM packetization path, so the tone test also
 regresses the generic PCM implementation.
 
+## Continuous-source buffer
+
+`PcmRingBuffer` is the producer/consumer layer that will sit between the future
+CoreAudio-facing code and the AMDTP packet engine. It stores interleaved frames,
+tracks absolute produced/consumed frame counters, supports wraparound, reports
+available/free frames, and zero-fills consumer underruns while counting the
+number of silenced frames.
+
+The design follows the same separation used by Linux FireWire AMDTP: PCM buffer
+position/accounting is kept independent from the isochronous packet queue, and
+the AM824 layer consumes PCM frames as packets are prepared. The macOS transport
+still uses the proven callback-free prebuilt NuDCL ring; dynamic packet refill is
+the next transport milestone and will be connected only after the PCM ring
+semantics are validated independently.
+
 Run:
 
 ```bash
@@ -68,12 +86,20 @@ cd fw410/lib
 make check
 ```
 
-Then validate the transport with the existing playback tool:
+Then validate the transport with the existing playback tools:
 
 ```bash
 cd ../tools/transport/isoplayback
 make
 ./isoplayback --execute --tone-output 1
+```
+
+or the direct PCM-buffer test:
+
+```bash
+cd ../pcmbufferplayback
+make
+./pcmbufferplayback --execute
 ```
 
 ## Planned extraction order
