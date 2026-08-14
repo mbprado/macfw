@@ -99,8 +99,6 @@ static bool transact(IOFireWireLibDeviceRef device,
 }
 
 static std::array<UInt8,16> plugInputCommand(const std::array<UInt8,6>& addr) {
-    // BridgeCo PLUG INFO extension, info type 0x05 = plug input.
-    // Address mapping follows Linux avc_bridgeco_fill_extension_addr().
     return {
         0x01, addr[0], 0x02, 0xc0,
         addr[1], addr[2], addr[3], addr[4], addr[5],
@@ -120,6 +118,13 @@ static const char* modeName(UInt8 m) {
         default: return "unknown";
     }
 }
+static const char* subunitTypeName(UInt8 t) {
+    switch (t) {
+        case 0x01: return "Audio";
+        case 0x0c: return "Music";
+        default: return "unknown";
+    }
+}
 static const char* fbTypeName(UInt8 t) {
     switch (t) {
         case 0x80: return "selector";
@@ -131,23 +136,37 @@ static const char* fbTypeName(UInt8 t) {
 }
 
 static void printAddress(const UInt8* a, std::size_t n) {
-    if (n < 5) {
+    if (n < 4) {
         printBytes(a, static_cast<UInt32>(n));
         return;
     }
-    std::cout << "dir=" << dirName(a[0])
-              << " mode=" << modeName(a[1]);
+
+    std::cout << "dir=" << dirName(a[0]) << " mode=" << modeName(a[1]);
+
     if (a[1] == 0x00) {
         std::cout << " unit-type=0x" << std::hex << static_cast<unsigned>(a[2])
                   << std::dec << " plug=" << static_cast<unsigned>(a[3]);
-    } else if (a[1] == 0x01) {
-        std::cout << " subunit=0x" << std::hex << static_cast<unsigned>(a[2])
-                  << std::dec << " plug=" << static_cast<unsigned>(a[3]);
-    } else if (a[1] == 0x02) {
-        std::cout << " type=" << fbTypeName(a[2])
-                  << "(0x" << std::hex << static_cast<unsigned>(a[2]) << std::dec << ')'
-                  << " fb=" << static_cast<unsigned>(a[3])
+        return;
+    }
+
+    if (a[1] == 0x01) {
+        if (n < 5) { std::cout << " truncated"; return; }
+        std::cout << ' ' << subunitTypeName(a[2])
+                  << "-subunit=" << static_cast<unsigned>(a[3])
                   << " plug=" << static_cast<unsigned>(a[4]);
+        return;
+    }
+
+    if (a[1] == 0x02) {
+        // BridgeCo function-block source address is seven bytes:
+        // dir, mode, subunit-type, subunit-id, fb-type, fb-id, plug-id.
+        if (n < 7) { std::cout << " truncated"; return; }
+        std::cout << ' ' << subunitTypeName(a[2])
+                  << "-subunit=" << static_cast<unsigned>(a[3])
+                  << ' ' << fbTypeName(a[4]) << "-fb="
+                  << static_cast<unsigned>(a[5])
+                  << " plug=" << static_cast<unsigned>(a[6]);
+        return;
     }
 }
 
@@ -163,19 +182,17 @@ static bool queryAndPrint(IOFireWireLibDeviceRef device,
     if (ctx.length < 1 || ctx.bytes[0] != 0x0c) return false;
 
     std::cout << "        " << label << " <- ";
-    if (ctx.length >= 15) {
-        // Linux copies the BridgeCo source address from response bytes 10+.
+    if (ctx.length >= 14)
         printAddress(ctx.bytes.data() + 10, ctx.length - 10);
-    } else {
+    else
         std::cout << "short response";
-    }
     std::cout << '\n';
     return true;
 }
 
 static void scanUnit(IOFireWireLibDeviceRef device, UInt32 gen, UInt16 node,
                      ResponseContext& ctx, bool raw) {
-    std::cout << "    BridgeCo unit plug-input topology (read-only):\n";
+    std::cout << "    Unit plug-input topology:\n";
     for (UInt8 dir = 0; dir <= 1; ++dir) {
         for (UInt8 unitType = 0; unitType <= 2; ++unitType) {
             for (UInt8 plug = 0; plug < 16; ++plug) {
@@ -189,13 +206,15 @@ static void scanUnit(IOFireWireLibDeviceRef device, UInt32 gen, UInt16 node,
     }
 }
 
-static void scanMusicSubunit(IOFireWireLibDeviceRef device, UInt32 gen, UInt16 node,
-                             ResponseContext& ctx, bool raw) {
-    std::cout << "    BridgeCo Music Subunit plug-input topology (read-only):\n";
+static void scanSubunit(IOFireWireLibDeviceRef device, UInt32 gen, UInt16 node,
+                        ResponseContext& ctx, UInt8 subunitByte,
+                        const char* name, bool raw) {
+    std::cout << "    " << name << " Subunit plug-input topology:\n";
     for (UInt8 dir = 0; dir <= 1; ++dir) {
         for (UInt8 plug = 0; plug < 16; ++plug) {
-            std::array<UInt8,6> addr = {0x60, dir, 0x01, plug, 0xff, 0xff};
-            const std::string label = std::string(dirName(dir)) + " MSU plug " + std::to_string(plug);
+            std::array<UInt8,6> addr = {subunitByte, dir, 0x01, plug, 0xff, 0xff};
+            const std::string label = std::string(dirName(dir)) + ' ' + name +
+                " plug " + std::to_string(plug);
             queryAndPrint(device, gen, node, ctx, label, addr, raw);
         }
     }
@@ -203,15 +222,13 @@ static void scanMusicSubunit(IOFireWireLibDeviceRef device, UInt32 gen, UInt16 n
 
 static void scanFunctionBlocks(IOFireWireLibDeviceRef device, UInt32 gen, UInt16 node,
                                ResponseContext& ctx, bool raw) {
-    std::cout << "    BridgeCo Audio function-block plug-input topology (read-only):\n";
-    const std::array<UInt8,2> types = {0x80, 0x81};
+    std::cout << "    Audio function-block plug-input topology:\n";
+    const std::array<UInt8,3> types = {0x80, 0x81, 0x82};
     for (UInt8 type : types) {
-        const unsigned maxFb = type == 0x80 ? 7 : 15;
+        const unsigned maxFb = type == 0x80 ? 7 : type == 0x81 ? 15 : 8;
         for (UInt8 dir = 0; dir <= 1; ++dir) {
             for (unsigned fb = 1; fb <= maxFb; ++fb) {
                 for (UInt8 plug = 0; plug < 4; ++plug) {
-                    // Audio subunit 0 = 0x08. Function-block address fields:
-                    // subunit, dir, mode=FUNCTION_BLOCK, fb type, fb id, plug id.
                     std::array<UInt8,6> addr = {
                         0x08, dir, 0x02, type,
                         static_cast<UInt8>(fb), plug
@@ -248,7 +265,8 @@ static bool runProbe(IOFireWireLibDeviceRef device, UInt32 generation,
     }
 
     scanUnit(device, generation, remoteNodeID, ctx, raw);
-    scanMusicSubunit(device, generation, remoteNodeID, ctx, raw);
+    scanSubunit(device, generation, remoteNodeID, ctx, 0x08, "Audio", raw);
+    scanSubunit(device, generation, remoteNodeID, ctx, 0x60, "Music", raw);
     scanFunctionBlocks(device, generation, remoteNodeID, ctx, raw);
 
     std::cout << "    note: STATUS queries only; no routing or mixer values are changed\n";
