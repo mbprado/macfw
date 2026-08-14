@@ -2,6 +2,7 @@
 #include "macfw/am824_playback.h"
 #include "macfw/firewire_device.h"
 #include "macfw/pcm_buffer.h"
+#include "macfw/pcm_ring_buffer.h"
 #include <IOKit/firewire/IOFireWireLibIsoch.h>
 #include <cstddef>
 #include <cstdint>
@@ -16,6 +17,14 @@ public:
         std::uint8_t dbc = 0;
         std::uint16_t syt = 0xffffu;
         bool dataBearing = false;
+    };
+
+    struct RefillResult {
+        std::size_t packetsVisited = 0;
+        std::size_t dataPacketsRefilled = 0;
+        std::size_t framesRequested = 0;
+        std::size_t framesFromBuffer = 0;
+        std::size_t framesSilenced = 0;
     };
 
     AmdtpTransmitRing() = default;
@@ -43,6 +52,15 @@ public:
                                            double frequencyHz = 1000.0,
                                            double amplitude = 131072.0,
                                            std::size_t packetCount = 128);
+
+    // Replace only PCM payload words in already-built send slots. CIP timing,
+    // DBC/SYT and DCL structure are left untouched. This is intentionally a
+    // data-buffer update, not a running-DCL metadata update. Callers must only
+    // refill slots known not to be in the DMA consumer's active window.
+    // The PCM ring must expose exactly the FW410's 10 playback positions.
+    RefillResult refillPcm48k(PcmRingBuffer& pcm,
+                              std::size_t firstPacket,
+                              std::size_t packetCount);
 
     explicit operator bool() const { return localPort_ != nullptr; }
     IOFireWireLibLocalIsochPortRef nativeLocalPort() const { return localPort_; }
