@@ -5,7 +5,7 @@ CPPFLAGS ?= -Iinclude
 FRAMEWORKS := -framework IOKit -framework CoreFoundation
 
 LIB := libmacfw.a
-LIB_OBJS := src/firewire_device.o src/cmp.o src/isoch_allocation.o src/amdtp_receive_ring.o src/amdtp_transmit_ring.o
+LIB_OBJS := src/firewire_device.o src/cmp.o src/isoch_allocation.o src/amdtp_receive_ring.o src/amdtp_transmit_ring.o src/pcm_ring_buffer.o
 
 all: $(LIB) smoke
 
@@ -27,8 +27,11 @@ src/amdtp_receive_ring.o: src/amdtp_receive_ring.cpp include/macfw/amdtp_receive
 src/amdtp_transmit_ring.o: src/amdtp_transmit_ring.cpp include/macfw/amdtp_transmit_ring.h include/macfw/am824_playback.h include/macfw/pcm_buffer.h include/macfw/firewire_device.h
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
-smoke: src/smoke.cpp include/macfw/channel_map.h include/macfw/am824.h include/macfw/amdtp_packet.h include/macfw/pcm_buffer.h
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) src/smoke.cpp -o $@
+src/pcm_ring_buffer.o: src/pcm_ring_buffer.cpp include/macfw/pcm_ring_buffer.h
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+smoke: src/smoke.cpp include/macfw/channel_map.h include/macfw/am824.h include/macfw/amdtp_packet.h include/macfw/pcm_buffer.h include/macfw/pcm_ring_buffer.h
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) src/smoke.cpp src/pcm_ring_buffer.cpp -o $@
 
 check: $(LIB) smoke
 	./smoke
