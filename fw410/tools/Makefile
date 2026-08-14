@@ -1,25 +1,26 @@
-CATEGORIES := device transport control
-LEGACY := avcprobe cmpconnect cmpprobe fcpprobe formatprobe fwboot fwprobe isocapture isoduplex isoplayback mixerprobe plugprobe streamprobe topologyprobe headphoneprobe
+CONTROL := avcprobe fcpprobe mixerprobe plugprobe topologyprobe headphoneprobe
+TRANSPORT := cmpconnect cmpprobe formatprobe isocapture isoduplex isoplayback streamprobe
+DEVICE := fwboot fwprobe
+TOOLS := $(CONTROL) $(TRANSPORT) $(DEVICE)
 
-.PHONY: all clean $(CATEGORIES) $(LEGACY)
+.PHONY: all clean control transport device $(TOOLS)
 
-all: $(CATEGORIES)
+all: control transport device
+control:
+	$(MAKE) -C control
+transport:
+	$(MAKE) -C transport
+device:
+	$(MAKE) -C device
 
-device transport control:
-	@echo "==> building $@ tools"
-	$(MAKE) -C $@
-
-fwboot fwprobe:
-	$(MAKE) -C device $@
-
-cmpconnect cmpprobe formatprobe isocapture isoduplex isoplayback streamprobe:
-	$(MAKE) -C transport $@
-
-avcprobe fcpprobe mixerprobe plugprobe topologyprobe headphoneprobe:
-	$(MAKE) -C control $@
+$(CONTROL):
+	$(MAKE) -C control/$@
+$(TRANSPORT):
+	$(MAKE) -C transport/$@
+$(DEVICE):
+	$(MAKE) -C device/$@
 
 clean:
-	@for category in $(CATEGORIES); do \
-		echo "==> cleaning $$category tools"; \
-		$(MAKE) -C $$category clean || exit $$?; \
-	done
+	$(MAKE) -C control clean
+	$(MAKE) -C transport clean
+	$(MAKE) -C device clean
