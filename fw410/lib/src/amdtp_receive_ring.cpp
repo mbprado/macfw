@@ -152,8 +152,10 @@ AmdtpReceiveRing AmdtpReceiveRing::create(FireWireDevice& device,
          static_cast<IOByteCount>(ring.payloadBytes_)}
     };
 
+    // Match the known-good duplex implementation: the receive port is not
+    // armed with a SY-bits event. The isoch channel start drives the RX DCLs.
     ring.localPort_ = (*native)->CreateLocalIsochPort(native, false, program,
-        kFWDCLSyBitsEvent, 0, 0, nullptr, 0, mappedRanges, 2,
+        0, 0, 0, nullptr, 0, mappedRanges, 2,
         CFUUIDGetUUIDBytes(kIOFireWireLocalIsochPortInterfaceID));
     if (!ring.localPort_) {
         ring.reset();
