@@ -1,16 +1,16 @@
 CXX := clang++
 CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic
-CPPFLAGS := -I../../lib/include
+CPPFLAGS := -I../../../lib/include
 FRAMEWORKS := -framework IOKit -framework CoreFoundation
 TARGET := cmpconnect
-LIB := ../../lib/libmacfw.a
+LIB := ../../../lib/libmacfw.a
 
 .PHONY: all clean
 
 all: $(TARGET)
 
 $(LIB):
-	$(MAKE) -C ../../lib libmacfw.a
+	$(MAKE) -C ../../../lib libmacfw.a
 
 $(TARGET): main.cpp $(LIB)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) main.cpp $(LIB) $(FRAMEWORKS) -o $(TARGET)
