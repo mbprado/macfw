@@ -181,6 +181,7 @@ bool run(bool execute, bool raw, UInt32 cycleLead) {
     bool opConnected = false;
     bool ipConnected = false;
     bool ok = false;
+    UInt32 startCycleTime = 0;
 
     if ((*native)->AddCallbackDispatcherToRunLoop(native, CFRunLoopGetCurrent()) == kIOReturnSuccess)
         callbackDispatcher = true;
@@ -205,7 +206,6 @@ bool run(bool execute, bool raw, UInt32 cycleLead) {
         goto cleanup;
     ipConnected = true;
 
-    UInt32 startCycleTime = 0;
     if ((*native)->GetCycleTime(native, &startCycleTime) == kIOReturnSuccess) {
         const UInt32 startNow = (startCycleTime >> 12) & 0x1fffu;
         const UInt32 forward = (firstCycle - startNow) & 0x1fffu;
