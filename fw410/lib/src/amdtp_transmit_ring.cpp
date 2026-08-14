@@ -1,5 +1,6 @@
 #include "macfw/amdtp_transmit_ring.h"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <new>
@@ -28,6 +29,20 @@ std::size_t dataFrameCapacity(std::size_t packetCount) {
         if ((i & 3u) != 3u)
             ++dataPackets;
     return dataPackets * am824::kPlayback48kEventsPerDataPacket;
+}
+
+void putPcmWords(std::uint8_t* payload, const std::int32_t* frames) {
+    for (std::size_t event = 0; event < am824::kPlayback48kEventsPerDataPacket; ++event) {
+        for (std::size_t channel = 0; channel < am824::kPlayback48kPcmPositions; ++channel) {
+            const std::int32_t sample = clipPcm24(
+                frames[event * am824::kPlayback48kPcmPositions + channel]);
+            const std::uint32_t mbla =
+                0x40000000u | (static_cast<std::uint32_t>(sample) & 0x00ffffffu);
+            const std::size_t byteOffset =
+                8 + (event * am824::kPlayback48kPositions + channel) * 4;
+            am824::putBe32Playback(payload + byteOffset, mbla);
+        }
+    }
 }
 } // namespace
 
@@ -87,6 +102,37 @@ AmdtpTransmitRing AmdtpTransmitRing::createTone48k(FireWireDevice& device,
         samples.data(), frames, am824::kPlayback48kPcmPositions, false
     };
     return createPcm48k(device, firstCycle, pcm, packetCount);
+}
+
+AmdtpTransmitRing::RefillResult AmdtpTransmitRing::refillPcm48k(
+    PcmRingBuffer& pcm, std::size_t firstPacket, std::size_t packetCount) {
+    RefillResult result{};
+    if (!storage_ || !slots_ || packetCount_ == 0 || !pcm.valid() ||
+        pcm.channelCount() != am824::kPlayback48kPcmPositions ||
+        firstPacket >= packetCount_ || packetCount == 0)
+        return result;
+
+    const std::size_t end = std::min(packetCount_, firstPacket + packetCount);
+    std::int32_t frames[am824::kPlayback48kEventsPerDataPacket *
+                        am824::kPlayback48kPcmPositions]{};
+
+    for (std::size_t i = firstPacket; i < end; ++i) {
+        ++result.packetsVisited;
+        if (!slots_[i].dataBearing) continue;
+
+        const auto rr = pcm.read(frames, am824::kPlayback48kEventsPerDataPacket);
+        result.framesRequested += rr.framesRequested;
+        result.framesFromBuffer += rr.framesFromBuffer;
+        result.framesSilenced += rr.framesSilenced;
+        putPcmWords(storage_[i].payload, frames);
+        ++result.dataPacketsRefilled;
+    }
+
+    // Payload bytes live in the same mmap-backed range already locked for the
+    // local isoch port. We did not alter DCL ranges, sizes, branches or headers;
+    // publish completed stores before the caller lets DMA reach these slots.
+    std::atomic_thread_fence(std::memory_order_release);
+    return result;
 }
 
 AmdtpTransmitRing AmdtpTransmitRing::create48k(FireWireDevice& device,
