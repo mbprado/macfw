@@ -1,14 +1,16 @@
 #include "macfw/am824.h"
+#include "macfw/am824_playback.h"
 #include "macfw/amdtp_receive_ring.h"
-#include "macfw/amdtp_transmit_ring.h"
 #include "macfw/cmp.h"
 #include "macfw/firewire_device.h"
 #include "macfw/isoch_allocation.h"
 
 #include <CoreFoundation/CoreFoundation.h>
+#include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <string>
+#include <sys/mman.h>
 
 namespace {
 
@@ -17,6 +19,153 @@ constexpr UInt32 kPlaybackMaxPacket48k = 360;
 constexpr std::size_t kCaptureSlots = 256;
 constexpr std::size_t kPlaybackSlots = 128;
 constexpr UInt32 kDefaultCycleLead = 256;
+
+class ManualTxRing {
+public:
+    struct PlaybackSlot {
+        UInt32 status = 0;
+        UInt32 timestamp = 0;
+        UInt8 payload[kPlaybackMaxPacket48k]{};
+    };
+
+    ~ManualTxRing() { reset(); }
+    ManualTxRing(const ManualTxRing&) = delete;
+    ManualTxRing& operator=(const ManualTxRing&) = delete;
+    ManualTxRing() = default;
+
+    bool init(macfw::FireWireDevice& device,
+              UInt32 firstCycle,
+              std::size_t packetCount) {
+        reset();
+
+        auto native = device.nativeHandle();
+        if (!native || packetCount == 0)
+            return false;
+
+        packetCount_ = packetCount;
+        mappedBytes_ = sizeof(PlaybackSlot) * packetCount_;
+        slots_ = static_cast<PlaybackSlot*>(mmap(
+            nullptr, mappedBytes_, PROT_READ | PROT_WRITE,
+            MAP_ANON | MAP_SHARED, -1, 0));
+        if (slots_ == MAP_FAILED) {
+            slots_ = nullptr;
+            reset();
+            return false;
+        }
+        std::memset(slots_, 0, mappedBytes_);
+
+        macfw::am824::Playback48kState state{};
+        for (std::size_t i = 0; i < packetCount_; ++i) {
+            const UInt32 cycle =
+                (firstCycle + static_cast<UInt32>(i)) & 0x1fffu;
+            const auto packet =
+                macfw::am824::buildPlayback48kSilence(cycle, state);
+            std::memcpy(slots_[i].payload,
+                        packet.bytes.data(), packet.length);
+            if (packet.dataBearing)
+                state.dbc = static_cast<std::uint8_t>(state.dbc + 8u);
+            state.phase =
+                static_cast<std::uint8_t>((state.phase + 1u) & 3u);
+        }
+
+        pool_ = (*native)->CreateNuDCLPool(
+            native,
+            static_cast<UInt32>(packetCount_),
+            CFUUIDGetUUIDBytes(kIOFireWireNuDCLPoolInterfaceID));
+        if (!pool_) {
+            reset();
+            return false;
+        }
+
+        (*pool_)->SetCurrentTagAndSync(pool_, 1, 0);
+
+        NuDCLRef first = nullptr;
+        NuDCLRef last = nullptr;
+
+        for (std::size_t i = 0; i < packetCount_; ++i) {
+            const IOByteCount packetBytes =
+                static_cast<IOByteCount>((i & 3u) == 3u
+                    ? 8u : kPlaybackMaxPacket48k);
+            IOVirtualRange range = {
+                reinterpret_cast<IOVirtualAddress>(slots_[i].payload),
+                packetBytes
+            };
+
+            auto dcl = (*pool_)->AllocateSendPacket(
+                pool_, nullptr, 1, &range);
+            if (!dcl) {
+                reset();
+                return false;
+            }
+
+            const NuDCLRef ref = reinterpret_cast<NuDCLRef>(dcl);
+            if (!first)
+                first = ref;
+            last = ref;
+        }
+
+        if (!first || !last ||
+            (*pool_)->SetDCLBranch(last, first) != kIOReturnSuccess) {
+            reset();
+            return false;
+        }
+
+        DCLCommand* program = (*pool_)->GetProgram(pool_);
+        if (!program) {
+            reset();
+            return false;
+        }
+
+        IOVirtualRange mapped = {
+            reinterpret_cast<IOVirtualAddress>(slots_),
+            static_cast<IOByteCount>(mappedBytes_)
+        };
+
+        localPort_ = (*native)->CreateLocalIsochPort(
+            native, true, program,
+            kFWDCLCycleEvent, firstCycle, 0x1fffu,
+            nullptr, 0,
+            &mapped, 1,
+            CFUUIDGetUUIDBytes(kIOFireWireLocalIsochPortInterfaceID));
+
+        if (!localPort_) {
+            reset();
+            return false;
+        }
+
+        return true;
+    }
+
+    IOFireWireLibLocalIsochPortRef nativeLocalPort() const {
+        return localPort_;
+    }
+
+    std::size_t packetCount() const { return packetCount_; }
+
+private:
+    void reset() {
+        if (localPort_) {
+            (*localPort_)->Release(localPort_);
+            localPort_ = nullptr;
+        }
+        if (pool_) {
+            (*pool_)->Release(pool_);
+            pool_ = nullptr;
+        }
+        if (slots_) {
+            munmap(slots_, mappedBytes_);
+            slots_ = nullptr;
+        }
+        mappedBytes_ = 0;
+        packetCount_ = 0;
+    }
+
+    PlaybackSlot* slots_ = nullptr;
+    std::size_t mappedBytes_ = 0;
+    std::size_t packetCount_ = 0;
+    IOFireWireLibNuDCLPoolRef pool_ = nullptr;
+    IOFireWireLibLocalIsochPortRef localPort_ = nullptr;
+};
 
 void dumpCapture(const macfw::AmdtpReceiveRing& ring, bool raw) {
     std::size_t touched = 0;
@@ -31,16 +180,19 @@ void dumpCapture(const macfw::AmdtpReceiveRing& ring, bool raw) {
         const auto packet = slot.packet();
         if (packet.length > 8) {
             ++dataBearing;
-            macfw::am824::accumulateCapture48k(packet.payload, packet.length, stats);
+            macfw::am824::accumulateCapture48k(
+                packet.payload, packet.length, stats);
         }
     }
 
     std::cout << "capture summary:\n";
-    std::cout << "    touched slots:      " << touched << " / " << ring.packetCount() << '\n';
+    std::cout << "    touched slots:      " << touched
+              << " / " << ring.packetCount() << '\n';
     std::cout << "    data-bearing slots: " << dataBearing << '\n';
 
     std::size_t shown = 0;
-    for (std::size_t i = 0; i < ring.packetCount() && shown < 16; ++i) {
+    for (std::size_t i = 0;
+         i < ring.packetCount() && shown < 16; ++i) {
         const auto& slot = ring.slot(i);
         if (!slot.touched())
             continue;
@@ -56,17 +208,20 @@ void dumpCapture(const macfw::AmdtpReceiveRing& ring, bool raw) {
         if (packet.hasCip()) {
             std::cout << " CIP{dbs=" << static_cast<unsigned>(cip.dbs)
                       << " dbc=" << static_cast<unsigned>(cip.dbc)
-                      << " fmt=0x" << std::hex << static_cast<unsigned>(cip.fmt)
+                      << " fmt=0x" << std::hex
+                      << static_cast<unsigned>(cip.fmt)
                       << " fdf=0x" << static_cast<unsigned>(cip.fdf)
                       << " syt=0x" << cip.syt << std::dec << "}";
         }
         std::cout << '\n';
 
         if (raw && packet.payload && packet.length) {
-            const std::size_t n = packet.length < 48 ? packet.length : 48;
+            const std::size_t n =
+                packet.length < 48 ? packet.length : 48;
             std::cout << "        raw:";
             for (std::size_t j = 0; j < n; ++j)
-                std::cout << ' ' << std::hex << std::setw(2) << std::setfill('0')
+                std::cout << ' ' << std::hex << std::setw(2)
+                          << std::setfill('0')
                           << static_cast<unsigned>(packet.payload[j]);
             std::cout << std::dec << std::setfill(' ') << '\n';
         }
@@ -92,26 +247,30 @@ bool run(bool execute, bool raw, UInt32 cycleLead) {
 
     std::cout << "FW410 operational unit:\n";
     std::cout << "    generation: " << device.generation() << '\n';
-    std::cout << "    remote node: 0x" << std::hex << device.nodeID() << std::dec << '\n';
+    std::cout << "    remote node: 0x" << std::hex
+              << device.nodeID() << std::dec << '\n';
 
     if (device.open() != kIOReturnSuccess) {
         std::cout << "open failed\n";
         return false;
     }
 
-    std::uint32_t opcr0 = 0, ipcr0 = 0;
+    std::uint32_t opcr0 = 0;
+    std::uint32_t ipcr0 = 0;
     if (macfw::cmp::readOpcr0(device, opcr0) != kIOReturnSuccess ||
         macfw::cmp::readIpcr0(device, ipcr0) != kIOReturnSuccess) {
         std::cout << "PCR read failed\n";
         return false;
     }
 
-    std::cout << "preflight (48 kHz reusable callback-free playback):\n";
+    std::cout << "preflight (48 kHz manual-TX A/B playback):\n";
     std::cout << "    oPCR[0]: 0x" << std::hex << opcr0 << std::dec << '\n';
     std::cout << "    iPCR[0]: 0x" << std::hex << ipcr0 << std::dec << '\n';
-    std::cout << "    capture max packet:  " << kCaptureMaxPacket48k << " bytes\n";
-    std::cout << "    playback max packet: " << kPlaybackMaxPacket48k << " bytes\n";
-    std::cout << "    playback: reusable 128-cycle AM824 silence ring\n";
+    std::cout << "    capture max packet:  "
+              << kCaptureMaxPacket48k << " bytes\n";
+    std::cout << "    playback max packet: "
+              << kPlaybackMaxPacket48k << " bytes\n";
+    std::cout << "    playback: old manual NuDCL TX construction\n";
     std::cout << "    start lead: " << cycleLead << " cycles\n";
 
     if (!macfw::cmp::ready(macfw::cmp::decodePcr(opcr0)) ||
@@ -126,47 +285,62 @@ bool run(bool execute, bool raw, UInt32 cycleLead) {
         std::cout << "GetCycleTime failed\n";
         return false;
     }
+
     const UInt32 now = (cycleTime >> 12) & 0x1fffu;
     const UInt32 firstCycle = (now + cycleLead) & 0x1fffu;
 
     if (!execute) {
         std::cout << "TX plan (dry run):\n";
-        std::cout << "    cycle timer: 0x" << std::hex << cycleTime << std::dec << '\n';
+        std::cout << "    cycle timer: 0x" << std::hex
+                  << cycleTime << std::dec << '\n';
         std::cout << "    current cycle: " << now << '\n';
         std::cout << "    planned first TX cycle: " << firstCycle << '\n';
         macfw::am824::Playback48kState state{};
         for (std::size_t i = 0; i < 16; ++i) {
-            const UInt32 cycle = (firstCycle + static_cast<UInt32>(i)) & 0x1fffu;
-            const auto p = macfw::am824::buildPlayback48kSilence(cycle, state);
-            std::cout << "    packet " << i << ": cycle=" << cycle
+            const UInt32 cycle =
+                (firstCycle + static_cast<UInt32>(i)) & 0x1fffu;
+            const auto p =
+                macfw::am824::buildPlayback48kSilence(cycle, state);
+            std::cout << "    packet " << i
+                      << ": cycle=" << cycle
                       << " len=" << p.length
                       << " dbc=" << static_cast<unsigned>(p.dbc)
                       << " syt=0x" << std::hex << p.syt << std::dec
-                      << (p.dataBearing ? " SILENCE" : " NODATA") << '\n';
+                      << (p.dataBearing ? " SILENCE" : " NODATA")
+                      << '\n';
             if (p.dataBearing)
                 state.dbc = static_cast<std::uint8_t>(state.dbc + 8u);
-            state.phase = static_cast<std::uint8_t>((state.phase + 1u) & 3u);
+            state.phase =
+                static_cast<std::uint8_t>((state.phase + 1u) & 3u);
         }
         std::cout << "status: PASS - dry run only; nothing transmitted\n";
         std::cout << "to execute: ./isoplayback --execute [--raw] [--cycle-lead N]\n";
         return true;
     }
 
-    auto rx = macfw::AmdtpReceiveRing::create(device, kCaptureSlots, kCaptureMaxPacket48k);
-    auto tx = macfw::AmdtpTransmitRing::createSilence48k(device, firstCycle, kPlaybackSlots);
+    auto rx = macfw::AmdtpReceiveRing::create(
+        device, kCaptureSlots, kCaptureMaxPacket48k);
+    ManualTxRing tx;
+    const bool txOk = tx.init(device, firstCycle, kPlaybackSlots);
     auto capture = macfw::IsochAllocation::create(
-        device, macfw::IsochAllocation::Direction::DeviceToHost, kCaptureMaxPacket48k);
+        device,
+        macfw::IsochAllocation::Direction::DeviceToHost,
+        kCaptureMaxPacket48k);
     auto playback = macfw::IsochAllocation::create(
-        device, macfw::IsochAllocation::Direction::HostToDevice, kPlaybackMaxPacket48k);
+        device,
+        macfw::IsochAllocation::Direction::HostToDevice,
+        kPlaybackMaxPacket48k);
 
-    if (!rx || !tx || !capture || !playback) {
+    if (!rx || !txOk || !capture || !playback) {
         std::cout << "transport object creation failed\n";
         return false;
     }
 
     (*capture.nativeChannel())->AddListener(
         capture.nativeChannel(),
-        reinterpret_cast<IOFireWireLibIsochPortRef>(rx.nativeLocalPort()));
+        reinterpret_cast<IOFireWireLibIsochPortRef>(
+            rx.nativeLocalPort()));
+
     if (playback.bindHostToDeviceTalkerFirst(
             tx.nativeLocalPort()) != kIOReturnSuccess) {
         std::cout << "playback port binding failed\n";
@@ -180,35 +354,81 @@ bool run(bool execute, bool raw, UInt32 cycleLead) {
     bool playbackStarted = false;
     bool opConnected = false;
     bool ipConnected = false;
-    bool ok = false;
-    UInt32 startCycleTime = 0;
 
-    if ((*native)->AddCallbackDispatcherToRunLoop(native, CFRunLoopGetCurrent()) == kIOReturnSuccess)
+    auto cleanup = [&]() {
+        if (playbackStarted)
+            (*playback.nativeChannel())->Stop(playback.nativeChannel());
+        if (captureStarted)
+            (*capture.nativeChannel())->Stop(capture.nativeChannel());
+
+        if (ipConnected) {
+            const auto kr = macfw::cmp::restore(
+                device, macfw::cmp::kIpcr0AddressLo, ipcr0);
+            std::cout << "restore iPCR[0]: "
+                      << (kr == kIOReturnSuccess ? "success" : "failed")
+                      << '\n';
+        }
+        if (opConnected) {
+            const auto kr = macfw::cmp::restore(
+                device, macfw::cmp::kOpcr0AddressLo, opcr0);
+            std::cout << "restore oPCR[0]: "
+                      << (kr == kIOReturnSuccess ? "success" : "failed")
+                      << '\n';
+        }
+
+        playback.release();
+        capture.release();
+
+        if (notifications)
+            (*native)->TurnOffNotification(native);
+        if (isochDispatcher)
+            (*native)->RemoveIsochCallbackDispatcherFromRunLoop(native);
+        if (callbackDispatcher)
+            (*native)->RemoveCallbackDispatcherFromRunLoop(native);
+    };
+
+    if ((*native)->AddCallbackDispatcherToRunLoop(
+            native, CFRunLoopGetCurrent()) == kIOReturnSuccess)
         callbackDispatcher = true;
-    if ((*native)->AddIsochCallbackDispatcherToRunLoop(native, CFRunLoopGetCurrent()) == kIOReturnSuccess)
+    if ((*native)->AddIsochCallbackDispatcherToRunLoop(
+            native, CFRunLoopGetCurrent()) == kIOReturnSuccess)
         isochDispatcher = true;
     if ((*native)->TurnOnNotification(native))
         notifications = true;
 
-    if (capture.allocate() != kIOReturnSuccess || playback.allocate() != kIOReturnSuccess) {
+    if (capture.allocate() != kIOReturnSuccess ||
+        playback.allocate() != kIOReturnSuccess) {
         std::cout << "ISO resource allocation failed\n";
-        goto cleanup;
+        cleanup();
+        return false;
     }
 
     std::cout << "ISO resources:\n";
     std::cout << "    capture channel:  " << capture.channel() << '\n';
     std::cout << "    playback channel: " << playback.channel() << '\n';
 
-    if (macfw::cmp::connectOpcr0(device, opcr0, capture.channel(), capture.speed()) != kIOReturnSuccess)
-        goto cleanup;
+    if (macfw::cmp::connectOpcr0(
+            device, opcr0, capture.channel(), capture.speed())
+            != kIOReturnSuccess) {
+        cleanup();
+        return false;
+    }
     opConnected = true;
-    if (macfw::cmp::connectIpcr0(device, ipcr0, playback.channel()) != kIOReturnSuccess)
-        goto cleanup;
+
+    if (macfw::cmp::connectIpcr0(
+            device, ipcr0, playback.channel()) != kIOReturnSuccess) {
+        cleanup();
+        return false;
+    }
     ipConnected = true;
 
-    if ((*native)->GetCycleTime(native, &startCycleTime) == kIOReturnSuccess) {
-        const UInt32 startNow = (startCycleTime >> 12) & 0x1fffu;
-        const UInt32 forward = (firstCycle - startNow) & 0x1fffu;
+    UInt32 startCycleTime = 0;
+    if ((*native)->GetCycleTime(native, &startCycleTime)
+            == kIOReturnSuccess) {
+        const UInt32 startNow =
+            (startCycleTime >> 12) & 0x1fffu;
+        const UInt32 forward =
+            (firstCycle - startNow) & 0x1fffu;
         std::cout << "TX start timing:\n";
         std::cout << "    scheduled cycle: " << firstCycle << '\n';
         std::cout << "    current cycle:   " << startNow << '\n';
@@ -220,63 +440,46 @@ bool run(bool execute, bool raw, UInt32 cycleLead) {
                   << '\n';
     }
 
-    // Match the proven/Linux ordering: host playback first, then capture.
-    if ((*playback.nativeChannel())->Start(playback.nativeChannel()) != kIOReturnSuccess) {
+    if ((*playback.nativeChannel())->Start(
+            playback.nativeChannel()) != kIOReturnSuccess) {
         std::cout << "playback start failed\n";
-        goto cleanup;
+        cleanup();
+        return false;
     }
     playbackStarted = true;
 
-    if ((*capture.nativeChannel())->Start(capture.nativeChannel()) != kIOReturnSuccess) {
+    if ((*capture.nativeChannel())->Start(
+            capture.nativeChannel()) != kIOReturnSuccess) {
         std::cout << "capture start failed\n";
-        goto cleanup;
+        cleanup();
+        return false;
     }
     captureStarted = true;
 
-    std::cout << "duplex ISO: started (reusable prebuilt timed PCM silence)\n";
+    std::cout << "duplex ISO: started (manual old-style TX + reusable RX)\n";
     std::cout << "observation window: 2.0 s\n";
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 2.0, false);
 
     dumpCapture(rx, raw);
     std::cout << "\nplayback TX mode:\n";
+    std::cout << "    implementation:     manual old-style NuDCL A/B\n";
     std::cout << "    callback dependency: none\n";
     std::cout << "    dynamic updates:     none\n";
     std::cout << "    ring packets:        " << tx.packetCount() << '\n';
-    ok = true;
 
-cleanup:
-    if (playbackStarted)
-        (*playback.nativeChannel())->Stop(playback.nativeChannel());
-    if (captureStarted)
-        (*capture.nativeChannel())->Stop(capture.nativeChannel());
+    cleanup();
 
-    if (ipConnected) {
-        const auto kr = macfw::cmp::restore(device, macfw::cmp::kIpcr0AddressLo, ipcr0);
-        std::cout << "restore iPCR[0]: " << (kr == kIOReturnSuccess ? "success" : "failed") << '\n';
-    }
-    if (opConnected) {
-        const auto kr = macfw::cmp::restore(device, macfw::cmp::kOpcr0AddressLo, opcr0);
-        std::cout << "restore oPCR[0]: " << (kr == kIOReturnSuccess ? "success" : "failed") << '\n';
-    }
-
-    playback.release();
-    capture.release();
-
-    if (notifications)
-        (*native)->TurnOffNotification(native);
-    if (isochDispatcher)
-        (*native)->RemoveIsochCallbackDispatcherFromRunLoop(native);
-    if (callbackDispatcher)
-        (*native)->RemoveCallbackDispatcherFromRunLoop(native);
-
-    std::uint32_t opAfter = 0, ipAfter = 0;
+    std::uint32_t opAfter = 0;
+    std::uint32_t ipAfter = 0;
     if (macfw::cmp::readOpcr0(device, opAfter) == kIOReturnSuccess &&
         macfw::cmp::readIpcr0(device, ipAfter) == kIOReturnSuccess) {
         std::cout << "post-test PCR restore: "
-                  << ((opAfter == opcr0 && ipAfter == ipcr0) ? "PASS" : "FAIL") << '\n';
+                  << ((opAfter == opcr0 && ipAfter == ipcr0)
+                          ? "PASS" : "FAIL")
+                  << '\n';
     }
 
-    return ok;
+    return true;
 }
 
 } // namespace
@@ -294,7 +497,8 @@ int main(int argc, char** argv) {
             raw = true;
         else if (arg == "--cycle-lead" && i + 1 < argc) {
             try {
-                cycleLead = static_cast<UInt32>(std::stoul(argv[++i]));
+                cycleLead =
+                    static_cast<UInt32>(std::stoul(argv[++i]));
             } catch (...) {
                 std::cerr << "invalid --cycle-lead value\n";
                 return 64;
@@ -304,11 +508,13 @@ int main(int argc, char** argv) {
                 return 64;
             }
         } else {
-            std::cerr << "usage: ./isoplayback [--execute] [--raw] [--cycle-lead N]\n";
+            std::cerr
+                << "usage: ./isoplayback [--execute] [--raw] [--cycle-lead N]\n";
             return 64;
         }
     }
 
-    std::cout << "macfw isoplayback — reusable callback-free FW410 playback test\n\n";
+    std::cout
+        << "macfw isoplayback — manual-TX A/B isolation test\n\n";
     return run(execute, raw, cycleLead) ? 0 : 1;
 }
