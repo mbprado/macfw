@@ -1,6 +1,7 @@
 #include "macfw/am824.h"
 #include "macfw/amdtp_receive_ring.h"
 #include "macfw/amdtp_transmit_ring.h"
+#include "macfw/channel_map.h"
 #include "macfw/cmp.h"
 #include "macfw/firewire_device.h"
 #include "macfw/isoch_allocation.h"
@@ -81,7 +82,8 @@ void dumpCapture(const macfw::AmdtpReceiveRing& ring, bool raw) {
     macfw::am824::printCaptureStats(stats, std::cout);
 }
 
-bool run(bool execute, bool raw, UInt32 cycleLead) {
+bool run(bool execute, bool raw, UInt32 cycleLead,
+         std::size_t tonePcmPosition, const char* toneName) {
     auto device = macfw::FireWireDevice::findByProductName("FW 410");
     if (!device) {
         std::cout << "No operational FW 410 unit found.\n";
@@ -109,7 +111,13 @@ bool run(bool execute, bool raw, UInt32 cycleLead) {
     std::cout << "    iPCR[0]: 0x" << std::hex << ipcr0 << std::dec << '\n';
     std::cout << "    capture max packet:  " << kCaptureMaxPacket48k << " bytes\n";
     std::cout << "    playback max packet: " << kPlaybackMaxPacket48k << " bytes\n";
-    std::cout << "    playback: reusable 128-cycle AM824 silence ring\n";
+    std::cout << "    playback: reusable 128-cycle AM824 ring\n";
+    std::cout << "    TX content: ";
+    if (tonePcmPosition)
+        std::cout << "1 kHz tone on PCM position " << tonePcmPosition
+                  << " (" << toneName << ", ~-36 dBFS)\n";
+    else
+        std::cout << "digital silence\n";
     std::cout << "    start lead: " << cycleLead << " cycles\n";
 
     if (!macfw::cmp::ready(macfw::cmp::decodePcr(opcr0)) ||
@@ -132,6 +140,11 @@ bool run(bool execute, bool raw, UInt32 cycleLead) {
         std::cout << "    cycle timer: 0x" << std::hex << cycleTime << std::dec << '\n';
         std::cout << "    current cycle: " << now << '\n';
         std::cout << "    planned first TX cycle: " << firstCycle << '\n';
+        std::cout << "    mode: "
+                  << (tonePcmPosition ? "1 kHz test tone" : "digital silence") << '\n';
+        if (tonePcmPosition)
+            std::cout << "    target: PCM position " << tonePcmPosition
+                      << " -> " << toneName << '\n';
         macfw::am824::Playback48kState state{};
         for (std::size_t i = 0; i < 16; ++i) {
             const UInt32 cycle = (firstCycle + static_cast<UInt32>(i)) & 0x1fffu;
@@ -140,18 +153,24 @@ bool run(bool execute, bool raw, UInt32 cycleLead) {
                       << " len=" << p.length
                       << " dbc=" << static_cast<unsigned>(p.dbc)
                       << " syt=0x" << std::hex << p.syt << std::dec
-                      << (p.dataBearing ? " SILENCE" : " NODATA") << '\n';
+                      << (p.dataBearing ? (tonePcmPosition ? " TONE" : " SILENCE") : " NODATA")
+                      << '\n';
             if (p.dataBearing)
                 state.dbc = static_cast<std::uint8_t>(state.dbc + 8u);
             state.phase = static_cast<std::uint8_t>((state.phase + 1u) & 3u);
         }
         std::cout << "status: PASS - dry run only; nothing transmitted\n";
-        std::cout << "to execute: ./isoplayback --execute [--raw] [--cycle-lead N]\n";
+        std::cout << "to execute: ./isoplayback --execute [--raw] [--cycle-lead N] "
+                     "[--tone-channel 1..10 | --tone-output 1..8]\n";
         return true;
     }
 
     auto rx = macfw::AmdtpReceiveRing::create(device, kCaptureSlots, kCaptureMaxPacket48k);
-    auto tx = macfw::AmdtpTransmitRing::createSilence48k(device, firstCycle, kPlaybackSlots);
+    auto tx = tonePcmPosition
+        ? macfw::AmdtpTransmitRing::createTone48k(
+              device, firstCycle, tonePcmPosition, 1000.0, 131072.0, kPlaybackSlots)
+        : macfw::AmdtpTransmitRing::createSilence48k(
+              device, firstCycle, kPlaybackSlots);
     auto capture = macfw::IsochAllocation::create(
         device, macfw::IsochAllocation::Direction::DeviceToHost, kCaptureMaxPacket48k);
     auto playback = macfw::IsochAllocation::create(
@@ -227,13 +246,16 @@ bool run(bool execute, bool raw, UInt32 cycleLead) {
     }
     captureStarted = true;
 
-    std::cout << "duplex ISO: started (reusable prebuilt timed PCM silence)\n";
+    std::cout << "duplex ISO: started (reusable prebuilt "
+              << (tonePcmPosition ? "tone" : "silence") << ")\n";
     std::cout << "observation window: 2.0 s\n";
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 2.0, false);
 
     dumpCapture(rx, raw);
     std::cout << "\nplayback TX mode:\n";
     std::cout << "    implementation:     reusable AmdtpTransmitRing\n";
+    std::cout << "    content:            "
+              << (tonePcmPosition ? toneName : "digital silence") << '\n';
     std::cout << "    callback dependency: none\n";
     std::cout << "    dynamic updates:     none\n";
     std::cout << "    ring packets:        " << tx.packetCount() << '\n';
@@ -280,6 +302,8 @@ int main(int argc, char** argv) {
     bool execute = false;
     bool raw = false;
     UInt32 cycleLead = kDefaultCycleLead;
+    std::size_t tonePcmPosition = 0;
+    const char* toneName = "digital silence";
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -298,12 +322,49 @@ int main(int argc, char** argv) {
                 std::cerr << "--cycle-lead must be 1..8191\n";
                 return 64;
             }
+        } else if (arg == "--tone-channel" && i + 1 < argc) {
+            if (tonePcmPosition) {
+                std::cerr << "choose only one tone target\n";
+                return 64;
+            }
+            try {
+                tonePcmPosition = static_cast<std::size_t>(std::stoul(argv[++i]));
+            } catch (...) {
+                std::cerr << "invalid --tone-channel value\n";
+                return 64;
+            }
+            if (tonePcmPosition < 1 || tonePcmPosition > 10) {
+                std::cerr << "--tone-channel must be 1..10\n";
+                return 64;
+            }
+            const auto* channel = macfw::fw410::playbackChannelForPosition(tonePcmPosition);
+            toneName = channel ? channel->name : "unknown playback position";
+        } else if (arg == "--tone-output" && i + 1 < argc) {
+            if (tonePcmPosition) {
+                std::cerr << "choose only one tone target\n";
+                return 64;
+            }
+            std::size_t output = 0;
+            try {
+                output = static_cast<std::size_t>(std::stoul(argv[++i]));
+            } catch (...) {
+                std::cerr << "invalid --tone-output value\n";
+                return 64;
+            }
+            const auto* channel = macfw::fw410::playbackAnalogOutput(output);
+            if (!channel) {
+                std::cerr << "--tone-output must be 1..8\n";
+                return 64;
+            }
+            tonePcmPosition = channel->streamPosition;
+            toneName = channel->name;
         } else {
-            std::cerr << "usage: ./isoplayback [--execute] [--raw] [--cycle-lead N]\n";
+            std::cerr << "usage: ./isoplayback [--execute] [--raw] [--cycle-lead N] "
+                         "[--tone-channel 1..10 | --tone-output 1..8]\n";
             return 64;
         }
     }
 
     std::cout << "macfw isoplayback — reusable callback-free FW410 playback test\n\n";
-    return run(execute, raw, cycleLead) ? 0 : 1;
+    return run(execute, raw, cycleLead, tonePcmPosition, toneName) ? 0 : 1;
 }
