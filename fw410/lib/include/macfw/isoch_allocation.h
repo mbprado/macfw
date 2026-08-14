@@ -37,6 +37,13 @@ public:
         return channel_;
     }
 
+    IOFireWireLibRemoteIsochPortRef nativeRemotePort() const {
+        return remotePort_;
+    }
+
+    IOReturn bindHostToDeviceTalkerFirst(
+        IOFireWireLibLocalIsochPortRef localTalker);
+
 private:
     struct PortState { IsochAllocation* owner = nullptr; };
 

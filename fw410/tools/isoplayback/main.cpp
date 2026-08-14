@@ -167,9 +167,11 @@ bool run(bool execute, bool raw, UInt32 cycleLead) {
     (*capture.nativeChannel())->AddListener(
         capture.nativeChannel(),
         reinterpret_cast<IOFireWireLibIsochPortRef>(rx.nativeLocalPort()));
-    (*playback.nativeChannel())->SetTalker(
-        playback.nativeChannel(),
-        reinterpret_cast<IOFireWireLibIsochPortRef>(tx.nativeLocalPort()));
+    if (playback.bindHostToDeviceTalkerFirst(
+            tx.nativeLocalPort()) != kIOReturnSuccess) {
+        std::cout << "playback port binding failed\n";
+        return false;
+    }
 
     bool callbackDispatcher = false;
     bool isochDispatcher = false;

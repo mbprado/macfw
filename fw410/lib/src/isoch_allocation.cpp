@@ -130,11 +130,30 @@ IsochAllocation IsochAllocation::create(FireWireDevice& device,
 
     if (direction == Direction::DeviceToHost) {
         (*result.channel_)->SetTalker(result.channel_, basePort);
-    } else {
-        (*result.channel_)->AddListener(result.channel_, basePort);
     }
+    // HostToDevice listener attachment is intentionally deferred.
+    // The proven FW410 path attaches the local talker first.
 
     return result;
+}
+
+IOReturn IsochAllocation::bindHostToDeviceTalkerFirst(
+    IOFireWireLibLocalIsochPortRef localTalker) {
+
+    if (direction_ != Direction::HostToDevice ||
+        !channel_ || !remotePort_ || !localTalker)
+        return kIOReturnBadArgument;
+
+    auto localBase =
+        reinterpret_cast<IOFireWireLibIsochPortRef>(localTalker);
+    auto remoteBase =
+        reinterpret_cast<IOFireWireLibIsochPortRef>(remotePort_);
+
+    IOReturn kr = (*channel_)->SetTalker(channel_, localBase);
+    if (kr != kIOReturnSuccess)
+        return kr;
+
+    return (*channel_)->AddListener(channel_, remoteBase);
 }
 
 IOReturn IsochAllocation::allocate() {
