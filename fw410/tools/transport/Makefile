@@ -1,4 +1,4 @@
-TOOLS := cmpconnect cmpprobe coreaudiobridge formatprobe isocapture isoduplex isoplayback pcmbufferplayback pcmstreamplayback streamprobe
+TOOLS := cmpconnect cmpprobe coreaudiobridge coreaudiodiag formatprobe isocapture isoduplex isoplayback pcmbufferplayback pcmstreamplayback streamprobe
 .PHONY: all clean $(TOOLS)
 all: $(TOOLS)
 $(TOOLS):
