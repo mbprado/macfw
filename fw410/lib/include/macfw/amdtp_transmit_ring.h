@@ -1,6 +1,7 @@
 #pragma once
 #include "macfw/am824_playback.h"
 #include "macfw/firewire_device.h"
+#include "macfw/pcm_buffer.h"
 #include <IOKit/firewire/IOFireWireLibIsoch.h>
 #include <cstddef>
 #include <cstdint>
@@ -28,6 +29,14 @@ public:
                                               UInt32 firstCycle,
                                               std::size_t packetCount = 128);
 
+    // Packetize interleaved PCM into the FW410's 10 playback PCM positions.
+    // Missing channels/frames are zero-filled. Samples outside signed 24-bit
+    // range are clipped. The source is consumed during construction only.
+    static AmdtpTransmitRing createPcm48k(FireWireDevice& device,
+                                          UInt32 firstCycle,
+                                          const PcmBufferView& pcm,
+                                          std::size_t packetCount = 128);
+
     static AmdtpTransmitRing createTone48k(FireWireDevice& device,
                                            UInt32 firstCycle,
                                            std::size_t pcmPosition,
@@ -45,9 +54,7 @@ private:
     struct StorageSlot;
     static AmdtpTransmitRing create48k(FireWireDevice& device,
                                        UInt32 firstCycle,
-                                       std::size_t tonePcmPosition,
-                                       double frequencyHz,
-                                       double amplitude,
+                                       const PcmBufferView* pcm,
                                        std::size_t packetCount);
     void reset();
     void moveFrom(AmdtpTransmitRing&& other) noexcept;
