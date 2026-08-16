@@ -1,4 +1,4 @@
-TOOLS := avcprobe fcpprobe mixerprobe plugprobe topologyprobe headphoneprobe
+TOOLS := avcprobe fcpprobe mixerprobe plugprobe topologyprobe headphoneprobe rateprobe
 .PHONY: all clean $(TOOLS)
 all: $(TOOLS)
 $(TOOLS):
