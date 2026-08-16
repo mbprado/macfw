@@ -5,7 +5,7 @@ CPPFLAGS ?= -Iinclude
 FRAMEWORKS := -framework IOKit -framework CoreFoundation
 
 LIB := libmacfw.a
-LIB_OBJS := src/firewire_device.o src/cmp.o src/isoch_allocation.o src/amdtp_receive_ring.o src/amdtp_transmit_ring.o src/pcm_ring_buffer.o src/amdtp_pcm_stream.o
+LIB_OBJS := src/firewire_device.o src/cmp.o src/isoch_allocation.o src/amdtp_receive_ring.o src/amdtp_transmit_ring.o src/amdtp_nodata_transmit_ring.o src/pcm_ring_buffer.o src/amdtp_pcm_stream.o
 
 all: $(LIB) smoke
 
@@ -25,6 +25,9 @@ src/amdtp_receive_ring.o: src/amdtp_receive_ring.cpp include/macfw/amdtp_receive
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
 src/amdtp_transmit_ring.o: src/amdtp_transmit_ring.cpp include/macfw/amdtp_transmit_ring.h include/macfw/am824_playback.h include/macfw/pcm_buffer.h include/macfw/pcm_ring_buffer.h include/macfw/firewire_device.h
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+src/amdtp_nodata_transmit_ring.o: src/amdtp_nodata_transmit_ring.cpp include/macfw/amdtp_nodata_transmit_ring.h include/macfw/firewire_device.h
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
 src/pcm_ring_buffer.o: src/pcm_ring_buffer.cpp include/macfw/pcm_ring_buffer.h
