@@ -2,7 +2,7 @@
 //  macfwApp.swift
 //  macfw
 //
-//  Created by Murilo Borghi Prado on 16.08.2026.
+//  Created by Murilo on 17.08.2026.
 //
 
 import SwiftUI

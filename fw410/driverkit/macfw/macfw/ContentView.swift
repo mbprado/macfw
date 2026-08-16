@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  macfw
 //
-//  Created by Murilo Borghi Prado on 16.08.2026.
+//  Created by Murilo on 17.08.2026.
 //
 
 import SwiftUI
@@ -12,15 +12,13 @@ struct ContentView: View {
         VStack {
             Image(systemName: "globe")
                 .imageScale(.large)
-                .foregroundColor(.accentColor)
+                .foregroundStyle(.tint)
             Text("Hello, world!")
         }
         .padding()
     }
 }
 
-struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView()
-    }
+#Preview {
+    ContentView()
 }
