@@ -1,3 +1,4 @@
+#include "macfw/amdtp_packet.h"
 #include "macfw/amdtp_receive_ring.h"
 #include "macfw/amdtp_transmit_ring.h"
 #include "macfw/cmp.h"
@@ -5,7 +6,9 @@
 #include "macfw/isoch_allocation.h"
 
 #include <CoreFoundation/CoreFoundation.h>
+#include <algorithm>
 #include <cstdint>
+#include <iomanip>
 #include <iostream>
 #include <string>
 
@@ -16,6 +19,45 @@ constexpr std::size_t kCaptureSlots = 256;
 constexpr std::size_t kPlaybackSlots = 4096; // 512 ms at 8k FireWire cycles/s.
 constexpr UInt32 kCycleLead = 256;
 constexpr double kObservationSeconds = 0.35; // stop before first TX-ring wrap.
+
+void dumpTx(const macfw::AmdtpTransmitRing& tx, bool raw) {
+    std::size_t data = 0;
+    std::size_t nodata = 0;
+    for (std::size_t i = 0; i < tx.packetCount(); ++i) {
+        if (tx.slot(i).dataBearing) ++data;
+        else ++nodata;
+    }
+
+    std::cout << "TX schedule summary:\n"
+              << "    packets:            " << tx.packetCount() << '\n'
+              << "    data-bearing:       " << data << '\n'
+              << "    NODATA:             " << nodata << '\n';
+
+    if (!raw) return;
+
+    const std::size_t count = std::min<std::size_t>(32, tx.packetCount());
+    std::cout << "TX first " << count << " packets:\n";
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto& slot = tx.slot(i);
+        const macfw::amdtp::PacketView view{slot.payload, slot.length};
+        const auto cip = view.cip();
+        std::cout << "    packet " << i
+                  << ": cycle=" << slot.cycle
+                  << " len=" << slot.length
+                  << " CIP{dbs=" << static_cast<unsigned>(cip.dbs)
+                  << " dbc=" << static_cast<unsigned>(cip.dbc)
+                  << " fmt=0x" << std::hex << static_cast<unsigned>(cip.fmt)
+                  << " fdf=0x" << static_cast<unsigned>(cip.fdf)
+                  << " syt=0x" << cip.syt << std::dec << "}\n"
+                  << "        raw:";
+        const std::size_t bytes = std::min<std::size_t>(slot.length, 48);
+        for (std::size_t b = 0; b < bytes; ++b) {
+            std::cout << ' ' << std::hex << std::setw(2) << std::setfill('0')
+                      << static_cast<unsigned>(slot.payload[b]);
+        }
+        std::cout << std::dec << std::setfill(' ') << '\n';
+    }
+}
 
 void dumpCapture(const macfw::AmdtpReceiveRing& ring) {
     std::size_t touched = 0;
@@ -38,7 +80,7 @@ void dumpCapture(const macfw::AmdtpReceiveRing& ring) {
               << '\n';
 }
 
-bool run(bool execute) {
+bool run(bool execute, bool raw) {
     auto device = macfw::FireWireDevice::findByProductName("FW 410");
     if (!device) {
         std::cout << "No operational FW 410 unit found.\n";
@@ -76,7 +118,7 @@ bool run(bool execute) {
     std::cout << "native 44.1 kHz playback test:\n"
               << "    sample rate:        44100 Hz\n"
               << "    FDF:                0x01\n"
-              << "    packet scheduler:   rational 441/640\n"
+              << "    packet scheduler:   blocking base-44.1 SYT sequence\n"
               << "    PCM events/packet:  8\n"
               << "    TX program:         4096 cycles (512 ms), stopped before wrap\n"
               << "    tone:               1 kHz on Analog Out 1 (PCM position 2)\n"
@@ -84,7 +126,7 @@ bool run(bool execute) {
 
     if (!execute) {
         std::cout << "status: PASS - dry run only; no stream started\n"
-                  << "to execute safely: ./run44100.sh\n";
+                  << "to execute safely: ./run44100.sh [--raw]\n";
         return true;
     }
 
@@ -100,6 +142,8 @@ bool run(bool execute) {
         std::cout << "transport object creation failed\n";
         return false;
     }
+
+    dumpTx(tx, raw);
 
     (*capture.nativeChannel())->AddListener(
         capture.nativeChannel(),
@@ -179,15 +223,17 @@ cleanup:
 
 int main(int argc, char** argv) {
     bool execute = false;
+    bool raw = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--execute") execute = true;
+        else if (arg == "--raw") raw = true;
         else {
-            std::cerr << "usage: ./pcm44100playback [--execute]\n";
+            std::cerr << "usage: ./pcm44100playback [--execute] [--raw]\n";
             return 64;
         }
     }
 
     std::cout << "macfw pcm44100playback — native FW410 44.1 kHz PCM playback test\n\n";
-    return run(execute) ? 0 : 1;
+    return run(execute, raw) ? 0 : 1;
 }
