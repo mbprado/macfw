@@ -365,13 +365,16 @@ bool run(bool execute) {
     bool opConn = false, ipConn = false;
     UInt32 startCycleTime = 0;
     UInt32 startForward = 0;
-    if ((*native)->AddCallbackDispatcherToRunLoop(native, CFRunLoopGetCurrent()) == kIOReturnSuccess) cb = true;
-    if ((*native)->AddIsochCallbackDispatcherToRunLoop(native, CFRunLoopGetCurrent()) == kIOReturnSuccess) iso = true;
-    if ((*native)->TurnOnNotification(native)) notif = true;
+    if ((*native)->AddCallbackDispatcherToRunLoop(native, CFRunLoopGetCurrent()) == kIOReturnSuccess)
+        cb = true;
     if (!cb || !fcp.arm(device)) {
         std::cout << "FCP response setup failed\n";
         goto cleanup;
     }
+    if ((*native)->AddIsochCallbackDispatcherToRunLoop(native, CFRunLoopGetCurrent()) == kIOReturnSuccess)
+        iso = true;
+    if ((*native)->TurnOnNotification(native))
+        notif = true;
 
     if (capture.allocate() != kIOReturnSuccess || playback.allocate() != kIOReturnSuccess) goto cleanup;
     std::cout << "ISO resources:\n"
