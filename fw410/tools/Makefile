@@ -1,5 +1,5 @@
 CONTROL := avcprobe fcpprobe mixerprobe plugprobe topologyprobe headphoneprobe rateprobe
-TRANSPORT := cmpconnect cmpprobe coreaudiobridge coreaudiodiag formatprobe isocapture isoduplex isoplayback pcmbufferplayback pcmstreamplayback streamprobe
+TRANSPORT := cmpconnect cmpprobe coreaudiobridge coreaudiodiag formatprobe isocapture isoduplex isoplayback pcmbufferplayback pcmstreamplayback streamprobe amdtp44probe
 DEVICE := fwboot fwprobe
 TOOLS := $(CONTROL) $(TRANSPORT) $(DEVICE)
 
