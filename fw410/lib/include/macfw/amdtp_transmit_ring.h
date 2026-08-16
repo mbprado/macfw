@@ -4,6 +4,8 @@
 #include "macfw/pcm_buffer.h"
 #include "macfw/pcm_ring_buffer.h"
 #include <IOKit/firewire/IOFireWireLibIsoch.h>
+#include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -37,12 +39,10 @@ public:
     static AmdtpTransmitRing createSilence48k(FireWireDevice& device,
                                               UInt32 firstCycle,
                                               std::size_t packetCount = 128);
-
     static AmdtpTransmitRing createPcm48k(FireWireDevice& device,
                                           UInt32 firstCycle,
                                           const PcmBufferView& pcm,
                                           std::size_t packetCount = 128);
-
     static AmdtpTransmitRing createTone48k(FireWireDevice& device,
                                            UInt32 firstCycle,
                                            std::size_t pcmPosition,
@@ -50,17 +50,13 @@ public:
                                            double amplitude = 131072.0,
                                            std::size_t packetCount = 128);
 
-    // Native 44.1-kHz variants. These use the rational 441/640 packet cadence
-    // observed from the FW410 and FDF=0x01; no sample-rate conversion occurs.
     static AmdtpTransmitRing createSilence44100(FireWireDevice& device,
                                                 UInt32 firstCycle,
                                                 std::size_t packetCount = 128);
-
     static AmdtpTransmitRing createPcm44100(FireWireDevice& device,
                                             UInt32 firstCycle,
                                             const PcmBufferView& pcm,
                                             std::size_t packetCount = 128);
-
     static AmdtpTransmitRing createTone44100(FireWireDevice& device,
                                              UInt32 firstCycle,
                                              std::size_t pcmPosition,
@@ -68,12 +64,68 @@ public:
                                              double amplitude = 131072.0,
                                              std::size_t packetCount = 128);
 
-    // Replace only PCM payload words in already-built 48-kHz send slots. CIP
-    // timing, DBC/SYT and DCL structure are left untouched. Live 44.1-kHz
-    // refill will be added after static native-rate playback is validated.
     RefillResult refillPcm48k(PcmRingBuffer& pcm,
                               std::size_t firstPacket,
                               std::size_t packetCount);
+
+    // Rebuild complete native-44.1 packets for a recycled range. Unlike the
+    // 48-kHz path, DBC/SYT cannot be allowed to repeat at a short ring wrap.
+    // The caller owns the continuation state and cycle cursor. A 640-packet
+    // ring is recommended because the 441/640 data/NODATA pattern repeats at
+    // exactly that boundary, keeping each DCL slot's packet length stable.
+    RefillResult refillPcm44100(PcmRingBuffer& pcm,
+                                std::size_t firstPacket,
+                                std::size_t packetCount,
+                                am824::Playback44100State& state,
+                                UInt32& cycle) {
+        RefillResult result{};
+        if (!slots_ || packetCount_ == 0 || !pcm.valid() ||
+            pcm.channelCount() != am824::kPlayback44100PcmPositions ||
+            firstPacket >= packetCount_ || packetCount == 0)
+            return result;
+
+        const std::size_t end = std::min(packetCount_, firstPacket + packetCount);
+        std::int32_t frames[am824::kPlayback44100EventsPerDataPacket *
+                            am824::kPlayback44100PcmPositions]{};
+
+        for (std::size_t i = firstPacket; i < end; ++i) {
+            ++result.packetsVisited;
+            auto packet = am824::buildPlayback44100Silence(cycle & 0x1fffu, state);
+            if (packet.length != slots_[i].length ||
+                packet.dataBearing != slots_[i].dataBearing)
+                return RefillResult{};
+
+            if (packet.dataBearing) {
+                const auto rr = pcm.read(frames, am824::kPlayback44100EventsPerDataPacket);
+                result.framesRequested += rr.framesRequested;
+                result.framesFromBuffer += rr.framesFromBuffer;
+                result.framesSilenced += rr.framesSilenced;
+                for (std::size_t event = 0; event < am824::kPlayback44100EventsPerDataPacket; ++event) {
+                    for (std::size_t channel = 0; channel < am824::kPlayback44100PcmPositions; ++channel) {
+                        const auto sample = std::max<std::int32_t>(-8388608,
+                            std::min<std::int32_t>(8388607,
+                                frames[event * am824::kPlayback44100PcmPositions + channel]));
+                        const std::uint32_t mbla = 0x40000000u |
+                            (static_cast<std::uint32_t>(sample) & 0x00ffffffu);
+                        const std::size_t off = 8 +
+                            (event * am824::kPlayback44100Positions + channel) * 4;
+                        am824::putBe32Playback(packet.bytes.data() + off, mbla);
+                    }
+                }
+                ++result.dataPacketsRefilled;
+            }
+
+            auto* dst = const_cast<std::uint8_t*>(slots_[i].payload);
+            std::copy_n(packet.bytes.data(), packet.length, dst);
+            slots_[i].cycle = cycle & 0x1fffu;
+            slots_[i].dbc = packet.dbc;
+            slots_[i].syt = packet.syt;
+            ++cycle;
+        }
+
+        std::atomic_thread_fence(std::memory_order_release);
+        return result;
+    }
 
     explicit operator bool() const { return localPort_ != nullptr; }
     IOFireWireLibLocalIsochPortRef nativeLocalPort() const { return localPort_; }
