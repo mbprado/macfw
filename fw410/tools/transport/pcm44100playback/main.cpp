@@ -13,8 +13,9 @@ namespace {
 constexpr UInt32 kCaptureMaxPacket44100 = 168;
 constexpr UInt32 kPlaybackMaxPacket44100 = 360;
 constexpr std::size_t kCaptureSlots = 256;
-constexpr std::size_t kPlaybackSlots = 128;
+constexpr std::size_t kPlaybackSlots = 4096; // 512 ms at 8k FireWire cycles/s.
 constexpr UInt32 kCycleLead = 256;
+constexpr double kObservationSeconds = 0.35; // stop before first TX-ring wrap.
 
 void dumpCapture(const macfw::AmdtpReceiveRing& ring) {
     std::size_t touched = 0;
@@ -77,6 +78,7 @@ bool run(bool execute) {
               << "    FDF:                0x01\n"
               << "    packet scheduler:   rational 441/640\n"
               << "    PCM events/packet:  8\n"
+              << "    TX program:         4096 cycles (512 ms), stopped before wrap\n"
               << "    tone:               1 kHz on Analog Out 1 (PCM position 2)\n"
               << "    amplitude:          ~-36 dBFS\n";
 
@@ -146,9 +148,9 @@ bool run(bool execute) {
     captureStarted = true;
 
     std::cout << "duplex ISO: started (native 44.1 kHz prebuilt PCM)\n"
-              << "observation window: 2.0 s\n"
+              << "observation window: " << kObservationSeconds << " s (before TX wrap)\n"
               << "listen for 1 kHz on Analog Out 1\n";
-    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 2.0, false);
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, kObservationSeconds, false);
     dumpCapture(rx);
     ok = true;
 
