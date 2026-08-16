@@ -41,6 +41,7 @@ constexpr double kFcpTimeoutSeconds = 1.0;
 
 class FcpRateReassertion {
 public:
+    FcpRateReassertion() = default;
     ~FcpRateReassertion() { reset(); }
     FcpRateReassertion(const FcpRateReassertion&) = delete;
     FcpRateReassertion& operator=(const FcpRateReassertion&) = delete;
@@ -94,8 +95,6 @@ private:
         UInt32 length = 0;
         std::array<UInt8, kFcpResponseSize> bytes{};
     };
-
-    FcpRateReassertion() = default;
 
     static UInt32 responseHandler(IOFireWireLibPseudoAddressSpaceRef space,
                                   FWClientCommandID commandID,
@@ -321,7 +320,7 @@ bool run(bool execute) {
 
     std::uint32_t opcr0 = 0, ipcr0 = 0;
     if (macfw::cmp::readOpcr0(device, opcr0) != kIOReturnSuccess ||
-        !macfw::cmp::readIpcr0(device, ipcr0) != kIOReturnSuccess) return false;
+        macfw::cmp::readIpcr0(device, ipcr0) != kIOReturnSuccess) return false;
     if (!macfw::cmp::ready(macfw::cmp::decodePcr(opcr0)) ||
         !macfw::cmp::ready(macfw::cmp::decodePcr(ipcr0))) {
         std::cout << "status: REFUSED - PCR0 offline or already connected\n";
