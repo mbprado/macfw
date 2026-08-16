@@ -106,7 +106,15 @@ bool setRate(IOFireWireLibDeviceRef dev, UInt32 gen, UInt16 node,
     const UInt8 cmd[8] = {0x00, 0xff, opcode, 0x00, 0x90,
                           static_cast<UInt8>(sfc), 0xff, 0xff};
     if (!transaction(dev, gen, node, ctx, cmd, sizeof(cmd), raw)) return false;
-    return ctx.length >= 8 && (ctx.bytes[0] == 0x09 || ctx.bytes[0] == 0x0c || ctx.bytes[0] == 0x0d) &&
+
+    // AV/C CONTROL may complete immediately (ACCEPTED/IMPLEMENTED/CHANGED)
+    // or return INTERIM (0x0f) while the device performs the transition.
+    // Treat INTERIM as a valid deferred acceptance; the caller's STATUS
+    // readback after the settling delay is authoritative for completion.
+    const UInt8 response = ctx.length ? ctx.bytes[0] : 0;
+    const bool accepted = response == 0x09 || response == 0x0c ||
+                          response == 0x0d || response == 0x0f;
+    return ctx.length >= 8 && accepted &&
            ctx.bytes[1] == 0xff && ctx.bytes[2] == opcode && ctx.bytes[3] == 0x00 &&
            ctx.bytes[4] == 0x90 && ((ctx.bytes[5] & 0x07) == static_cast<UInt8>(sfc));
 }
