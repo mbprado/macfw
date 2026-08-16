@@ -5,10 +5,10 @@ LDFLAGS += -framework IOKit -framework CoreFoundation -framework CoreAudio -fram
 
 all: coreaudiobridge44100 script
 
-../../../lib/libmacfw.a:
+lib:
 	$(MAKE) -C ../../../lib libmacfw.a
 
-coreaudiobridge44100: main.cpp ../../../lib/libmacfw.a
+coreaudiobridge44100: main.cpp lib
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) main.cpp ../../../lib/libmacfw.a $(LDFLAGS) -o $@
 
 script:
@@ -17,4 +17,4 @@ script:
 clean:
 	rm -f coreaudiobridge44100
 
-.PHONY: all clean script
+.PHONY: all clean script lib
