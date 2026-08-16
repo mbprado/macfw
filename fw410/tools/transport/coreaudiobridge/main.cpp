@@ -62,10 +62,8 @@ struct CoreAudioInput {
     macfw::PcmRingBuffer* ring = nullptr;
     double nativeRate = 0.0;
     double sourcePosition = 0.0;
-    Float32 previous1 = 0.0f;
-    Float32 previous2 = 0.0f;
-    Float32 previous3 = 0.0f;
-    bool haveHistory = false;
+    Float32 previousSample = 0.0f;
+    bool havePreviousSample = false;
     std::vector<Float32> mono;
     std::vector<std::int32_t> mapped;
     std::atomic<std::uint64_t> callbacks{0};
@@ -77,24 +75,6 @@ struct CoreAudioInput {
     std::atomic<std::int32_t> firstRenderError{0};
 
     ~CoreAudioInput() { stop(); }
-
-    double virtualSample(int index) const {
-        if (index == 0) return static_cast<double>(previous1);
-        if (index == -1) return static_cast<double>(previous2);
-        if (index <= -2) return static_cast<double>(previous3);
-        return static_cast<double>(mono[static_cast<std::size_t>(index - 1)]);
-    }
-
-    static double cubicLagrange(double ym2, double ym1, double y0, double y1, double t) {
-        // Four-point cubic through source positions -2, -1, 0 and +1,
-        // evaluated between 0 and +1. This is causal for the current AUHAL
-        // callback because y1 is already present in the current input buffer.
-        const double lm2 = -((t + 1.0) * t * (t - 1.0)) / 6.0;
-        const double lm1 =  ((t + 2.0) * t * (t - 1.0)) / 2.0;
-        const double l0  = -((t + 2.0) * (t + 1.0) * (t - 1.0)) / 2.0;
-        const double l1  =  ((t + 2.0) * (t + 1.0) * t) / 6.0;
-        return ym2 * lm2 + ym1 * lm1 + y0 * l0 + y1 * l1;
-    }
 
     static OSStatus inputCallback(void* refCon,
                                   AudioUnitRenderActionFlags* flags,
@@ -125,18 +105,14 @@ struct CoreAudioInput {
         }
         self->renderedFrames += frames;
 
-        // Continuous high-quality SRC from the CoreAudio device clock to the
-        // FW410's fixed 48 kHz playback clock. The virtual source buffer is:
-        //   [... three history samples, current callback samples ...]
-        // sourcePosition is retained across callback boundaries. Four-point
-        // cubic interpolation avoids the audible high-frequency loss/roughness
-        // of the previous linear interpolator while requiring no look-ahead
-        // beyond samples already delivered by AUHAL.
-        if (!self->haveHistory) {
-            self->previous1 = self->mono[0];
-            self->previous2 = self->mono[0];
-            self->previous3 = self->mono[0];
-            self->haveHistory = true;
+        // Continuous linear SRC from the CoreAudio device clock to the FW410's
+        // fixed 48 kHz playback clock. The virtual source buffer is:
+        //   [previous callback's last sample, current callback samples...]
+        // sourcePosition is retained relative to that boundary, so interpolation
+        // never clamps to/repeats the last sample at callback boundaries.
+        if (!self->havePreviousSample) {
+            self->previousSample = self->mono[0];
+            self->havePreviousSample = true;
             self->sourcePosition = 0.0;
         }
 
@@ -144,40 +120,29 @@ struct CoreAudioInput {
         UInt32 outFrames = 0;
         while (self->sourcePosition < static_cast<double>(frames) &&
                outFrames < kMaxResampledFrames) {
-            const int i0 = static_cast<int>(self->sourcePosition);
+            const UInt32 i0 = static_cast<UInt32>(self->sourcePosition);
+            const UInt32 i1 = i0 + 1u;
             const double frac = self->sourcePosition - static_cast<double>(i0);
-            const double sample = cubicLagrange(
-                self->virtualSample(i0 - 2),
-                self->virtualSample(i0 - 1),
-                self->virtualSample(i0),
-                self->virtualSample(i0 + 1),
-                frac);
+
+            const double s0 = (i0 == 0u)
+                ? static_cast<double>(self->previousSample)
+                : static_cast<double>(self->mono[i0 - 1u]);
+            const double s1 = static_cast<double>(self->mono[i1 - 1u]);
+            const double sample = s0 + (s1 - s0) * frac;
             const double x = std::max(-1.0, std::min(1.0, sample));
             const auto s24 = static_cast<std::int32_t>(x * 8388607.0);
 
             const std::size_t base = static_cast<std::size_t>(outFrames) * kPcmChannels;
             std::fill_n(self->mapped.data() + base, kPcmChannels, 0);
-            self->mapped[base + 1] = s24;
-            self->mapped[base + 6] = s24;
+            self->mapped[base + 1] = s24; // PCM position 2 -> Analog Out 1.
+            self->mapped[base + 6] = s24; // PCM position 7 -> Analog Out 2.
 
             ++outFrames;
             self->sourcePosition += sourceStep;
         }
 
         self->sourcePosition -= static_cast<double>(frames);
-        if (frames >= 3) {
-            self->previous3 = self->mono[frames - 3u];
-            self->previous2 = self->mono[frames - 2u];
-            self->previous1 = self->mono[frames - 1u];
-        } else if (frames == 2) {
-            self->previous3 = self->previous1;
-            self->previous2 = self->mono[0];
-            self->previous1 = self->mono[1];
-        } else {
-            self->previous3 = self->previous2;
-            self->previous2 = self->previous1;
-            self->previous1 = self->mono[0];
-        }
+        self->previousSample = self->mono[frames - 1u];
         self->resampledFrames += outFrames;
 
         const std::size_t written = self->ring->write(self->mapped.data(), outFrames);
@@ -272,7 +237,7 @@ struct CoreAudioInput {
                   << "    native rate:        " << nativeRate << " Hz\n"
                   << "    hardware channels:  " << deviceAsbd.mChannelsPerFrame << '\n'
                   << "    AUHAL client:       " << nativeRate << " Hz mono Float32\n"
-                  << "    bridge SRC:         " << nativeRate << " -> 48000 Hz continuous cubic\n";
+                  << "    bridge SRC:         " << nativeRate << " -> 48000 Hz continuous linear\n";
         return true;
     }
 
