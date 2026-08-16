@@ -61,6 +61,34 @@ int main() {
     if (tx3.dataBearing || tx3.length != 8 || tx3.dbc != 24 || tx3.syt != 0xffff) return 7;
     std::cout << "AMDTP playback packet builder: PASS\n";
 
+    macfw::am824::Playback44100State tx44{};
+    std::size_t data44 = 0;
+    std::size_t nodata44 = 0;
+    std::uint16_t previousSyt = 0;
+    bool havePreviousSyt = false;
+    const bool expectedFirst16[16] = {
+        true, true, false, true, true, false, true, true,
+        false, true, true, false, true, true, true, false
+    };
+    for (std::size_t i = 0; i < 640; ++i) {
+        const auto p = macfw::am824::buildPlayback44100Silence(
+            static_cast<std::uint32_t>(100 + i), tx44);
+        if (i < 16 && p.dataBearing != expectedFirst16[i]) return 8;
+        if (p.bytes[4] != 0x90 || p.bytes[5] != 0x01) return 9;
+        if (p.dataBearing) {
+            ++data44;
+            if (p.length != 360 || p.syt == 0xffff) return 10;
+            if (havePreviousSyt && p.syt == previousSyt) return 11;
+            previousSyt = p.syt;
+            havePreviousSyt = true;
+        } else {
+            ++nodata44;
+            if (p.length != 8 || p.syt != 0xffff) return 12;
+        }
+    }
+    if (data44 != 441 || nodata44 != 199) return 13;
+    std::cout << "AMDTP 44.1 kHz packet scheduler: PASS\n";
+
     const std::int32_t pcmSamples[] = {
         100, -100,
         200, -200,
@@ -68,16 +96,16 @@ int main() {
     const macfw::PcmBufferView pcm{pcmSamples, 2, 2, false};
     if (!pcm.valid() || pcm.sample(0, 0) != 100 || pcm.sample(1, 1) != -200 ||
         pcm.sample(2, 0) != 0 || pcm.sample(0, 2) != 0)
-        return 8;
+        return 14;
 
     const macfw::PcmBufferView looped{pcmSamples, 2, 2, true};
     if (looped.sample(2, 0) != 100 || looped.sample(3, 1) != -200)
-        return 9;
+        return 15;
     std::cout << "PCM buffer view: PASS\n";
 
     macfw::PcmRingBuffer ring(4, 2);
     if (!ring.valid() || ring.capacityFrames() != 4 || ring.channelCount() != 2)
-        return 10;
+        return 16;
 
     const std::int32_t firstWrite[] = {
         1, 101,
@@ -85,14 +113,14 @@ int main() {
         3, 103,
     };
     if (ring.write(firstWrite, 3) != 3 || ring.availableFrames() != 3 || ring.freeFrames() != 1)
-        return 11;
+        return 17;
 
     std::int32_t firstRead[4] = {};
     const auto r1 = ring.read(firstRead, 2);
     if (r1.framesFromBuffer != 2 || r1.framesSilenced != 0 ||
         firstRead[0] != 1 || firstRead[1] != 101 ||
         firstRead[2] != 2 || firstRead[3] != 102)
-        return 12;
+        return 18;
 
     const std::int32_t secondWrite[] = {
         4, 104,
@@ -100,7 +128,7 @@ int main() {
         6, 106,
     };
     if (ring.write(secondWrite, 3) != 3 || ring.availableFrames() != 4)
-        return 13;
+        return 19;
 
     std::int32_t wrapRead[10] = {};
     const auto r2 = ring.read(wrapRead, 5);
@@ -111,14 +139,14 @@ int main() {
         wrapRead[6] != 6 || wrapRead[7] != 106 ||
         wrapRead[8] != 0 || wrapRead[9] != 0 ||
         ring.underrunFrames() != 1)
-        return 14;
+        return 20;
 
     if (ring.producedFrames() != 6 || ring.consumedFrames() != 6 || ring.availableFrames() != 0)
-        return 15;
+        return 21;
 
     ring.reset();
     if (ring.producedFrames() != 0 || ring.consumedFrames() != 0 || ring.underrunFrames() != 0)
-        return 16;
+        return 22;
 
     std::cout << "PCM ring buffer: PASS\n";
 
