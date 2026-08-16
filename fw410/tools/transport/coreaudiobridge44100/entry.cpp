@@ -54,7 +54,12 @@ int runRateProbe(const std::string& rateProbe, const char* rate) {
 }
 
 bool restore48000(const std::string& rateProbe) {
-    for (int attempt = 0; attempt < 10; ++attempt) {
+    // rateprobe historically returns success even when the immediate readback
+    // catches the FW410 during its post-rate-change transient. Always perform a
+    // second SET/readback after a short settle delay; retry the pair if needed.
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        runRateProbe(rateProbe, "48000");
+        sleep(1);
         if (runRateProbe(rateProbe, "48000") == 0)
             return true;
         sleep(1);
