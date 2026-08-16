@@ -17,7 +17,7 @@ constexpr UInt32 kCaptureMaxPacket44100 = 168;
 constexpr UInt32 kPlaybackMaxPacket44100 = 360;
 constexpr std::size_t kCaptureSlots = 256;
 constexpr std::size_t kPlaybackSlots = 4096; // 512 ms at 8k FireWire cycles/s.
-constexpr UInt32 kCycleLead = 256;
+constexpr UInt32 kCycleLead = 2048; // 256 ms: leave time to build 4096 NuDCL packets.
 constexpr double kObservationSeconds = 0.35; // stop before first TX-ring wrap.
 
 void dumpTx(const macfw::AmdtpTransmitRing& tx, bool raw) {
@@ -121,6 +121,7 @@ bool run(bool execute, bool raw) {
               << "    packet scheduler:   blocking base-44.1 SYT sequence\n"
               << "    PCM events/packet:  8\n"
               << "    TX program:         4096 cycles (512 ms), stopped before wrap\n"
+              << "    start lead:         " << kCycleLead << " cycles (256 ms)\n"
               << "    tone:               1 kHz on Analog Out 1 (PCM position 2)\n"
               << "    amplitude:          ~-36 dBFS\n";
 
@@ -161,6 +162,7 @@ bool run(bool execute, bool raw) {
     bool opConnected = false;
     bool ipConnected = false;
     bool ok = false;
+    UInt32 startCycleTime = 0;
 
     if ((*native)->AddCallbackDispatcherToRunLoop(native, CFRunLoopGetCurrent()) == kIOReturnSuccess)
         callbackDispatcher = true;
@@ -183,6 +185,23 @@ bool run(bool execute, bool raw) {
     if (macfw::cmp::connectIpcr0(device, ipcr0, playback.channel()) != kIOReturnSuccess)
         goto cleanup;
     ipConnected = true;
+
+    if ((*native)->GetCycleTime(native, &startCycleTime) == kIOReturnSuccess) {
+        const UInt32 startNow = (startCycleTime >> 12) & 0x1fffu;
+        const UInt32 forward = (firstCycle - startNow) & 0x1fffu;
+        const bool stillAhead = forward <= 4096u;
+        std::cout << "TX start timing:\n"
+                  << "    scheduled cycle: " << firstCycle << '\n'
+                  << "    current cycle:   " << startNow << '\n'
+                  << "    forward delta:   " << forward << " cycles\n"
+                  << "    interpretation:  "
+                  << (stillAhead ? "scheduled cycle still ahead" : "scheduled cycle already missed")
+                  << '\n';
+        if (!stillAhead) {
+            std::cout << "status: REFUSED - TX construction missed scheduled first cycle\n";
+            goto cleanup;
+        }
+    }
 
     if ((*playback.nativeChannel())->Start(playback.nativeChannel()) != kIOReturnSuccess)
         goto cleanup;
