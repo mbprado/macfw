@@ -23,12 +23,24 @@ std::int32_t clipPcm24(std::int32_t sample) {
     return std::max(kPcm24Min, std::min(kPcm24Max, sample));
 }
 
-std::size_t dataFrameCapacity(std::size_t packetCount) {
+std::size_t dataFrameCapacity48k(std::size_t packetCount) {
     std::size_t dataPackets = 0;
     for (std::size_t i = 0; i < packetCount; ++i)
         if ((i & 3u) != 3u)
             ++dataPackets;
     return dataPackets * am824::kPlayback48kEventsPerDataPacket;
+}
+
+std::size_t dataFrameCapacity44100(std::size_t packetCount) {
+    am824::Playback44100State state{};
+    std::size_t dataPackets = 0;
+    for (std::size_t i = 0; i < packetCount; ++i) {
+        const auto packet = am824::buildPlayback44100Silence(
+            static_cast<std::uint32_t>(i), state);
+        if (packet.dataBearing)
+            ++dataPackets;
+    }
+    return dataPackets * am824::kPlayback44100EventsPerDataPacket;
 }
 
 void putPcmWords(std::uint8_t* payload, const std::int32_t* frames) {
@@ -43,6 +55,51 @@ void putPcmWords(std::uint8_t* payload, const std::int32_t* frames) {
             am824::putBe32Playback(payload + byteOffset, mbla);
         }
     }
+}
+
+bool finishTransmitRing(AmdtpTransmitRing& ring, FireWireDevice& device,
+                        AmdtpTransmitRing::StorageSlot* storage,
+                        AmdtpTransmitRing::PacketSlot* slots,
+                        std::size_t packetCount, std::size_t mappedBytes,
+                        UInt32 firstCycle,
+                        IOFireWireLibNuDCLPoolRef& pool,
+                        IOFireWireLibLocalIsochPortRef& localPort) {
+    auto native = device.nativeHandle();
+    pool = (*native)->CreateNuDCLPool(native, static_cast<UInt32>(packetCount),
+        CFUUIDGetUUIDBytes(kIOFireWireNuDCLPoolInterfaceID));
+    if (!pool) return false;
+
+    (*pool)->SetCurrentTagAndSync(pool, 1, 0);
+
+    NuDCLRef first = nullptr;
+    NuDCLRef last = nullptr;
+    for (std::size_t i = 0; i < packetCount; ++i) {
+        IOVirtualRange range = {
+            reinterpret_cast<IOVirtualAddress>(storage[i].payload),
+            static_cast<IOByteCount>(slots[i].length)
+        };
+        auto dcl = (*pool)->AllocateSendPacket(pool, nullptr, 1, &range);
+        if (!dcl) return false;
+        const NuDCLRef ref = reinterpret_cast<NuDCLRef>(dcl);
+        if (!first) first = ref;
+        last = ref;
+    }
+
+    if (!first || !last || (*pool)->SetDCLBranch(last, first) != kIOReturnSuccess)
+        return false;
+
+    DCLCommand* program = (*pool)->GetProgram(pool);
+    if (!program) return false;
+
+    IOVirtualRange mapped = {
+        reinterpret_cast<IOVirtualAddress>(storage),
+        static_cast<IOByteCount>(mappedBytes)
+    };
+    localPort = (*native)->CreateLocalIsochPort(native, true, program,
+        kFWDCLCycleEvent, firstCycle, 0x1fffu,
+        nullptr, 0, &mapped, 1,
+        CFUUIDGetUUIDBytes(kIOFireWireLocalIsochPortInterfaceID));
+    return localPort != nullptr;
 }
 } // namespace
 
@@ -88,7 +145,7 @@ AmdtpTransmitRing AmdtpTransmitRing::createTone48k(FireWireDevice& device,
         packetCount == 0)
         return {};
 
-    const std::size_t frames = dataFrameCapacity(packetCount);
+    const std::size_t frames = dataFrameCapacity48k(packetCount);
     std::vector<std::int32_t> samples(frames * am824::kPlayback48kPcmPositions, 0);
     constexpr double kPi = 3.14159265358979323846;
     const std::size_t channel = pcmPosition - 1;
@@ -102,6 +159,48 @@ AmdtpTransmitRing AmdtpTransmitRing::createTone48k(FireWireDevice& device,
         samples.data(), frames, am824::kPlayback48kPcmPositions, false
     };
     return createPcm48k(device, firstCycle, pcm, packetCount);
+}
+
+AmdtpTransmitRing AmdtpTransmitRing::createSilence44100(FireWireDevice& device,
+                                                         UInt32 firstCycle,
+                                                         std::size_t packetCount) {
+    return create44100(device, firstCycle, nullptr, packetCount);
+}
+
+AmdtpTransmitRing AmdtpTransmitRing::createPcm44100(FireWireDevice& device,
+                                                     UInt32 firstCycle,
+                                                     const PcmBufferView& pcm,
+                                                     std::size_t packetCount) {
+    if (!pcm.valid() || pcm.channelCount > am824::kPlayback44100PcmPositions)
+        return {};
+    return create44100(device, firstCycle, &pcm, packetCount);
+}
+
+AmdtpTransmitRing AmdtpTransmitRing::createTone44100(FireWireDevice& device,
+                                                      UInt32 firstCycle,
+                                                      std::size_t pcmPosition,
+                                                      double frequencyHz,
+                                                      double amplitude,
+                                                      std::size_t packetCount) {
+    if (pcmPosition < 1 || pcmPosition > am824::kPlayback44100PcmPositions ||
+        frequencyHz <= 0.0 || amplitude < 0.0 || amplitude > 8388607.0 ||
+        packetCount == 0)
+        return {};
+
+    const std::size_t frames = dataFrameCapacity44100(packetCount);
+    std::vector<std::int32_t> samples(frames * am824::kPlayback44100PcmPositions, 0);
+    constexpr double kPi = 3.14159265358979323846;
+    const std::size_t channel = pcmPosition - 1;
+    for (std::size_t frame = 0; frame < frames; ++frame) {
+        const double phase = 2.0 * kPi * frequencyHz * static_cast<double>(frame) / 44100.0;
+        samples[frame * am824::kPlayback44100PcmPositions + channel] =
+            static_cast<std::int32_t>(std::sin(phase) * amplitude);
+    }
+
+    const PcmBufferView pcm{
+        samples.data(), frames, am824::kPlayback44100PcmPositions, false
+    };
+    return createPcm44100(device, firstCycle, pcm, packetCount);
 }
 
 AmdtpTransmitRing::RefillResult AmdtpTransmitRing::refillPcm48k(
@@ -128,9 +227,6 @@ AmdtpTransmitRing::RefillResult AmdtpTransmitRing::refillPcm48k(
         ++result.dataPacketsRefilled;
     }
 
-    // Payload bytes live in the same mmap-backed range already locked for the
-    // local isoch port. We did not alter DCL ranges, sizes, branches or headers;
-    // publish completed stores before the caller lets DMA reach these slots.
     std::atomic_thread_fence(std::memory_order_release);
     return result;
 }
@@ -186,45 +282,66 @@ AmdtpTransmitRing AmdtpTransmitRing::create48k(FireWireDevice& device,
         state.phase = static_cast<std::uint8_t>((state.phase + 1u) & 3u);
     }
 
-    auto native = device.nativeHandle();
-    ring.pool_ = (*native)->CreateNuDCLPool(native, static_cast<UInt32>(packetCount),
-        CFUUIDGetUUIDBytes(kIOFireWireNuDCLPoolInterfaceID));
-    if (!ring.pool_) { ring.reset(); return ring; }
-
-    (*ring.pool_)->SetCurrentTagAndSync(ring.pool_, 1, 0);
-
-    NuDCLRef first = nullptr;
-    NuDCLRef last = nullptr;
-    for (std::size_t i = 0; i < packetCount; ++i) {
-        IOVirtualRange range = {
-            reinterpret_cast<IOVirtualAddress>(ring.storage_[i].payload),
-            static_cast<IOByteCount>(ring.slots_[i].length)
-        };
-        auto dcl = (*ring.pool_)->AllocateSendPacket(ring.pool_, nullptr, 1, &range);
-        if (!dcl) { ring.reset(); return ring; }
-        const NuDCLRef ref = reinterpret_cast<NuDCLRef>(dcl);
-        if (!first) first = ref;
-        last = ref;
-    }
-
-    if (!first || !last ||
-        (*ring.pool_)->SetDCLBranch(last, first) != kIOReturnSuccess) {
+    if (!finishTransmitRing(ring, device, ring.storage_, ring.slots_, packetCount,
+                            ring.mappedBytes_, ring.firstCycle_, ring.pool_, ring.localPort_)) {
         ring.reset();
-        return ring;
+    }
+    return ring;
+}
+
+AmdtpTransmitRing AmdtpTransmitRing::create44100(FireWireDevice& device,
+                                                  UInt32 firstCycle,
+                                                  const PcmBufferView* pcm,
+                                                  std::size_t packetCount) {
+    AmdtpTransmitRing ring;
+    if (!device.nativeHandle() || packetCount == 0) return ring;
+
+    ring.device_ = &device;
+    ring.packetCount_ = packetCount;
+    ring.firstCycle_ = firstCycle & 0x1fffu;
+    ring.mappedBytes_ = sizeof(StorageSlot) * packetCount;
+
+    ring.storage_ = static_cast<StorageSlot*>(mmap(nullptr, ring.mappedBytes_,
+        PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED, -1, 0));
+    if (ring.storage_ == MAP_FAILED) { ring.storage_ = nullptr; ring.reset(); return ring; }
+    std::memset(ring.storage_, 0, ring.mappedBytes_);
+
+    ring.slots_ = new (std::nothrow) PacketSlot[packetCount];
+    if (!ring.slots_) { ring.reset(); return ring; }
+
+    am824::Playback44100State state{};
+    std::uint64_t audioFrame = 0;
+
+    for (std::size_t i = 0; i < packetCount; ++i) {
+        const UInt32 cycle = (ring.firstCycle_ + static_cast<UInt32>(i)) & 0x1fffu;
+        auto packet = am824::buildPlayback44100Silence(cycle, state);
+
+        if (packet.dataBearing && pcm) {
+            for (std::size_t event = 0; event < am824::kPlayback44100EventsPerDataPacket; ++event) {
+                const std::size_t frame = static_cast<std::size_t>(audioFrame) + event;
+                for (std::size_t channel = 0; channel < am824::kPlayback44100PcmPositions; ++channel) {
+                    const std::int32_t sample = clipPcm24(pcm->sample(frame, channel));
+                    const std::uint32_t mbla =
+                        0x40000000u | (static_cast<std::uint32_t>(sample) & 0x00ffffffu);
+                    const std::size_t byteOffset =
+                        8 + (event * am824::kPlayback44100Positions + channel) * 4;
+                    am824::putBe32Playback(packet.bytes.data() + byteOffset, mbla);
+                }
+            }
+        }
+
+        if (packet.dataBearing)
+            audioFrame += am824::kPlayback44100EventsPerDataPacket;
+
+        std::memcpy(ring.storage_[i].payload, packet.bytes.data(), packet.length);
+        ring.slots_[i] = {ring.storage_[i].payload, packet.length, cycle,
+                          packet.dbc, packet.syt, packet.dataBearing};
     }
 
-    DCLCommand* program = (*ring.pool_)->GetProgram(ring.pool_);
-    if (!program) { ring.reset(); return ring; }
-
-    IOVirtualRange mapped = {
-        reinterpret_cast<IOVirtualAddress>(ring.storage_),
-        static_cast<IOByteCount>(ring.mappedBytes_)
-    };
-    ring.localPort_ = (*native)->CreateLocalIsochPort(native, true, program,
-        kFWDCLCycleEvent, ring.firstCycle_, 0x1fffu,
-        nullptr, 0, &mapped, 1,
-        CFUUIDGetUUIDBytes(kIOFireWireLocalIsochPortInterfaceID));
-    if (!ring.localPort_) { ring.reset(); return ring; }
+    if (!finishTransmitRing(ring, device, ring.storage_, ring.slots_, packetCount,
+                            ring.mappedBytes_, ring.firstCycle_, ring.pool_, ring.localPort_)) {
+        ring.reset();
+    }
     return ring;
 }
 
