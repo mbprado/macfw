@@ -38,9 +38,6 @@ public:
                                               UInt32 firstCycle,
                                               std::size_t packetCount = 128);
 
-    // Packetize interleaved PCM into the FW410's 10 playback PCM positions.
-    // Missing channels/frames are zero-filled. Samples outside signed 24-bit
-    // range are clipped. The source is consumed during construction only.
     static AmdtpTransmitRing createPcm48k(FireWireDevice& device,
                                           UInt32 firstCycle,
                                           const PcmBufferView& pcm,
@@ -53,11 +50,27 @@ public:
                                            double amplitude = 131072.0,
                                            std::size_t packetCount = 128);
 
-    // Replace only PCM payload words in already-built send slots. CIP timing,
-    // DBC/SYT and DCL structure are left untouched. This is intentionally a
-    // data-buffer update, not a running-DCL metadata update. Callers must only
-    // refill slots known not to be in the DMA consumer's active window.
-    // The PCM ring must expose exactly the FW410's 10 playback positions.
+    // Native 44.1-kHz variants. These use the rational 441/640 packet cadence
+    // observed from the FW410 and FDF=0x01; no sample-rate conversion occurs.
+    static AmdtpTransmitRing createSilence44100(FireWireDevice& device,
+                                                UInt32 firstCycle,
+                                                std::size_t packetCount = 128);
+
+    static AmdtpTransmitRing createPcm44100(FireWireDevice& device,
+                                            UInt32 firstCycle,
+                                            const PcmBufferView& pcm,
+                                            std::size_t packetCount = 128);
+
+    static AmdtpTransmitRing createTone44100(FireWireDevice& device,
+                                             UInt32 firstCycle,
+                                             std::size_t pcmPosition,
+                                             double frequencyHz = 1000.0,
+                                             double amplitude = 131072.0,
+                                             std::size_t packetCount = 128);
+
+    // Replace only PCM payload words in already-built 48-kHz send slots. CIP
+    // timing, DBC/SYT and DCL structure are left untouched. Live 44.1-kHz
+    // refill will be added after static native-rate playback is validated.
     RefillResult refillPcm48k(PcmRingBuffer& pcm,
                               std::size_t firstPacket,
                               std::size_t packetCount);
@@ -74,6 +87,10 @@ private:
                                        UInt32 firstCycle,
                                        const PcmBufferView* pcm,
                                        std::size_t packetCount);
+    static AmdtpTransmitRing create44100(FireWireDevice& device,
+                                         UInt32 firstCycle,
+                                         const PcmBufferView* pcm,
+                                         std::size_t packetCount);
     void reset();
     void moveFrom(AmdtpTransmitRing&& other) noexcept;
 
