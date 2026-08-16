@@ -5,8 +5,8 @@ FRAMEWORKS := -framework IOKit -framework CoreFoundation
 TARGET := amdtp44probe
 LIB := ../../../lib/libmacfw.a
 
-.PHONY: all clean
-all: $(TARGET) run44.sh
+.PHONY: all clean script
+all: $(TARGET) script
 
 $(LIB):
 	$(MAKE) -C ../../../lib libmacfw.a
@@ -14,7 +14,7 @@ $(LIB):
 $(TARGET): main.cpp $(LIB)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) main.cpp $(LIB) $(FRAMEWORKS) -o $(TARGET)
 
-run44.sh:
+script:
 	chmod +x run44.sh
 
 clean:
