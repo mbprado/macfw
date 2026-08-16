@@ -228,6 +228,7 @@ bool run(bool execute) {
 
     bool cb = false, iso = false, notif = false, capStart = false, playStart = false;
     bool opConn = false, ipConn = false;
+    UInt32 startCycleTime = 0;
     if ((*native)->AddCallbackDispatcherToRunLoop(native, CFRunLoopGetCurrent()) == kIOReturnSuccess) cb = true;
     if ((*native)->AddIsochCallbackDispatcherToRunLoop(native, CFRunLoopGetCurrent()) == kIOReturnSuccess) iso = true;
     if ((*native)->TurnOnNotification(native)) notif = true;
@@ -241,7 +242,6 @@ bool run(bool execute) {
     if (macfw::cmp::connectIpcr0(device, ipcr0, playback.channel()) != kIOReturnSuccess) goto cleanup;
     ipConn = true;
 
-    UInt32 startCycleTime = 0;
     if ((*native)->GetCycleTime(native, &startCycleTime) == kIOReturnSuccess) {
         const UInt32 startNow = (startCycleTime >> 12) & 0x1fffu;
         const UInt32 forward = (firstCycle - startNow) & 0x1fffu;
