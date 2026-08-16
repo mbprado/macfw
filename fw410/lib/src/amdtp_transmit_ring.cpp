@@ -57,10 +57,11 @@ void putPcmWords(std::uint8_t* payload, const std::int32_t* frames) {
     }
 }
 
-bool finishTransmitRing(AmdtpTransmitRing& ring, FireWireDevice& device,
-                        AmdtpTransmitRing::StorageSlot* storage,
+bool finishTransmitRing(FireWireDevice& device,
                         AmdtpTransmitRing::PacketSlot* slots,
-                        std::size_t packetCount, std::size_t mappedBytes,
+                        std::size_t packetCount,
+                        void* mappedBase,
+                        std::size_t mappedBytes,
                         UInt32 firstCycle,
                         IOFireWireLibNuDCLPoolRef& pool,
                         IOFireWireLibLocalIsochPortRef& localPort) {
@@ -75,7 +76,8 @@ bool finishTransmitRing(AmdtpTransmitRing& ring, FireWireDevice& device,
     NuDCLRef last = nullptr;
     for (std::size_t i = 0; i < packetCount; ++i) {
         IOVirtualRange range = {
-            reinterpret_cast<IOVirtualAddress>(storage[i].payload),
+            reinterpret_cast<IOVirtualAddress>(
+                const_cast<std::uint8_t*>(slots[i].payload)),
             static_cast<IOByteCount>(slots[i].length)
         };
         auto dcl = (*pool)->AllocateSendPacket(pool, nullptr, 1, &range);
@@ -92,7 +94,7 @@ bool finishTransmitRing(AmdtpTransmitRing& ring, FireWireDevice& device,
     if (!program) return false;
 
     IOVirtualRange mapped = {
-        reinterpret_cast<IOVirtualAddress>(storage),
+        reinterpret_cast<IOVirtualAddress>(mappedBase),
         static_cast<IOByteCount>(mappedBytes)
     };
     localPort = (*native)->CreateLocalIsochPort(native, true, program,
@@ -282,7 +284,7 @@ AmdtpTransmitRing AmdtpTransmitRing::create48k(FireWireDevice& device,
         state.phase = static_cast<std::uint8_t>((state.phase + 1u) & 3u);
     }
 
-    if (!finishTransmitRing(ring, device, ring.storage_, ring.slots_, packetCount,
+    if (!finishTransmitRing(device, ring.slots_, packetCount, ring.storage_,
                             ring.mappedBytes_, ring.firstCycle_, ring.pool_, ring.localPort_)) {
         ring.reset();
     }
@@ -338,7 +340,7 @@ AmdtpTransmitRing AmdtpTransmitRing::create44100(FireWireDevice& device,
                           packet.dbc, packet.syt, packet.dataBearing};
     }
 
-    if (!finishTransmitRing(ring, device, ring.storage_, ring.slots_, packetCount,
+    if (!finishTransmitRing(device, ring.slots_, packetCount, ring.storage_,
                             ring.mappedBytes_, ring.firstCycle_, ring.pool_, ring.localPort_)) {
         ring.reset();
     }
