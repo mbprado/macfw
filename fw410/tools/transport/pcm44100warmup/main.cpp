@@ -5,8 +5,10 @@
 #include "macfw/isoch_allocation.h"
 
 #include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/firewire/IOFireWireLib.h>
 #include <IOKit/firewire/IOFireWireLibIsoch.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -25,9 +27,141 @@ constexpr std::size_t kCaptureSlots = 256;
 constexpr std::size_t kPlaybackSlots = 4096;
 constexpr std::size_t kWarmupCycles = 512;
 constexpr UInt32 kCycleLead = 2048;
+constexpr UInt32 kCyclesPerSecond = 8000;
+constexpr double kPostTxStartReassertDelaySeconds = 0.020;
 constexpr double kObservationSeconds = 0.35;
 constexpr std::int32_t kToneAmplitude = 131072;
 constexpr double kToneHz = 1000.0;
+
+constexpr UInt16 kFcpAddressHi = 0xffff;
+constexpr UInt32 kFcpCommandLo = 0xf0000b00;
+constexpr UInt32 kFcpResponseLo = 0xf0000d00;
+constexpr UInt32 kFcpResponseSize = 0x200;
+constexpr double kFcpTimeoutSeconds = 1.0;
+
+class FcpRateReassertion {
+public:
+    ~FcpRateReassertion() { reset(); }
+    FcpRateReassertion(const FcpRateReassertion&) = delete;
+    FcpRateReassertion& operator=(const FcpRateReassertion&) = delete;
+
+    bool arm(macfw::FireWireDevice& device) {
+        native_ = device.nativeHandle();
+        generation_ = device.generation();
+        node_ = device.nodeID();
+        response_.expectedNode = node_;
+
+        responseSpace_ = (*native_)->CreateInitialUnitsPseudoAddressSpace(
+            native_, kFcpResponseLo, kFcpResponseSize, &response_, 1024, nullptr,
+            kFWAddressSpaceNoReadAccess | kFWAddressSpaceShareIfExists,
+            CFUUIDGetUUIDBytes(kIOFireWirePseudoAddressSpaceInterfaceID));
+        if (!responseSpace_) return false;
+
+        (*responseSpace_)->SetWriteHandler(responseSpace_, responseHandler);
+        if ((*responseSpace_)->TurnOnNotification(responseSpace_) != kIOReturnSuccess) {
+            reset();
+            return false;
+        }
+        notificationOn_ = true;
+        return true;
+    }
+
+    bool reassert44100() {
+        const bool output = setRate(0x18);
+        const bool input = setRate(0x19);
+        std::cout << "post-start AV/C reassert:\n"
+                  << "    OUTPUT plug 0 -> 44100: " << (output ? "accepted" : "failed") << '\n'
+                  << "    INPUT plug 0  -> 44100: " << (input ? "accepted" : "failed") << '\n';
+        return output && input;
+    }
+
+    void reset() {
+        if (responseSpace_) {
+            if (notificationOn_) {
+                (*responseSpace_)->TurnOffNotification(responseSpace_);
+                notificationOn_ = false;
+            }
+            (*responseSpace_)->Release(responseSpace_);
+            responseSpace_ = nullptr;
+        }
+        native_ = nullptr;
+    }
+
+private:
+    struct ResponseContext {
+        UInt16 expectedNode = 0;
+        bool received = false;
+        UInt32 length = 0;
+        std::array<UInt8, kFcpResponseSize> bytes{};
+    };
+
+    FcpRateReassertion() = default;
+
+    static UInt32 responseHandler(IOFireWireLibPseudoAddressSpaceRef space,
+                                  FWClientCommandID commandID,
+                                  UInt32 packetLen,
+                                  void* packet,
+                                  UInt16 srcNodeID,
+                                  UInt32,
+                                  UInt32,
+                                  void* refCon) {
+        auto* ctx = static_cast<ResponseContext*>(refCon);
+        if (ctx && packet && srcNodeID == ctx->expectedNode) {
+            ctx->length = std::min<UInt32>(packetLen, ctx->bytes.size());
+            std::memcpy(ctx->bytes.data(), packet, ctx->length);
+            ctx->received = true;
+        }
+        (*space)->ClientCommandIsComplete(space, commandID, kIOReturnSuccess);
+        return kIOReturnSuccess;
+    }
+
+    bool transaction(const UInt8* cmd, UInt32 len) {
+        response_.received = false;
+        response_.length = 0;
+        response_.bytes.fill(0);
+
+        FWAddress address{};
+        address.nodeID = node_;
+        address.addressHi = kFcpAddressHi;
+        address.addressLo = kFcpCommandLo;
+        UInt32 size = len;
+        if ((*native_)->Write(native_, 0, &address, cmd, &size, true, generation_) !=
+            kIOReturnSuccess) {
+            return false;
+        }
+
+        const CFAbsoluteTime deadline =
+            CFAbsoluteTimeGetCurrent() + kFcpTimeoutSeconds;
+        while (!response_.received && CFAbsoluteTimeGetCurrent() < deadline)
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, true);
+        return response_.received;
+    }
+
+    bool setRate(UInt8 opcode) {
+        constexpr UInt8 kSfc44100 = 0x01;
+        const UInt8 cmd[8] = {
+            0x00, 0xff, opcode, 0x00, 0x90, kSfc44100, 0xff, 0xff
+        };
+        if (!transaction(cmd, sizeof(cmd))) return false;
+
+        const UInt8 responseCode = response_.length ? response_.bytes[0] : 0;
+        const bool accepted = responseCode == 0x09 || responseCode == 0x0c ||
+                              responseCode == 0x0d || responseCode == 0x0f;
+        return response_.length >= sizeof(cmd) && accepted &&
+               response_.bytes[1] == 0xff &&
+               response_.bytes[2] == opcode &&
+               response_.bytes[3] == 0x00 &&
+               response_.bytes[4] == 0x90 &&
+               ((response_.bytes[5] & 0x07) == kSfc44100);
+    }
+
+    IOFireWireLibDeviceRef native_ = nullptr;
+    IOFireWireLibPseudoAddressSpaceRef responseSpace_ = nullptr;
+    ResponseContext response_{};
+    UInt32 generation_ = 0;
+    UInt16 node_ = 0;
+    bool notificationOn_ = false;
+};
 
 struct WarmupTxRing {
     struct StorageSlot {
@@ -173,7 +307,7 @@ void dumpCapture(const macfw::AmdtpReceiveRing& ring) {
               << "    touched slots:      " << touched << " / " << ring.packetCount() << '\n'
               << "    data-bearing slots: " << data << '\n'
               << "    FDF=0x01 slots:     " << fdf << '\n'
-              << "result: " << (data ? "PASS - FW410 accepted 44.1 data after NODATA warm-up"
+              << "result: " << (data ? "PASS - FW410 accepted 44.1 data after post-start rate reassertion"
                                       : "FAIL - capture remained NODATA") << '\n';
 }
 
@@ -187,7 +321,7 @@ bool run(bool execute) {
 
     std::uint32_t opcr0 = 0, ipcr0 = 0;
     if (macfw::cmp::readOpcr0(device, opcr0) != kIOReturnSuccess ||
-        macfw::cmp::readIpcr0(device, ipcr0) != kIOReturnSuccess) return false;
+        !macfw::cmp::readIpcr0(device, ipcr0) != kIOReturnSuccess) return false;
     if (!macfw::cmp::ready(macfw::cmp::decodePcr(opcr0)) ||
         !macfw::cmp::ready(macfw::cmp::decodePcr(ipcr0))) {
         std::cout << "status: REFUSED - PCR0 offline or already connected\n";
@@ -202,6 +336,7 @@ bool run(bool execute) {
 
     std::cout << "44.1 kHz warm-up experiment:\n"
               << "    warm-up:            " << kWarmupCycles << " cycles (64 ms) true NODATA\n"
+              << "    M-Audio quirk:      reassert 44100 Hz ~20 ms after NODATA TX begins\n"
               << "    after warm-up:      native blocking 44.1 cadence + 1 kHz tone on Output 1\n"
               << "    total TX program:   " << kPlaybackSlots << " cycles\n"
               << "    start lead:         " << kCycleLead << " cycles\n";
@@ -226,12 +361,18 @@ bool run(bool execute) {
         reinterpret_cast<IOFireWireLibIsochPortRef>(rx.nativeLocalPort()));
     if (playback.bindHostToDeviceTalkerFirst(tx->localPort) != kIOReturnSuccess) return false;
 
+    FcpRateReassertion fcp;
     bool cb = false, iso = false, notif = false, capStart = false, playStart = false;
     bool opConn = false, ipConn = false;
     UInt32 startCycleTime = 0;
+    UInt32 startForward = 0;
     if ((*native)->AddCallbackDispatcherToRunLoop(native, CFRunLoopGetCurrent()) == kIOReturnSuccess) cb = true;
     if ((*native)->AddIsochCallbackDispatcherToRunLoop(native, CFRunLoopGetCurrent()) == kIOReturnSuccess) iso = true;
     if ((*native)->TurnOnNotification(native)) notif = true;
+    if (!cb || !fcp.arm(device)) {
+        std::cout << "FCP response setup failed\n";
+        goto cleanup;
+    }
 
     if (capture.allocate() != kIOReturnSuccess || playback.allocate() != kIOReturnSuccess) goto cleanup;
     std::cout << "ISO resources:\n"
@@ -242,14 +383,18 @@ bool run(bool execute) {
     if (macfw::cmp::connectIpcr0(device, ipcr0, playback.channel()) != kIOReturnSuccess) goto cleanup;
     ipConn = true;
 
-    if ((*native)->GetCycleTime(native, &startCycleTime) == kIOReturnSuccess) {
+    if ((*native)->GetCycleTime(native, &startCycleTime) != kIOReturnSuccess) goto cleanup;
+    {
         const UInt32 startNow = (startCycleTime >> 12) & 0x1fffu;
-        const UInt32 forward = (firstCycle - startNow) & 0x1fffu;
+        startForward = (firstCycle - startNow) & 0x1fffu;
         std::cout << "TX start timing:\n"
                   << "    scheduled cycle: " << firstCycle << '\n'
                   << "    current cycle:   " << startNow << '\n'
-                  << "    forward delta:   " << forward << " cycles\n";
-        if (forward > 4096u) { std::cout << "status: REFUSED - scheduled cycle missed\n"; goto cleanup; }
+                  << "    forward delta:   " << startForward << " cycles\n";
+        if (startForward > 4096u) {
+            std::cout << "status: REFUSED - scheduled cycle missed\n";
+            goto cleanup;
+        }
     }
 
     if ((*playback.nativeChannel())->Start(playback.nativeChannel()) != kIOReturnSuccess) goto cleanup;
@@ -257,9 +402,24 @@ bool run(bool execute) {
     if ((*capture.nativeChannel())->Start(capture.nativeChannel()) != kIOReturnSuccess) goto cleanup;
     capStart = true;
 
-    std::cout << "duplex ISO: started\n"
-              << "listen: tone should begin after ~64 ms on Analog Out 1\n"
-              << "observation window: " << kObservationSeconds << " s\n";
+    {
+        const double untilReassert =
+            static_cast<double>(startForward) / static_cast<double>(kCyclesPerSecond) +
+            kPostTxStartReassertDelaySeconds;
+        std::cout << "duplex ISO: started\n"
+                  << "waiting " << std::fixed << std::setprecision(3) << untilReassert
+                  << " s so the reassert occurs ~20 ms into live NODATA TX\n"
+                  << std::defaultfloat;
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, untilReassert, false);
+    }
+
+    if (!fcp.reassert44100()) {
+        std::cout << "status: FAIL - post-start 44100 Hz reassertion was not accepted\n";
+        goto cleanup;
+    }
+
+    std::cout << "listen: tone should begin ~44 ms after the post-start reassert on Analog Out 1\n"
+              << "post-reassert observation window: " << kObservationSeconds << " s\n";
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, kObservationSeconds, false);
     dumpCapture(rx);
 
@@ -275,6 +435,7 @@ cleanup:
         std::cout << "restore oPCR[0]: " << (kr == kIOReturnSuccess ? "success" : "failed") << '\n';
     }
     playback.release(); capture.release();
+    fcp.reset();
     if (notif) (*native)->TurnOffNotification(native);
     if (iso) (*native)->RemoveIsochCallbackDispatcherFromRunLoop(native);
     if (cb) (*native)->RemoveCallbackDispatcherFromRunLoop(native);
@@ -289,6 +450,6 @@ int main(int argc, char** argv) {
         if (arg == "--execute") execute = true;
         else { std::cerr << "usage: ./pcm44100warmup [--execute]\n"; return 64; }
     }
-    std::cout << "macfw pcm44100warmup — 44.1 kHz NODATA warm-up A/B test\n\n";
+    std::cout << "macfw pcm44100warmup — 44.1 kHz NODATA warm-up + M-Audio rate reassert test\n\n";
     return run(execute) ? 0 : 1;
 }
