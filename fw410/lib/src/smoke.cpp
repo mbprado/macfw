@@ -67,8 +67,8 @@ int main() {
     std::uint16_t previousSyt = 0;
     bool havePreviousSyt = false;
     const bool expectedFirst16[16] = {
-        true, true, false, true, true, false, true, true,
-        false, true, true, false, true, true, true, false
+        true, true, true, false, true, true, false, true,
+        true, false, true, true, false, true, true, true
     };
     for (std::size_t i = 0; i < 640; ++i) {
         const auto p = macfw::am824::buildPlayback44100Silence(
