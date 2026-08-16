@@ -44,24 +44,22 @@ A kernel component should only be considered if a required low-level capability 
 
 ## Confirmed user-space result
 
-On an Intel Mac running macOS Monterey, normal user-space processes using Apple's `IOFireWireLib` can now perform the complete low-level bring-up path:
+On an Intel Mac running macOS Monterey, normal user-space processes using Apple's `IOFireWireLib` can now perform the complete low-level bring-up path and substantially more of the audio stack:
 
-- discover the FW410 bootloader;
-- read its configuration ROM;
-- perform direct asynchronous FireWire reads and writes;
-- read and decode the BeBoB information registers;
-- issue the guarded M-Audio boot-from-flash cue;
-- survive the resulting FireWire bus reset by reacquiring generation/node state;
-- rediscover the device as the operational `FW 410` personality;
-- send AV/C commands through raw FCP from user space;
-- receive FCP responses through a user-space pseudo address space;
-- discover plug topology, sample rates, PCM/MIDI formations, and channel positions;
-- allocate FireWire IRM channel/bandwidth resources;
-- establish and tear down both CMP stream connections;
-- create local NuDCL isochronous transmit and receive programs;
-- transmit Mac -> FW410 isochronous packets;
-- receive FW410 -> Mac AM824 audio packets;
-- trigger the FW410's required full-duplex stream behavior entirely from user space.
+- discover and boot the FW410 from its bootloader personality;
+- perform asynchronous FireWire reads/writes and raw FCP/AV/C transactions;
+- discover plug topology, supported rates, stream formations, and channel positions;
+- allocate IRM channel/bandwidth resources and establish both CMP directions;
+- transmit and receive NuDCL isochronous programs entirely from user space;
+- decode FW410 AM824 capture to signed 24-bit PCM;
+- transmit correctly timed 48 kHz data-bearing AM824 playback;
+- play verified tones on physical FW410 analog outputs;
+- feed playback from reusable PCM buffers/ring buffers with live refill;
+- run an independent PCM producer thread against the FireWire scheduler;
+- capture audio through CoreAudio/AUHAL and reproduce it through FW410 outputs;
+- read and change the FW410 sample rate through AV/C;
+- run valid 44.1 kHz NODATA duplex transport and receive sample-bearing 44.1 kHz capture;
+- probe the internal AV/C mixer/routing topology and identify a headphone selector path.
 
 Confirmed boot identity transition:
 
@@ -70,25 +68,9 @@ before: FW Bootloader / model 0x00010058
 after:  FW 410        / model 0x00010046
 ```
 
-The operational BeBoB information block reports bootloader version `0`, confirming that the application firmware is running.
+48 kHz PCM playback/capture and live streaming are now the known-good reference implementation. The current transport blocker is native **data-bearing 44.1 kHz host playback**, not basic 44.1 kHz rate selection or ISO connectivity.
 
-Confirmed AV/C status transaction:
-
-```text
-command:  01 ff 18 00 90 ff ff ff
-response: 0c ff 18 00 90 02 ff ff
-rate:     48000 Hz
-```
-
-Confirmed live 48 kHz capture packet:
-
-```text
-00 05 00 f0 90 02 aa b5 ...
-```
-
-This decodes as AM824, DBS=5, eight events per 168-byte data packet, valid SYT, and the expected four PCM + one MIDI position layout. With host playback ISO packets active, the FW410 produces a repeating 3-data / 1-NODATA blocking-mode cadence, exactly yielding 48,000 events/sec.
-
-See [`analysis/isochronous-transport.md`](analysis/isochronous-transport.md) for packet-level evidence.
+For the detailed handoff and exact experiments already eliminated, read [`analysis/current-development-status.md`](analysis/current-development-status.md) before continuing development.
 
 ## Protocol layers
 
@@ -115,132 +97,92 @@ See [`analysis/isochronous-transport.md`](analysis/isochronous-transport.md) for
 
 Only the FW410-specific layers should contain M-Audio-specific assumptions.
 
-## Reverse engineering
-
-The original M-Audio driver is treated as immutable reference material. Existing Linux `snd-bebob` and FFADO/FreeBoB implementations are used as independent protocol references.
-
-Important classes discovered in the original driver include:
-
-```text
-FWIsochChannel
-FWDCLProgram
-FWDCLInputProgram
-FWDCLOutputProgram
-FWP2PConnection
-FWConnectionManager
-FWAVCConnectionManager
-FWAudioDevice
-FWAudioEngine
-FWAudioStream
-FWUserClient
-FW410
-com_m_audio_FW410Device
-```
-
-See [`analysis/`](analysis/) for reverse-engineering notes.
-
 ## Development milestones
-
-### M0 — Repository and evidence
-
-- [x] Preserve original driver information
-- [x] Identify Mach-O architecture
-- [ ] Record hashes of original files
-- [ ] Extract and document `Info.plist`
-- [ ] Complete initial class/function map
 
 ### M1 — User-space FireWire proof of concept
 
-- [x] Detect an attached FireWire controller/device from user space
-- [x] Detect the FW410 bootloader
-- [x] Read the configuration ROM
-- [x] Read bus generation and remote node ID
-- [x] Perform harmless asynchronous reads
-- [x] Perform a narrowly scoped asynchronous write
-- [x] Start the FW410 operational firmware from flash
-- [x] Rediscover the operational FW410 after bus reset
-- [x] Determine whether isochronous resources can be controlled from user space
-- [ ] Repeat the successful path on Intel macOS Sonoma or newer
-
-**M1 achieved:** a standalone user-space process communicates with, boots, allocates ISO resources for, and streams packets with the FW410 without loading the original M-Audio kext.
+- [x] Detect/boot the FW410 from user space
+- [x] Read configuration ROM and BeBoB information
+- [x] Async read/write
+- [x] FCP/AV/C command/response
+- [x] Allocate isochronous resources
+- [x] Establish duplex transport
+- [ ] Repeat successful path on Intel macOS Sonoma or newer
 
 ### M2 — FireWire transport layer
 
 - [x] Node discovery
-- [ ] Bus reset notification/recovery abstraction
-- [x] 64-bit asynchronous addressing
-- [x] Asynchronous block read/write primitives
-- [x] FCP command/response transport
-- [x] Isochronous channel creation
-- [x] IRM bandwidth/channel allocation
-- [x] CMP connection setup/teardown
-- [x] NuDCL receive path
-- [x] NuDCL transmit path
-- [x] CIP/AM824 header parsing
-- [x] 48 kHz blocking-mode capture cadence identified
-- [ ] Long-running ring-buffered ISO engine
+- [ ] Bus-reset notification/recovery abstraction
+- [x] Async block read/write primitives
+- [x] FCP transport
+- [x] IRM allocation and CMP connection setup/teardown
+- [x] NuDCL RX and TX
+- [x] CIP/AM824 parsing
+- [x] Reusable RX/TX ring infrastructure
+- [x] 48 kHz live PCM refill
+- [x] Independent producer + transport scheduler
+- [ ] Long-running production stream engine
 - [ ] Bus-reset-safe stream restart
 
 ### M3 — FW410 / BeBoB protocol
 
-- [x] Device identification
-- [x] Firmware information
-- [x] Firmware boot-from-flash sequence
-- [x] AV/C STATUS command path
-- [x] Plug discovery
+- [x] Device/firmware identification and boot
+- [x] Plug and stream-formation discovery
+- [x] PCM/MIDI channel mapping
+- [x] Duplex packet-flow requirement
+- [x] Sample-rate discovery
+- [x] Sample-rate control (44.1/48 tested)
+- [x] Mixer/selector topology discovery
+- [x] Headphone selector candidate verified experimentally
 - [ ] Clock source discovery/control
-- [x] Sample-rate discovery in both directions
-- [ ] Sample-rate control
-- [x] Stream formation discovery
-- [x] PCM/MIDI channel-position mapping
-- [x] Confirm FW410 requires actual duplex packet flow
+- [ ] Complete mixer/control mapping
 - [ ] MIDI byte transport validation
-- [ ] Mixer/control protocol mapping
 
 ### M4 — Audio DevKit
 
-- [ ] Generic audio device abstraction
-- [ ] Reusable FireWire stream engine
-- [ ] Playback PCM encoder
-- [ ] Capture PCM decoder
-- [ ] Clock/SYT abstraction
-- [ ] Sample-rate management
-- [x] FW410 channel mapping understood
-- [ ] Controls / mixer abstraction
+- [ ] Generic audio-device abstraction
+- [x] Reusable FireWire TX/RX components
+- [x] Playback PCM encoder
+- [x] Capture PCM decoder
+- [x] PCM buffer/ring-buffer abstraction
+- [x] 48 kHz reusable PCM stream scheduler
+- [ ] General native-rate clock/SYT scheduler
+- [ ] Unified sample-rate management
+- [ ] Controls/mixer abstraction
 - [ ] MIDI abstraction
 
 ### M5 — CoreAudio integration
 
-- [ ] Minimal AudioDriverKit/CoreAudio-facing device
-- [ ] Device enumeration
-- [ ] Playback
-- [ ] Capture
-- [ ] Clock synchronization
+- [x] AUHAL input diagnostic
+- [x] Experimental CoreAudio input -> FW410 PCM bridge
+- [x] Temporary 44.1 -> 48 kHz SRC bridge validated
+- [ ] CoreAudio-facing FW410 device
+- [ ] Playback exposed to applications
+- [ ] Capture exposed to applications
+- [ ] Clock/rate synchronization
 - [ ] Controls
 
 ### M6 — FW410 complete implementation
 
-- [ ] Mixer
+- [ ] Mixer/control panel
 - [ ] Routing
-- [ ] Headphone output
-- [ ] S/PDIF
+- [ ] Headphone controls
+- [ ] S/PDIF validation
 - [ ] MIDI
 - [ ] Firmware management
 - [ ] Bus reset recovery
 
 ## Current phase
 
-**M2 transport completion / M4 Audio DevKit extraction.**
+**Native-rate AMDTP completion, then CoreAudio integration.**
 
-Raw FireWire audio transport has now been demonstrated in both directions. The FW410 starts real capture packets when the host sends an active isochronous playback stream, even when that playback stream contains AM824 NODATA only.
+The 48 kHz path is hardware-confirmed end-to-end: capture, PCM playback, reusable buffers, live asynchronous refill, and an experimental CoreAudio-input bridge all work.
 
-Immediate next work:
+The FW410 also successfully changes to 44.1 kHz and produces sample-bearing 44.1 kHz capture when the host sends the known-good NODATA stream. `formatprobe` confirms that 44.1 kHz playback still uses 10 PCM + 1 MIDI (DBS=11). Native data-bearing 44.1 kHz playback, however, currently produces no sound and leaves FW410 capture in NODATA.
 
-1. decode capture MBLA words into signed 24-bit PCM and gather per-channel statistics;
-2. generate correctly timed data-bearing playback silence with continuous DBC/SYT;
-3. validate longer-running duplex continuity;
-4. refactor the experimental code into reusable transport/AM824 classes;
-5. then expose the validated streams to the macOS audio layer.
+Known causes already eliminated include wrong rate selection, wrong FDF, wrong DBS/formation, general 44.1 CMP/NuDCL failure, and missing the scheduled TX start cycle. See [`analysis/current-development-status.md`](analysis/current-development-status.md) for the exact evidence and recommended A/B experiment.
+
+After native-rate transport is resolved, development should return to the CoreAudio-facing device architecture. Mixer/routing/headphone work is intentionally deferred; selector FB7 has already been shown to route playback channels 1/2 to headphone left/right when switched to its alternate input.
 
 ## External references
 
@@ -250,6 +192,8 @@ Existing open-source implementations are protocol references:
 - Linux M-Audio FireWire support
 - FFADO / FreeBoB
 - IEEE 1394 / IEC 61883 / AV/C specifications where available
+
+Use these to reduce duplicated reverse engineering, but do not copy implementation choices blindly when macOS offers a cleaner or more efficient approach.
 
 ## Disclaimer
 
