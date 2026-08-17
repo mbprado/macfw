@@ -1,0 +1,732 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		F05D08F03032FB5700F7A9C4 /* macfwApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05D08EF3032FB5700F7A9C4 /* macfwApp.swift */; };
+		F05D08F23032FB5700F7A9C4 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05D08F13032FB5700F7A9C4 /* ContentView.swift */; };
+		F05D08F43032FB5900F7A9C4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F05D08F33032FB5900F7A9C4 /* Assets.xcassets */; };
+		F05D08F73032FB5900F7A9C4 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F05D08F63032FB5900F7A9C4 /* Preview Assets.xcassets */; };
+		F05D09023032FB5900F7A9C4 /* macfwTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05D09013032FB5900F7A9C4 /* macfwTests.swift */; };
+		F05D090C3032FB5900F7A9C4 /* macfwUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05D090B3032FB5900F7A9C4 /* macfwUITests.swift */; };
+		F05D090E3032FB5900F7A9C4 /* macfwUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05D090D3032FB5900F7A9C4 /* macfwUITestsLaunchTests.swift */; };
+		F05D09223032FBB000F7A9C4 /* DriverKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F05D09213032FBB000F7A9C4 /* DriverKit.framework */; };
+		F05D09253032FBB000F7A9C4 /* FW410AudioDriver.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F05D09243032FBB000F7A9C4 /* FW410AudioDriver.cpp */; };
+		F05D09273032FBB000F7A9C4 /* FW410AudioDriver.iig in Sources */ = {isa = PBXBuildFile; fileRef = F05D09263032FBB000F7A9C4 /* FW410AudioDriver.iig */; };
+		F05D092B3032FBB000F7A9C4 /* com.mbprado.macfw.FW410AudioDriver.dext in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = F05D091F3032FBB000F7A9C4 /* com.mbprado.macfw.FW410AudioDriver.dext */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		F05D08FE3032FB5900F7A9C4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F05D08E43032FB5700F7A9C4 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F05D08EB3032FB5700F7A9C4;
+			remoteInfo = macfw;
+		};
+		F05D09083032FB5900F7A9C4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F05D08E43032FB5700F7A9C4 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F05D08EB3032FB5700F7A9C4;
+			remoteInfo = macfw;
+		};
+		F05D09293032FBB000F7A9C4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F05D08E43032FB5700F7A9C4 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F05D091E3032FBB000F7A9C4;
+			remoteInfo = FW410AudioDriver;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		F05D092F3032FBB000F7A9C4 /* Embed System Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(SYSTEM_EXTENSIONS_FOLDER_PATH)";
+			dstSubfolderSpec = 16;
+			files = (
+				F05D092B3032FBB000F7A9C4 /* com.mbprado.macfw.FW410AudioDriver.dext in Embed System Extensions */,
+			);
+			name = "Embed System Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		F05D08EC3032FB5700F7A9C4 /* macfw.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = macfw.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F05D08EF3032FB5700F7A9C4 /* macfwApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = macfwApp.swift; sourceTree = "<group>"; };
+		F05D08F13032FB5700F7A9C4 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		F05D08F33032FB5900F7A9C4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		F05D08F63032FB5900F7A9C4 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
+		F05D08F83032FB5900F7A9C4 /* macfw.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = macfw.entitlements; sourceTree = "<group>"; };
+		F05D08FD3032FB5900F7A9C4 /* macfwTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = macfwTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F05D09013032FB5900F7A9C4 /* macfwTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = macfwTests.swift; sourceTree = "<group>"; };
+		F05D09073032FB5900F7A9C4 /* macfwUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = macfwUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F05D090B3032FB5900F7A9C4 /* macfwUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = macfwUITests.swift; sourceTree = "<group>"; };
+		F05D090D3032FB5900F7A9C4 /* macfwUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = macfwUITestsLaunchTests.swift; sourceTree = "<group>"; };
+		F05D091F3032FBB000F7A9C4 /* com.mbprado.macfw.FW410AudioDriver.dext */ = {isa = PBXFileReference; explicitFileType = "wrapper.driver-extension"; includeInIndex = 0; path = com.mbprado.macfw.FW410AudioDriver.dext; sourceTree = BUILT_PRODUCTS_DIR; };
+		F05D09213032FBB000F7A9C4 /* DriverKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = DriverKit.framework; path = System/Library/Frameworks/DriverKit.framework; sourceTree = SDKROOT; };
+		F05D09243032FBB000F7A9C4 /* FW410AudioDriver.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = FW410AudioDriver.cpp; sourceTree = "<group>"; };
+		F05D09263032FBB000F7A9C4 /* FW410AudioDriver.iig */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.iig; path = FW410AudioDriver.iig; sourceTree = "<group>"; };
+		F05D09283032FBB000F7A9C4 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		F05D08E93032FB5700F7A9C4 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F05D08FA3032FB5900F7A9C4 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F05D09043032FB5900F7A9C4 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F05D091C3032FBB000F7A9C4 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F05D09223032FBB000F7A9C4 /* DriverKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		F05D08E33032FB5700F7A9C4 = {
+			isa = PBXGroup;
+			children = (
+				F05D08EE3032FB5700F7A9C4 /* macfw */,
+				F05D09003032FB5900F7A9C4 /* macfwTests */,
+				F05D090A3032FB5900F7A9C4 /* macfwUITests */,
+				F05D09233032FBB000F7A9C4 /* FW410AudioDriver */,
+				F05D09203032FBB000F7A9C4 /* Frameworks */,
+				F05D08ED3032FB5700F7A9C4 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		F05D08ED3032FB5700F7A9C4 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F05D08EC3032FB5700F7A9C4 /* macfw.app */,
+				F05D08FD3032FB5900F7A9C4 /* macfwTests.xctest */,
+				F05D09073032FB5900F7A9C4 /* macfwUITests.xctest */,
+				F05D091F3032FBB000F7A9C4 /* com.mbprado.macfw.FW410AudioDriver.dext */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		F05D08EE3032FB5700F7A9C4 /* macfw */ = {
+			isa = PBXGroup;
+			children = (
+				F05D08EF3032FB5700F7A9C4 /* macfwApp.swift */,
+				F05D08F13032FB5700F7A9C4 /* ContentView.swift */,
+				F05D08F33032FB5900F7A9C4 /* Assets.xcassets */,
+				F05D08F83032FB5900F7A9C4 /* macfw.entitlements */,
+				F05D08F53032FB5900F7A9C4 /* Preview Content */,
+			);
+			path = macfw;
+			sourceTree = "<group>";
+		};
+		F05D08F53032FB5900F7A9C4 /* Preview Content */ = {
+			isa = PBXGroup;
+			children = (
+				F05D08F63032FB5900F7A9C4 /* Preview Assets.xcassets */,
+			);
+			path = "Preview Content";
+			sourceTree = "<group>";
+		};
+		F05D09003032FB5900F7A9C4 /* macfwTests */ = {
+			isa = PBXGroup;
+			children = (
+				F05D09013032FB5900F7A9C4 /* macfwTests.swift */,
+			);
+			path = macfwTests;
+			sourceTree = "<group>";
+		};
+		F05D090A3032FB5900F7A9C4 /* macfwUITests */ = {
+			isa = PBXGroup;
+			children = (
+				F05D090B3032FB5900F7A9C4 /* macfwUITests.swift */,
+				F05D090D3032FB5900F7A9C4 /* macfwUITestsLaunchTests.swift */,
+			);
+			path = macfwUITests;
+			sourceTree = "<group>";
+		};
+		F05D09203032FBB000F7A9C4 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				F05D09213032FBB000F7A9C4 /* DriverKit.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		F05D09233032FBB000F7A9C4 /* FW410AudioDriver */ = {
+			isa = PBXGroup;
+			children = (
+				F05D09243032FBB000F7A9C4 /* FW410AudioDriver.cpp */,
+				F05D09263032FBB000F7A9C4 /* FW410AudioDriver.iig */,
+				F05D09283032FBB000F7A9C4 /* Info.plist */,
+			);
+			path = FW410AudioDriver;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXHeadersBuildPhase section */
+		F05D091A3032FBB000F7A9C4 /* Headers */ = {
+			isa = PBXHeadersBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXHeadersBuildPhase section */
+
+/* Begin PBXNativeTarget section */
+		F05D08EB3032FB5700F7A9C4 /* macfw */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F05D09113032FB5900F7A9C4 /* Build configuration list for PBXNativeTarget "macfw" */;
+			buildPhases = (
+				F05D08E83032FB5700F7A9C4 /* Sources */,
+				F05D08E93032FB5700F7A9C4 /* Frameworks */,
+				F05D08EA3032FB5700F7A9C4 /* Resources */,
+				F05D092F3032FBB000F7A9C4 /* Embed System Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F05D092A3032FBB000F7A9C4 /* PBXTargetDependency */,
+			);
+			name = macfw;
+			productName = macfw;
+			productReference = F05D08EC3032FB5700F7A9C4 /* macfw.app */;
+			productType = "com.apple.product-type.application";
+		};
+		F05D08FC3032FB5900F7A9C4 /* macfwTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F05D09143032FB5900F7A9C4 /* Build configuration list for PBXNativeTarget "macfwTests" */;
+			buildPhases = (
+				F05D08F93032FB5900F7A9C4 /* Sources */,
+				F05D08FA3032FB5900F7A9C4 /* Frameworks */,
+				F05D08FB3032FB5900F7A9C4 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F05D08FF3032FB5900F7A9C4 /* PBXTargetDependency */,
+			);
+			name = macfwTests;
+			productName = macfwTests;
+			productReference = F05D08FD3032FB5900F7A9C4 /* macfwTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		F05D09063032FB5900F7A9C4 /* macfwUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F05D09173032FB5900F7A9C4 /* Build configuration list for PBXNativeTarget "macfwUITests" */;
+			buildPhases = (
+				F05D09033032FB5900F7A9C4 /* Sources */,
+				F05D09043032FB5900F7A9C4 /* Frameworks */,
+				F05D09053032FB5900F7A9C4 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F05D09093032FB5900F7A9C4 /* PBXTargetDependency */,
+			);
+			name = macfwUITests;
+			productName = macfwUITests;
+			productReference = F05D09073032FB5900F7A9C4 /* macfwUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		F05D091E3032FBB000F7A9C4 /* FW410AudioDriver */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F05D092C3032FBB000F7A9C4 /* Build configuration list for PBXNativeTarget "FW410AudioDriver" */;
+			buildPhases = (
+				F05D091A3032FBB000F7A9C4 /* Headers */,
+				F05D091B3032FBB000F7A9C4 /* Sources */,
+				F05D091C3032FBB000F7A9C4 /* Frameworks */,
+				F05D091D3032FBB000F7A9C4 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = FW410AudioDriver;
+			productName = FW410AudioDriver;
+			productReference = F05D091F3032FBB000F7A9C4 /* com.mbprado.macfw.FW410AudioDriver.dext */;
+			productType = "com.apple.product-type.driver-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		F05D08E43032FB5700F7A9C4 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1420;
+				LastUpgradeCheck = 1420;
+				TargetAttributes = {
+					F05D08EB3032FB5700F7A9C4 = {
+						CreatedOnToolsVersion = 14.2;
+					};
+					F05D08FC3032FB5900F7A9C4 = {
+						CreatedOnToolsVersion = 14.2;
+						TestTargetID = F05D08EB3032FB5700F7A9C4;
+					};
+					F05D09063032FB5900F7A9C4 = {
+						CreatedOnToolsVersion = 14.2;
+						TestTargetID = F05D08EB3032FB5700F7A9C4;
+					};
+					F05D091E3032FBB000F7A9C4 = {
+						CreatedOnToolsVersion = 14.2;
+					};
+				};
+			};
+			buildConfigurationList = F05D08E73032FB5700F7A9C4 /* Build configuration list for PBXProject "macfw" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = F05D08E33032FB5700F7A9C4;
+			productRefGroup = F05D08ED3032FB5700F7A9C4 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F05D08EB3032FB5700F7A9C4 /* macfw */,
+				F05D08FC3032FB5900F7A9C4 /* macfwTests */,
+				F05D09063032FB5900F7A9C4 /* macfwUITests */,
+				F05D091E3032FBB000F7A9C4 /* FW410AudioDriver */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		F05D08EA3032FB5700F7A9C4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F05D08F73032FB5900F7A9C4 /* Preview Assets.xcassets in Resources */,
+				F05D08F43032FB5900F7A9C4 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F05D08FB3032FB5900F7A9C4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F05D09053032FB5900F7A9C4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F05D091D3032FBB000F7A9C4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		F05D08E83032FB5700F7A9C4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F05D08F23032FB5700F7A9C4 /* ContentView.swift in Sources */,
+				F05D08F03032FB5700F7A9C4 /* macfwApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F05D08F93032FB5900F7A9C4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F05D09023032FB5900F7A9C4 /* macfwTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F05D09033032FB5900F7A9C4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F05D090C3032FB5900F7A9C4 /* macfwUITests.swift in Sources */,
+				F05D090E3032FB5900F7A9C4 /* macfwUITestsLaunchTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F05D091B3032FBB000F7A9C4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F05D09253032FBB000F7A9C4 /* FW410AudioDriver.cpp in Sources */,
+				F05D09273032FBB000F7A9C4 /* FW410AudioDriver.iig in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		F05D08FF3032FB5900F7A9C4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F05D08EB3032FB5700F7A9C4 /* macfw */;
+			targetProxy = F05D08FE3032FB5900F7A9C4 /* PBXContainerItemProxy */;
+		};
+		F05D09093032FB5900F7A9C4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F05D08EB3032FB5700F7A9C4 /* macfw */;
+			targetProxy = F05D09083032FB5900F7A9C4 /* PBXContainerItemProxy */;
+		};
+		F05D092A3032FBB000F7A9C4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F05D091E3032FBB000F7A9C4 /* FW410AudioDriver */;
+			targetProxy = F05D09293032FBB000F7A9C4 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		F05D090F3032FB5900F7A9C4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 12.7;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		F05D09103032FB5900F7A9C4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 12.7;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		F05D09123032FB5900F7A9C4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = macfw/macfw.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"macfw/Preview Content\"";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mbprado.macfw;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		F05D09133032FB5900F7A9C4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = macfw/macfw.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"macfw/Preview Content\"";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mbprado.macfw;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		F05D09153032FB5900F7A9C4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 12.7;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mbprado.macfwTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/macfw.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/macfw";
+			};
+			name = Debug;
+		};
+		F05D09163032FB5900F7A9C4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 12.7;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mbprado.macfwTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/macfw.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/macfw";
+			};
+			name = Release;
+		};
+		F05D09183032FB5900F7A9C4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mbprado.macfwUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = macfw;
+			};
+			name = Debug;
+		};
+		F05D09193032FB5900F7A9C4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mbprado.macfwUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = macfw;
+			};
+			name = Release;
+		};
+		F05D092D3032FBB000F7A9C4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DRIVERKIT_DEPLOYMENT_TARGET = 22.2;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = FW410AudioDriver/Info.plist;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mbprado.macfw.FW410AudioDriver;
+				PRODUCT_NAME = "$(inherited)";
+				RUN_CLANG_STATIC_ANALYZER = YES;
+				SDKROOT = driverkit;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		F05D092E3032FBB000F7A9C4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DRIVERKIT_DEPLOYMENT_TARGET = 22.2;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = FW410AudioDriver/Info.plist;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mbprado.macfw.FW410AudioDriver;
+				PRODUCT_NAME = "$(inherited)";
+				RUN_CLANG_STATIC_ANALYZER = YES;
+				SDKROOT = driverkit;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		F05D08E73032FB5700F7A9C4 /* Build configuration list for PBXProject "macfw" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F05D090F3032FB5900F7A9C4 /* Debug */,
+				F05D09103032FB5900F7A9C4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F05D09113032FB5900F7A9C4 /* Build configuration list for PBXNativeTarget "macfw" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F05D09123032FB5900F7A9C4 /* Debug */,
+				F05D09133032FB5900F7A9C4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F05D09143032FB5900F7A9C4 /* Build configuration list for PBXNativeTarget "macfwTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F05D09153032FB5900F7A9C4 /* Debug */,
+				F05D09163032FB5900F7A9C4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F05D09173032FB5900F7A9C4 /* Build configuration list for PBXNativeTarget "macfwUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F05D09183032FB5900F7A9C4 /* Debug */,
+				F05D09193032FB5900F7A9C4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F05D092C3032FBB000F7A9C4 /* Build configuration list for PBXNativeTarget "FW410AudioDriver" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F05D092D3032FBB000F7A9C4 /* Debug */,
+				F05D092E3032FBB000F7A9C4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = F05D08E43032FB5700F7A9C4 /* Project object */;
+}

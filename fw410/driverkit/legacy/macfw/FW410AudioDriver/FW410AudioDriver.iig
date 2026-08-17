@@ -1,0 +1,21 @@
+//
+//  FW410AudioDriver.iig
+//  FW410AudioDriver
+//
+//  Created by Murilo Borghi Prado on 17.08.2026.
+//
+
+#ifndef FW410AudioDriver_h
+#define FW410AudioDriver_h
+
+#include <Availability.h>
+#include <DriverKit/IOService.iig>
+
+class FW410AudioDriver: public IOService
+{
+public:
+    virtual kern_return_t
+    Start(IOService * provider) override;
+};
+
+#endif /* FW410AudioDriver_h */
