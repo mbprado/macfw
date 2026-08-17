@@ -6,9 +6,9 @@
 
 namespace macfw::hal {
 
-constexpr const char* kShmName = "/macfw_fw410_pcm_v1";
+constexpr const char* kShmName = "/macfw_fw410_pcm_v2";
 constexpr std::uint32_t kMagic = 0x4d465734; // MFW4
-constexpr std::uint32_t kVersion = 1;
+constexpr std::uint32_t kVersion = 2;
 constexpr std::uint32_t kChannels = 2;
 constexpr std::uint32_t kCapacityFrames = 32768;
 
@@ -23,6 +23,25 @@ struct SharedPcmRing {
     std::atomic<std::uint64_t> underrunFrames;
     std::atomic<std::uint32_t> sampleRate;
     std::atomic<std::uint32_t> active;
+
+    // HAL diagnostic counters. These are intentionally stored in the same
+    // shared mapping so shmprobe can inspect the real-time path without
+    // logging from CoreAudio's I/O thread.
+    std::atomic<std::uint64_t> startIOCalls;
+    std::atomic<std::uint64_t> stopIOCalls;
+    std::atomic<std::uint64_t> willDoCalls;
+    std::atomic<std::uint64_t> beginIOCalls;
+    std::atomic<std::uint64_t> doIOCalls;
+    std::atomic<std::uint64_t> endIOCalls;
+    std::atomic<std::uint64_t> writeMixCalls;
+    std::atomic<std::uint64_t> nonNullMainBufferCalls;
+    std::atomic<std::uint64_t> doIOFrames;
+    std::atomic<std::uint32_t> lastWillDoOperation;
+    std::atomic<std::uint32_t> lastBeginOperation;
+    std::atomic<std::uint32_t> lastDoOperation;
+    std::atomic<std::uint32_t> lastEndOperation;
+    std::atomic<std::uint32_t> lastDoFrames;
+
     float samples[kCapacityFrames * kChannels];
 };
 
@@ -37,6 +56,20 @@ inline void initialize(SharedPcmRing& ring, std::uint32_t rate = 44100) {
     ring.underrunFrames.store(0, std::memory_order_relaxed);
     ring.sampleRate.store(rate, std::memory_order_relaxed);
     ring.active.store(0, std::memory_order_relaxed);
+    ring.startIOCalls.store(0, std::memory_order_relaxed);
+    ring.stopIOCalls.store(0, std::memory_order_relaxed);
+    ring.willDoCalls.store(0, std::memory_order_relaxed);
+    ring.beginIOCalls.store(0, std::memory_order_relaxed);
+    ring.doIOCalls.store(0, std::memory_order_relaxed);
+    ring.endIOCalls.store(0, std::memory_order_relaxed);
+    ring.writeMixCalls.store(0, std::memory_order_relaxed);
+    ring.nonNullMainBufferCalls.store(0, std::memory_order_relaxed);
+    ring.doIOFrames.store(0, std::memory_order_relaxed);
+    ring.lastWillDoOperation.store(0, std::memory_order_relaxed);
+    ring.lastBeginOperation.store(0, std::memory_order_relaxed);
+    ring.lastDoOperation.store(0, std::memory_order_relaxed);
+    ring.lastEndOperation.store(0, std::memory_order_relaxed);
+    ring.lastDoFrames.store(0, std::memory_order_relaxed);
 }
 
 inline bool valid(const SharedPcmRing& ring) {
