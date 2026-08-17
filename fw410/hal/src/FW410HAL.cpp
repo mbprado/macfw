@@ -23,7 +23,7 @@ Float64 gSampleRate = kRate44100;
 UInt64 gStartHostTime = 0;
 mach_timebase_info_data_t gTimebase{};
 
-static AudioServerPlugInDriverInterface gInterface;
+extern AudioServerPlugInDriverInterface gInterface;
 static AudioServerPlugInDriverInterface* gInterfacePtr = &gInterface;
 
 bool IsKnownObject(AudioObjectID id) {
@@ -44,7 +44,7 @@ AudioStreamBasicDescription Format(Float64 rate) {
 }
 
 bool ScopeIsOutput(AudioObjectPropertyScope scope) {
-    return scope == kAudioObjectPropertyScopeGlobal || scope == kAudioDevicePropertyScopeOutput;
+    return scope == kAudioObjectPropertyScopeGlobal || scope == kAudioObjectPropertyScopeOutput;
 }
 
 template <typename T>
@@ -158,7 +158,6 @@ Boolean STDMETHODCALLTYPE HasProperty(AudioServerPlugInDriverRef, AudioObjectID 
             case kAudioDevicePropertyDeviceCanBeDefaultSystemDevice:
             case kAudioDevicePropertyLatency:
             case kAudioDevicePropertyStreams:
-            case kAudioDevicePropertyControlList:
             case kAudioDevicePropertyNominalSampleRate:
             case kAudioDevicePropertyAvailableNominalSampleRates:
             case kAudioDevicePropertySafetyOffset:
@@ -211,7 +210,6 @@ UInt32 PropertySize(AudioObjectID object, const AudioObjectPropertyAddress& a) {
             case kAudioDevicePropertyStreams:
                 return ScopeIsOutput(a.mScope) ? sizeof(AudioObjectID) : 0;
             case kAudioDevicePropertyRelatedDevices: return sizeof(AudioObjectID);
-            case kAudioDevicePropertyControlList: return 0;
             case kAudioDevicePropertyDeviceUID:
             case kAudioDevicePropertyModelUID: return sizeof(CFStringRef);
             case kAudioDevicePropertyNominalSampleRate: return sizeof(Float64);
@@ -244,8 +242,7 @@ OSStatus STDMETHODCALLTYPE GetPropertyDataSize(AudioServerPlugInDriverRef driver
 OSStatus GetCommonObjectProperty(AudioObjectID object, const AudioObjectPropertyAddress& a,
                                  UInt32 inSize, UInt32* outSize, void* outData) {
     if (a.mSelector == kAudioObjectPropertyBaseClass) {
-        AudioClassID v = object == kAudioObjectPlugInObject ? kAudioObjectClassID :
-                         object == kDeviceID ? kAudioObjectClassID : kAudioObjectClassID;
+        AudioClassID v = object == kAudioObjectPlugInObject ? kAudioObjectClassID : kAudioObjectClassID;
         return CopyScalar(inSize, outSize, outData, v);
     }
     if (a.mSelector == kAudioObjectPropertyClass) {
@@ -312,14 +309,12 @@ OSStatus STDMETHODCALLTYPE GetPropertyData(AudioServerPlugInDriverRef driver, Au
                 return CopyScalar(inSize, outSize, outData, static_cast<UInt32>(gRunningClients.load() != 0));
             case kAudioDevicePropertyDeviceCanBeDefaultDevice:
             case kAudioDevicePropertyDeviceCanBeDefaultSystemDevice:
-                return CopyScalar(inSize, outSize, outData, static_cast<UInt32>(address->mScope == kAudioDevicePropertyScopeOutput));
+                return CopyScalar(inSize, outSize, outData, static_cast<UInt32>(address->mScope == kAudioObjectPropertyScopeOutput));
             case kAudioDevicePropertyLatency:
             case kAudioDevicePropertySafetyOffset:
                 return CopyScalar(inSize, outSize, outData, static_cast<UInt32>(0));
             case kAudioDevicePropertyZeroTimeStampPeriod:
                 return CopyScalar(inSize, outSize, outData, static_cast<UInt32>(512));
-            case kAudioDevicePropertyControlList:
-                *outSize = 0; return kAudioHardwareNoError;
             case kAudioDevicePropertyNominalSampleRate:
                 return CopyScalar(inSize, outSize, outData, gSampleRate);
             case kAudioDevicePropertyAvailableNominalSampleRates: {
