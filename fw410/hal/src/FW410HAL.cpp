@@ -163,6 +163,7 @@ Boolean STDMETHODCALLTYPE HasProperty(AudioServerPlugInDriverRef, AudioObjectID 
             case kAudioDevicePropertyAvailableNominalSampleRates:
             case kAudioDevicePropertySafetyOffset:
             case kAudioDevicePropertyZeroTimeStampPeriod:
+            case kAudioDevicePropertyIsHidden:
                 return true;
             default:
                 return false;
@@ -338,6 +339,8 @@ OSStatus STDMETHODCALLTYPE GetPropertyData(AudioServerPlugInDriverRef driver, Au
             case kAudioDevicePropertyDeviceCanBeDefaultSystemDevice:
                 return CopyScalar(inSize, outSize, outData,
                                   static_cast<UInt32>(address->mScope == kAudioObjectPropertyScopeOutput));
+            case kAudioDevicePropertyIsHidden:
+                return CopyScalar(inSize, outSize, outData, static_cast<UInt32>(0));
             case kAudioDevicePropertyLatency:
             case kAudioDevicePropertySafetyOffset:
                 return CopyScalar(inSize, outSize, outData, static_cast<UInt32>(0));
@@ -382,10 +385,8 @@ OSStatus STDMETHODCALLTYPE GetPropertyData(AudioServerPlugInDriverRef driver, Au
             case kAudioStreamPropertyAvailablePhysicalFormats: {
                 if (inSize < 2 * sizeof(AudioStreamRangedDescription)) return kAudioHardwareBadPropertySizeError;
                 auto* formats = reinterpret_cast<AudioStreamRangedDescription*>(outData);
-                formats[0].mFormat = Format(kRate44100);
-                formats[0].mSampleRateRange = {kRate44100, kRate44100};
-                formats[1].mFormat = Format(kRate48000);
-                formats[1].mSampleRateRange = {kRate48000, kRate48000};
+                formats[0] = {Format(kRate44100), {kRate44100, kRate44100}};
+                formats[1] = {Format(kRate48000), {kRate48000, kRate48000}};
                 *outSize = 2 * sizeof(AudioStreamRangedDescription);
                 return kAudioHardwareNoError;
             }
@@ -396,57 +397,59 @@ OSStatus STDMETHODCALLTYPE GetPropertyData(AudioServerPlugInDriverRef driver, Au
     return kAudioHardwareUnknownPropertyError;
 }
 
-OSStatus STDMETHODCALLTYPE SetPropertyData(AudioServerPlugInDriverRef, AudioObjectID object, pid_t,
-                                           const AudioObjectPropertyAddress* address, UInt32,
-                                           const void*, UInt32 dataSize, const void* data) {
-    if (!address || !data) return kAudioHardwareIllegalOperationError;
+OSStatus STDMETHODCALLTYPE SetPropertyData(AudioServerPlugInDriverRef driver, AudioObjectID object,
+                                           pid_t pid, const AudioObjectPropertyAddress* address,
+                                           UInt32, const void*, UInt32 inSize, const void* inData) {
+    if (!address || !inData) return kAudioHardwareIllegalOperationError;
+    if (!HasProperty(driver, object, pid, address)) return kAudioHardwareUnknownPropertyError;
     if (object == kDeviceID && address->mSelector == kAudioDevicePropertyNominalSampleRate) {
-        if (dataSize != sizeof(Float64)) return kAudioHardwareBadPropertySizeError;
-        const Float64 requested = *reinterpret_cast<const Float64*>(data);
-        if (requested != kRate44100 && requested != kRate48000) return kAudioHardwareIllegalOperationError;
-        if (requested == gSampleRate) return kAudioHardwareNoError;
-        if (!gHost) return kAudioHardwareIllegalOperationError;
-        return gHost->RequestDeviceConfigurationChange(gHost, kDeviceID,
-                                                        static_cast<UInt64>(requested), nullptr);
+        if (inSize != sizeof(Float64)) return kAudioHardwareBadPropertySizeError;
+        const Float64 rate = *reinterpret_cast<const Float64*>(inData);
+        if (rate != kRate44100 && rate != kRate48000) return kAudioHardwareIllegalOperationError;
+        if (rate != gSampleRate && gHost)
+            gHost->RequestDeviceConfigurationChange(gHost, kDeviceID, static_cast<UInt64>(rate), nullptr);
+        return kAudioHardwareNoError;
     }
     if (object == kOutputStreamID && address->mSelector == kAudioStreamPropertyIsActive)
-        return kAudioHardwareNoError;
-    return kAudioHardwareUnknownPropertyError;
+        return inSize == sizeof(UInt32) ? kAudioHardwareNoError : kAudioHardwareBadPropertySizeError;
+    return kAudioHardwareUnsupportedOperationError;
 }
 
 OSStatus STDMETHODCALLTYPE StartIO(AudioServerPlugInDriverRef, AudioObjectID device, UInt32) {
     if (device != kDeviceID) return kAudioHardwareBadObjectError;
     if (gRunningClients.fetch_add(1) == 0) gStartHostTime = mach_absolute_time();
-    Notify(kDeviceID, kAudioDevicePropertyDeviceIsRunning);
     return kAudioHardwareNoError;
 }
 
 OSStatus STDMETHODCALLTYPE StopIO(AudioServerPlugInDriverRef, AudioObjectID device, UInt32) {
     if (device != kDeviceID) return kAudioHardwareBadObjectError;
     UInt32 old = gRunningClients.load();
-    while (old && !gRunningClients.compare_exchange_weak(old, old - 1)) {}
-    Notify(kDeviceID, kAudioDevicePropertyDeviceIsRunning);
+    while (old > 0 && !gRunningClients.compare_exchange_weak(old, old - 1)) {}
     return kAudioHardwareNoError;
 }
 
 OSStatus STDMETHODCALLTYPE GetZeroTimeStamp(AudioServerPlugInDriverRef, AudioObjectID device, UInt32,
-                                            Float64* sampleTime, UInt64* hostTime, UInt64* seed) {
-    if (device != kDeviceID || !sampleTime || !hostTime || !seed)
+                                            Float64* outSampleTime, UInt64* outHostTime, UInt64* outSeed) {
+    if (device != kDeviceID || !outSampleTime || !outHostTime || !outSeed)
         return kAudioHardwareIllegalOperationError;
     const UInt64 now = mach_absolute_time();
-    const long double nanos = static_cast<long double>(now - gStartHostTime) *
-                              gTimebase.numer / gTimebase.denom;
-    *sampleTime = static_cast<Float64>((nanos / 1000000000.0L) * gSampleRate);
-    *hostTime = now;
-    *seed = 1;
+    const long double nanos = static_cast<long double>(now - gStartHostTime) * gTimebase.numer / gTimebase.denom;
+    const long double frames = nanos * gSampleRate / 1000000000.0L;
+    const UInt64 period = 512;
+    const UInt64 frame = static_cast<UInt64>(frames) / period * period;
+    const long double periodNanos = static_cast<long double>(frame) * 1000000000.0L / gSampleRate;
+    const UInt64 hostDelta = static_cast<UInt64>(periodNanos * gTimebase.denom / gTimebase.numer);
+    *outSampleTime = static_cast<Float64>(frame);
+    *outHostTime = gStartHostTime + hostDelta;
+    *outSeed = 1;
     return kAudioHardwareNoError;
 }
 
 OSStatus STDMETHODCALLTYPE WillDoIOOperation(AudioServerPlugInDriverRef, AudioObjectID device, UInt32,
-                                             UInt32 operation, Boolean* willDo, Boolean* inPlace) {
-    if (device != kDeviceID || !willDo || !inPlace) return kAudioHardwareIllegalOperationError;
-    *willDo = operation == kAudioServerPlugInIOOperationWriteMix;
-    *inPlace = true;
+                                             UInt32 operation, Boolean* outWillDo, Boolean* outInPlace) {
+    if (device != kDeviceID || !outWillDo || !outInPlace) return kAudioHardwareIllegalOperationError;
+    *outWillDo = operation == kAudioServerPlugInIOOperationWriteMix;
+    *outInPlace = true;
     return kAudioHardwareNoError;
 }
 
@@ -456,11 +459,11 @@ OSStatus STDMETHODCALLTYPE BeginIOOperation(AudioServerPlugInDriverRef, AudioObj
 }
 
 OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef, AudioObjectID device,
-                                         AudioObjectID stream, UInt32, UInt32 operation,
-                                         UInt32, const AudioServerPlugInIOCycleInfo*, void*, void*) {
+                                         AudioObjectID stream, UInt32, UInt32 operation, UInt32,
+                                         const AudioServerPlugInIOCycleInfo*, void*, void*) {
     if (device != kDeviceID || stream != kOutputStreamID) return kAudioHardwareBadObjectError;
-    return operation == kAudioServerPlugInIOOperationWriteMix
-        ? kAudioHardwareNoError : kAudioHardwareUnsupportedOperationError;
+    return operation == kAudioServerPlugInIOOperationWriteMix ? kAudioHardwareNoError
+                                                              : kAudioHardwareUnsupportedOperationError;
 }
 
 OSStatus STDMETHODCALLTYPE EndIOOperation(AudioServerPlugInDriverRef, AudioObjectID, UInt32,
@@ -496,7 +499,7 @@ AudioServerPlugInDriverInterface gInterface = {
 
 } // namespace
 
-extern "C" void* FW410HAL_Create(CFAllocatorRef, CFUUIDRef requestedType) {
-    if (!requestedType || !CFEqual(requestedType, kAudioServerPlugInTypeUUID)) return nullptr;
+extern "C" void* FW410HALFactory(CFAllocatorRef, CFUUIDRef typeUUID) {
+    if (!typeUUID || !CFEqual(typeUUID, kAudioServerPlugInTypeUUID)) return nullptr;
     return &gInterfacePtr;
 }
