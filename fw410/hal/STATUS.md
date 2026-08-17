@@ -10,21 +10,23 @@ The active CoreAudio-facing path is therefore `fw410/hal`, a dependency-free Aud
 
 The synthetic `M-Audio FireWire 410` now enumerates successfully in macOS as a real CoreAudio output device. It is visible in Audio MIDI Setup and in the macOS audio-device selector, can be selected as the default/system output, and exposes selectable 44.1 kHz and 48 kHz formats. CoreAudio starts and stops its I/O thread cleanly for the device.
 
-The current `DoIOOperation` implementation intentionally discards output samples, so silence is expected at this stage.
-
 The breakthrough required correcting the HAL factory registration so the symbol exported by the bundle matched `CFPlugInFactories`; after that Monterey created the remote Core Audio Driver Service and activated the device UID `com.mbprado.macfw.fw410.device`.
+
+The visible milestone is recorded in `fw410/HISTORY.md` with `fw410/pictures/screenshot1.png`.
 
 A remaining non-blocking HAL query for selector `srnd` on output scope is visible in logs and should be cleaned up, but it does not prevent enumeration or I/O thread startup.
 
-## Next milestone: hardware-backed 44.1 kHz playback
+## In progress: hardware-backed 44.1 kHz playback
 
-Add a companion user-space transport service and connect HAL output to it using a pre-mapped shared-memory PCM ring. The first hardware-backed path will be deliberately narrow:
+The first end-to-end bridge implementation is now present:
 
-1. HAL stereo Float32 output at 44.1 kHz.
-2. Non-blocking copy from `DoIOOperation` into shared memory.
-3. Companion transport process maps the shared ring into the existing 10-channel FW410 PCM layout.
-4. Reuse the proven `IOFireWireLib`, AV/C/CMP, NuDCL, `PcmRingBuffer`, `AmdtpPcmStream44100`, and the FW410-specific post-start 44.1 kHz AV/C rate reassertion.
-5. No SRC and no capture in this first hardware-backed version.
+1. `include/macfw_hal_shm.h` defines a versioned lock-free stereo Float32 shared-memory ring.
+2. `src/FW410HALBridge.cpp` preserves the working HAL device model and copies `WriteMix` PCM into the pre-mapped ring without FireWire work, allocation, filesystem I/O, or logging in the real-time callback.
+3. `tools/transport/halbridge44100` maps the shared ring, converts stereo Float32 into the established 10-channel FW410 PCM layout, and feeds the proven `PcmRingBuffer` + `AmdtpPcmStream44100` scheduler.
+4. The physical output mapping follows the already-tested native 44.1 bridge: left to FW410 PCM slot 1 and right to slot 6.
+5. AV/C/CMP, NuDCL, duplex ISO startup, and the required post-start 44.1 kHz rate reassertion remain in the companion transport process.
+
+This revision is at the compile-validation checkpoint on the Monterey test Mac. Do not treat it as production-safe yet; the next runtime revision will add the same guarded initial-rate setup/restoration and clean termination behavior used by the proven 44.1 tools before the first end-to-end playback test.
 
 After native 44.1 HAL playback is stable, add the native 48 kHz scheduler path and then capture/input.
 
