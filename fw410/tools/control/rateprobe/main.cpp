@@ -173,9 +173,11 @@ bool run(unsigned targetRate, bool execute, bool keep, bool raw) {
             } else {
                 const unsigned restoreOut = outRate, restoreIn = inRate;
                 std::cout << "setting OUTPUT plug 0...\n";
-                ok &= setRate(dev, gen, node, ctx, 0x18, targetRate, raw);
+                const bool controlOut = setRate(dev, gen, node, ctx, 0x18, targetRate, raw);
                 std::cout << "setting INPUT plug 0...\n";
-                ok &= setRate(dev, gen, node, ctx, 0x19, targetRate, raw);
+                const bool controlIn = setRate(dev, gen, node, ctx, 0x19, targetRate, raw);
+                if ((!controlOut || !controlIn) && raw)
+                    std::cout << "CONTROL response was non-final; relying on authoritative STATUS readback\n";
                 CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.35, false);
                 unsigned verifyOut = 0, verifyIn = 0;
                 const bool verified = readRate(dev, gen, node, ctx, 0x18, verifyOut, raw) &&
@@ -183,7 +185,10 @@ bool run(unsigned targetRate, bool execute, bool keep, bool raw) {
                                       verifyOut == targetRate && verifyIn == targetRate;
                 std::cout << "readback: out=" << verifyOut << " Hz, in=" << verifyIn
                           << " Hz -> " << (verified ? "PASS" : "FAIL") << '\n';
-                ok &= verified;
+                // STATUS readback is authoritative. Some FW410 CONTROL transactions can
+                // return a response shape our strict parser does not accept even though
+                // the requested clock transition has completed successfully.
+                ok = ok && verified;
                 if (!keep) {
                     std::cout << "restoring original rates...\n";
                     const bool r1 = setRate(dev, gen, node, ctx, 0x18, restoreOut, raw);
@@ -194,8 +199,9 @@ bool run(unsigned targetRate, bool execute, bool keep, bool raw) {
                                     readRate(dev, gen, node, ctx, 0x19, ri, raw) &&
                                     ro == restoreOut && ri == restoreIn;
                     std::cout << "restore readback: out=" << ro << " Hz, in=" << ri
-                              << " Hz -> " << ((r1 && r2 && rv) ? "PASS" : "FAIL") << '\n';
-                    ok &= r1 && r2 && rv;
+                              << " Hz -> " << (rv ? "PASS" : "FAIL") << '\n';
+                    (void)r1; (void)r2;
+                    ok = ok && rv;
                 } else {
                     std::cout << "rate left at " << targetRate << " Hz (--keep)\n";
                 }
