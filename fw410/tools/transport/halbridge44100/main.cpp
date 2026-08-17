@@ -13,13 +13,12 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <cmath>
+#include <csignal>
 #include <cstdint>
 #include <cstring>
 #include <fcntl.h>
 #include <iomanip>
 #include <iostream>
-#include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -41,6 +40,9 @@ constexpr UInt32 kFcpResponseLo = 0xf0000d00;
 constexpr UInt32 kFcpResponseSize = 0x200;
 constexpr double kFcpTimeoutSeconds = 1.0;
 
+volatile std::sig_atomic_t gStopRequested = 0;
+void signalHandler(int) { gStopRequested = 1; }
+
 UInt32 cycleCount(UInt32 cycleTime) { return (cycleTime >> 12) & 0x1fffu; }
 
 class SharedInput {
@@ -54,9 +56,14 @@ public:
         if (fd_ < 0) return false;
         void* p = mmap(nullptr, sizeof(macfw::hal::SharedPcmRing), PROT_READ | PROT_WRITE,
                        MAP_SHARED, fd_, 0);
-        if (p == MAP_FAILED) return false;
+        if (p == MAP_FAILED) { close(fd_); fd_ = -1; return false; }
         ring_ = static_cast<macfw::hal::SharedPcmRing*>(p);
         return macfw::hal::valid(*ring_);
+    }
+    void discardBacklog() {
+        if (!ring_) return;
+        const auto w = ring_->writeFrame.load(std::memory_order_acquire);
+        ring_->readFrame.store(w, std::memory_order_release);
     }
     macfw::hal::SharedPcmRing* ring() { return ring_; }
 private:
@@ -135,9 +142,7 @@ private:
 
 std::size_t pumpShared(macfw::hal::SharedPcmRing& shared, macfw::PcmRingBuffer& pcm,
                        std::vector<float>& stereo, std::vector<std::int32_t>& mapped) {
-    const std::size_t free = pcm.freeFrames();
-    const std::size_t available = macfw::hal::availableFrames(shared);
-    const std::size_t frames = std::min<std::size_t>({free, available, stereo.size()/2});
+    const std::size_t frames = std::min<std::size_t>({pcm.freeFrames(), macfw::hal::availableFrames(shared), stereo.size()/2});
     if (!frames) return 0;
     const std::size_t got = macfw::hal::read(shared, stereo.data(), frames);
     for (std::size_t i=0;i<got;++i) {
@@ -163,6 +168,7 @@ bool run() {
         std::cerr << "HAL device must be set to 44100 Hz for this milestone\n";
         return false;
     }
+    input.discardBacklog();
 
     auto device = macfw::FireWireDevice::findByProductName("FW 410");
     if (!device) { std::cerr << "No operational FW 410 unit found.\n"; return false; }
@@ -218,7 +224,7 @@ bool run() {
         std::uint64_t lastWrite=input.ring()->writeFrame.load(std::memory_order_acquire);
         CFAbsoluteTime lastStatus=CFAbsoluteTimeGetCurrent();
         std::cout << "HAL bridge active: play audio to M-Audio FireWire 410 at 44.1 kHz; Ctrl-C to stop\n";
-        while (true) {
+        while (!gStopRequested) {
             CFRunLoopRunInMode(kCFRunLoopDefaultMode,0.001,false);
             pumpShared(*input.ring(),pcm,stereo,mapped);
             UInt32 nowCt=0;
@@ -233,6 +239,7 @@ bool run() {
                 lastWrite=w; lastStatus=now;
             }
         }
+        std::cout << "stop requested; restoring ISO/CMP resources\n";
     }
     ok=true;
 cleanup:
@@ -248,7 +255,10 @@ cleanup:
 }
 } // namespace
 
-int main() {
+int halbridge44100_inner_main() {
+    gStopRequested = 0;
+    std::signal(SIGINT, signalHandler);
+    std::signal(SIGTERM, signalHandler);
     std::cout << "macfw halbridge44100 — CoreAudio HAL shared-memory to FW410 transport\n";
     return run()?0:1;
 }
