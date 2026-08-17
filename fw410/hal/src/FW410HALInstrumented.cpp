@@ -1,14 +1,32 @@
 // Diagnostic wrapper around the known-good HAL bridge implementation.
 //
 // Keep FW410HALBridge.cpp as the enumeration/playback baseline and intercept
-// only the I/O lifecycle entry points here. This lets shmprobe observe what
-// Monterey actually calls without logging or allocating on the audio thread.
+// only the COM/I/O lifecycle entry points here. This lets shmprobe observe
+// what Monterey actually calls without logging or allocating on the audio
+// thread.
 
 #define FW410HALFactory FW410HALFactory_Base
 #include "FW410HALBridge.cpp"
 #undef FW410HALFactory
 
 namespace {
+
+extern AudioServerPlugInDriverInterface gInstrumentedInterface;
+AudioServerPlugInDriverInterface* gInstrumentedInterfacePtr = &gInstrumentedInterface;
+
+HRESULT STDMETHODCALLTYPE InstrumentedQueryInterface(void*, REFIID uuid, LPVOID* outInterface) {
+    if (!outInterface) return E_POINTER;
+    *outInterface = nullptr;
+    CFUUIDRef requested = CFUUIDCreateFromUUIDBytes(kCFAllocatorDefault, uuid);
+    const bool supported = requested &&
+        (CFEqual(requested, IUnknownUUID) ||
+         CFEqual(requested, kAudioServerPlugInDriverInterfaceUUID));
+    if (requested) CFRelease(requested);
+    if (!supported) return E_NOINTERFACE;
+    gRefCount.fetch_add(1, std::memory_order_relaxed);
+    *outInterface = &gInstrumentedInterfacePtr;
+    return S_OK;
+}
 
 OSStatus STDMETHODCALLTYPE InstrumentedStartIO(AudioServerPlugInDriverRef driver,
                                                AudioObjectID device,
@@ -88,7 +106,7 @@ OSStatus STDMETHODCALLTYPE InstrumentedEndIOOperation(AudioServerPlugInDriverRef
 
 AudioServerPlugInDriverInterface gInstrumentedInterface = {
     nullptr,
-    QueryInterface,
+    InstrumentedQueryInterface,
     AddRef,
     Release,
     Initialize,
@@ -111,8 +129,6 @@ AudioServerPlugInDriverInterface gInstrumentedInterface = {
     InstrumentedDoIOOperation,
     InstrumentedEndIOOperation
 };
-
-AudioServerPlugInDriverInterface* gInstrumentedInterfacePtr = &gInstrumentedInterface;
 
 } // namespace
 
