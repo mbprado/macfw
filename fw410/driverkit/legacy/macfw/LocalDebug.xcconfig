@@ -1,0 +1,12 @@
+// Local-only DriverKit development signing for the legacy Xcode project.
+// Use only for Debug/test builds on a development Mac.
+
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+AD_HOC_CODE_SIGNING_ALLOWED = YES
+DEVELOPMENT_TEAM =
+PROVISIONING_PROFILE_SPECIFIER =
+
+// Keep architecture aligned with the Intel FW410 test Mac.
+ARCHS = x86_64
+ONLY_ACTIVE_ARCH = YES
