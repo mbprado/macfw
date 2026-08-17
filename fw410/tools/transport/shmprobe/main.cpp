@@ -17,8 +17,6 @@ const char* operationName(std::uint32_t op) {
         case kAudioServerPlugInIOOperationProcessInput: return "ProcessInput";
         case kAudioServerPlugInIOOperationProcessOutput: return "ProcessOutput";
         case kAudioServerPlugInIOOperationWriteMix: return "WriteMix";
-        case kAudioServerPlugInIOOperationThread: return "Thread";
-        case kAudioServerPlugInIOOperationCycle: return "Cycle";
         case 0: return "none";
         default: return "unknown";
     }
