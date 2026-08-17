@@ -11,8 +11,8 @@ lib:
 rateprobe:
 	$(MAKE) -C ../../control/rateprobe rateprobe
 
-halbridge44100: main.cpp lib rateprobe
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) main.cpp ../../../lib/libmacfw.a $(LDFLAGS) -o $@
+halbridge44100: main.cpp entry.cpp lib rateprobe
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) main.cpp entry.cpp ../../../lib/libmacfw.a $(LDFLAGS) -o $@
 
 clean:
 	rm -f halbridge44100
