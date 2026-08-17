@@ -24,7 +24,7 @@ install: $(MACOS)/macfw-fw410
 	rm -rf /Library/Audio/Plug-Ins/HAL/macfw-fw410.driver
 	cp -R $(BUNDLE) /Library/Audio/Plug-Ins/HAL/
 	chown -R root:wheel /Library/Audio/Plug-Ins/HAL/macfw-fw410.driver
-
+	killall coreaudiod
 uninstall:
 	rm -rf /Library/Audio/Plug-Ins/HAL/macfw-fw410.driver
 
