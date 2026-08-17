@@ -23,7 +23,7 @@
   <key>CFPlugInFactories</key>
   <dict>
     <key>87B5A2F5-8A3D-4B86-A92D-6D7F40E9A410</key>
-    <string>FW410HAL_Create</string>
+    <string>FW410HALFactory</string>
   </dict>
   <key>CFPlugInTypes</key>
   <dict>
