@@ -24,7 +24,8 @@ int main() {
     }
 
     auto* ring = static_cast<macfw::hal::SharedPcmRing*>(p);
-    std::printf("HAL shared ring: %s\n", macfw::hal::valid(*ring) ? "PASS" : "INVALID");
+    const bool ok = macfw::hal::valid(*ring);
+    std::printf("HAL shared ring: %s\n", ok ? "PASS" : "INVALID");
     std::printf("    sample rate:    %u Hz\n", ring->sampleRate.load(std::memory_order_acquire));
     std::printf("    write frame:    %llu\n", static_cast<unsigned long long>(ring->writeFrame.load(std::memory_order_acquire)));
     std::printf("    read frame:     %llu\n", static_cast<unsigned long long>(ring->readFrame.load(std::memory_order_acquire)));
@@ -33,5 +34,5 @@ int main() {
 
     munmap(p, sizeof(*ring));
     close(fd);
-    return macfw::hal::valid(*ring) ? 0 : 2;
+    return ok ? 0 : 2;
 }
