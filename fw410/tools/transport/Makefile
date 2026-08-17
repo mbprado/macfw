@@ -1,4 +1,4 @@
-TOOLS := amdtp44probe cmpconnect cmpprobe coreaudiobridge coreaudiodiag formatprobe isocapture isoduplex isoplayback pcm44100playback pcmbufferplayback pcmstreamplayback shmprobe streamprobe
+TOOLS := amdtp44probe cmpconnect cmpprobe coreaudiobridge coreaudiodiag formatprobe halbridge44100 isocapture isoduplex isoplayback pcm44100playback pcmbufferplayback pcmstreamplayback shmprobe streamprobe
 .PHONY: all clean $(TOOLS)
 all: $(TOOLS)
 $(TOOLS):
