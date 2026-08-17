@@ -5,15 +5,16 @@ MACOS := $(CONTENTS)/MacOS
 CXX ?= clang++
 CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic -O2
 LDFLAGS := -bundle -framework CoreAudio -framework CoreFoundation
+SRC := src/FW410HALBridge.cpp
 
 .PHONY: all clean install uninstall
 
 all: $(MACOS)/macfw-fw410
 
-$(MACOS)/macfw-fw410: src/FW410HAL.cpp Info.plist
+$(MACOS)/macfw-fw410: $(SRC) include/macfw_hal_shm.h Info.plist
 	mkdir -p $(MACOS)
 	cp Info.plist $(CONTENTS)/Info.plist
-	$(CXX) $(CXXFLAGS) src/FW410HAL.cpp $(LDFLAGS) -o $@
+	$(CXX) $(CXXFLAGS) $(SRC) $(LDFLAGS) -o $@
 
 install: all
 	rm -rf /Library/Audio/Plug-Ins/HAL/macfw-fw410.driver
