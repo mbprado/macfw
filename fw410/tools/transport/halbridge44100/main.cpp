@@ -232,10 +232,13 @@ bool run() {
             const CFAbsoluteTime now=CFAbsoluteTimeGetCurrent();
             if (now-lastStatus>=2.0) {
                 const auto w=input.ring()->writeFrame.load(std::memory_order_acquire);
+                const auto& stats=streamer.stats();
                 std::cout << "HAL frames=" << w << " (delta " << (w-lastWrite) << ")"
                           << " shared=" << macfw::hal::availableFrames(*input.ring())
                           << " pcm=" << pcm.availableFrames()
-                          << " drops=" << input.ring()->droppedFrames.load() << '\n';
+                          << " drops=" << input.ring()->droppedFrames.load()
+                          << " late=" << stats.lateCyclePolls
+                          << " silence=" << stats.framesSilenced << '\n';
                 lastWrite=w; lastStatus=now;
             }
         }
