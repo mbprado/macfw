@@ -38,3 +38,22 @@ Observed results:
 - Ctrl-C followed the guarded ISO/CMP cleanup path and the device read back successfully at 48 kHz after restoration.
 
 This is the first milestone where the macfw CoreAudio device is not merely visible to macOS: ordinary application audio reaches the real FireWire hardware cleanly.
+
+## 2026-08-18 — Native 48 kHz HAL playback validated
+
+The HAL/shared-memory path was tested with CoreAudio and the FW410 both operating natively at 48 kHz, with no sample-rate conversion. The earlier audible degradation was isolated to transport scheduling margin rather than CoreAudio or SRC.
+
+The first 48 kHz HAL transport inherited the older 128-cycle TX ring with 64-cycle refill halves. This provided only about 16 ms of total TX program and 8 ms per refill half, and playback sounded broken even though the HAL producer cadence was correct at approximately 48,000 frames/s.
+
+An A/B test changed only the transmit geometry to the same larger scheduling margin used by the successful native 44.1 path:
+
+- TX ring: 640 cycles;
+- refill halves: 320 cycles;
+- total programmed interval: about 80 ms;
+- refill-half interval: about 40 ms.
+
+With that change, native 48 kHz audio became clear. Increasing the internal PCM FIFO to 16,384 frames and draining all queued HAL frames each transport-loop iteration improved the remaining intermittent dropouts further.
+
+The remaining small glitches correlate with desktop activity and brief shared-ring backlog rather than steady-state audio-format errors. This points to user-space scheduling jitter. The next controlled experiment therefore raises the transport loop to `QOS_CLASS_USER_INTERACTIVE`, keeps the proven 640/320 geometry, and reduces the fixed CoreFoundation run-loop wait while retaining callback servicing.
+
+This milestone confirms that both native 44.1 kHz and native 48 kHz application playback can reach the real FW410 cleanly. The next architectural step is a single rate-aware companion transport rather than separate `halbridge44100` and `halbridge48000` executables.
