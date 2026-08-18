@@ -39,21 +39,14 @@ Observed results:
 
 This is the first milestone where the macfw CoreAudio device is not merely visible to macOS: ordinary application audio reaches the real FireWire hardware cleanly.
 
-## 2026-08-18 — Native 48 kHz HAL playback validated
+## 2026-08-18 — Native 48 kHz CoreAudio playback
 
-The HAL/shared-memory path was tested with CoreAudio and the FW410 both operating natively at 48 kHz, with no sample-rate conversion. The earlier audible degradation was isolated to transport scheduling margin rather than CoreAudio or SRC.
+The same HAL/shared-memory architecture was validated at native 48 kHz with no sample-rate conversion.
 
-The first 48 kHz HAL transport inherited the older 128-cycle TX ring with 64-cycle refill halves. This provided only about 16 ms of total TX program and 8 ms per refill half, and playback sounded broken even though the HAL producer cadence was correct at approximately 48,000 frames/s.
+The initial 48 kHz implementation sounded broken even though the HAL producer cadence was correct. A controlled A/B test isolated the decisive difference to FireWire transmit scheduling margin: the old 128-cycle TX ring with 64-cycle refill halves provided only about 8 ms per half under this workload, while enlarging the ring to 640 cycles with 320-cycle halves provided about 40 ms. With the larger geometry, native 48 kHz audio became clear.
 
-An A/B test changed only the transmit geometry to the same larger scheduling margin used by the successful native 44.1 path:
+The committed path also uses a 16,384-frame PCM FIFO, drains shared-memory backlog until caught up, requests user-interactive pthread QoS, and avoids redundant AV/C rate CONTROL when the FW410 is already at 48 kHz.
 
-- TX ring: 640 cycles;
-- refill halves: 320 cycles;
-- total programmed interval: about 80 ms;
-- refill-half interval: about 40 ms.
+Small load-sensitive dropouts can still occur during unrelated desktop activity. Current diagnostics show zero scheduler-inserted silence at those moments and no distinctive spike in `lateCyclePolls`, so this remains a transport-service jitter issue rather than a proven AMDTP underrun.
 
-With that change, native 48 kHz audio became clear. Increasing the internal PCM FIFO to 16,384 frames and draining all queued HAL frames each transport-loop iteration improved the remaining intermittent dropouts further.
-
-The remaining small glitches correlate with desktop activity and brief shared-ring backlog rather than steady-state audio-format errors. This points to user-space scheduling jitter. The next controlled experiment therefore raises the transport loop to `QOS_CLASS_USER_INTERACTIVE`, keeps the proven 640/320 geometry, and reduces the fixed CoreFoundation run-loop wait while retaining callback servicing.
-
-This milestone confirms that both native 44.1 kHz and native 48 kHz application playback can reach the real FW410 cleanly. The next architectural step is a single rate-aware companion transport rather than separate `halbridge44100` and `halbridge48000` executables.
+With both native 44.1 and 48 kHz playback proven, development moved to a rate-aware `haltransport` supervisor that selects the matching native engine from the HAL-selected CoreAudio rate without rewriting either known-good packet path first.
