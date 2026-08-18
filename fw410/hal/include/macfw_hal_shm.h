@@ -6,11 +6,25 @@
 
 namespace macfw::hal {
 
-constexpr const char* kShmName = "/macfw_fw410_pcm_v2";
+constexpr const char* kShmName = "/macfw_fw410_pcm_v3";
 constexpr std::uint32_t kMagic = 0x4d465734; // MFW4
-constexpr std::uint32_t kVersion = 2;
-constexpr std::uint32_t kChannels = 2;
+constexpr std::uint32_t kVersion = 3;
+constexpr std::uint32_t kChannels = 10;
 constexpr std::uint32_t kCapacityFrames = 32768;
+
+// CoreAudio-facing channel order. Keep this user-facing/physical rather than
+// exposing the FW410's unusual raw AMDTP slot order:
+//   0 Analog Out 1
+//   1 Analog Out 2
+//   2 Analog Out 3
+//   3 Analog Out 4
+//   4 Analog Out 5
+//   5 Analog Out 6
+//   6 Analog Out 7
+//   7 Analog Out 8
+//   8 S/PDIF Out L
+//   9 S/PDIF Out R
+// The transport layer performs the permutation into AMDTP positions.
 
 struct SharedPcmRing {
     std::uint32_t magic;
@@ -97,8 +111,9 @@ inline std::size_t write(SharedPcmRing& ring, const float* interleaved, std::siz
     const std::size_t n = frames < free ? frames : free;
     for (std::size_t i = 0; i < n; ++i) {
         const std::size_t dst = static_cast<std::size_t>((w + i) % kCapacityFrames) * kChannels;
-        ring.samples[dst] = interleaved[i * kChannels];
-        ring.samples[dst + 1] = interleaved[i * kChannels + 1];
+        const std::size_t src = i * kChannels;
+        for (std::size_t ch = 0; ch < kChannels; ++ch)
+            ring.samples[dst + ch] = interleaved[src + ch];
     }
     ring.writeFrame.store(w + n, std::memory_order_release);
     if (n < frames) ring.droppedFrames.fetch_add(frames - n, std::memory_order_relaxed);
@@ -113,8 +128,9 @@ inline std::size_t read(SharedPcmRing& ring, float* interleaved, std::size_t fra
     const std::size_t n = frames < available ? frames : available;
     for (std::size_t i = 0; i < n; ++i) {
         const std::size_t src = static_cast<std::size_t>((r + i) % kCapacityFrames) * kChannels;
-        interleaved[i * kChannels] = ring.samples[src];
-        interleaved[i * kChannels + 1] = ring.samples[src + 1];
+        const std::size_t dst = i * kChannels;
+        for (std::size_t ch = 0; ch < kChannels; ++ch)
+            interleaved[dst + ch] = ring.samples[src + ch];
     }
     ring.readFrame.store(r + n, std::memory_order_release);
     if (n < frames) ring.underrunFrames.fetch_add(frames - n, std::memory_order_relaxed);
