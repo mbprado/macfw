@@ -6,9 +6,9 @@ This document is the current handoff for the **CoreAudio integration and next-wo
 
 ## Current result
 
-macfw publishes **M-Audio FireWire 410** as a normal macOS CoreAudio output device through a dependency-free AudioServerPlugIn. The device is visible in Audio MIDI Setup and the macOS audio selector and exposes native 44.1 and 48 kHz operation.
+macfw publishes **M-Audio FireWire 410** as a normal macOS CoreAudio device through a dependency-free AudioServerPlugIn. The device is visible in Audio MIDI Setup and the macOS audio selector and exposes native 44.1 and 48 kHz operation.
 
-Hardware-backed normal application playback is confirmed at both native rates:
+Hardware-backed playback is confirmed at both native rates:
 
 - **44.1 kHz:** clear output using `AmdtpPcmStream44100` and the required FW410 post-start AV/C 44.1 reassertion.
 - **48 kHz:** clear output with no SRC after enlarging the TX scheduler from the old 128/64-cycle geometry to 640/320 cycles.
@@ -29,7 +29,7 @@ macOS application
     -> M-Audio FireWire 410
 ```
 
-The HAL callback does not own FireWire. It only copies real-time PCM to shared memory. AV/C, CMP, FireWire ISO, rate control, startup quirks and eventual bus-reset recovery belong in the companion transport/service layer.
+The HAL callback does not own FireWire. It only copies real-time PCM to/from shared memory. AV/C, CMP, FireWire ISO, rate control, startup quirks and eventual bus-reset recovery belong in the companion transport/service layer.
 
 ## Playback topology
 
@@ -66,7 +66,7 @@ CoreAudio 9   S/PDIF Out L   -> FW410 PCM position 1
 CoreAudio 10  S/PDIF Out R   -> FW410 PCM position 6
 ```
 
-The HAL/shared-memory ABI is version 3 and carries 10 interleaved Float32 output channels in this physical order. Both native transports explicitly permute that order into the FW410 AMDTP positions above.
+The HAL/shared-memory playback ABI is version 3 and carries 10 interleaved Float32 output channels in this physical order. Both native transports explicitly permute that order into the FW410 AMDTP positions above.
 
 Logic Pro X independently routed and hardware-validated every channel in this layout, including both S/PDIF channels. Browser/YouTube playback showed more occasional dropouts than Logic Pro, suggesting client/system buffering and scheduling contribute to the remaining jitter behavior.
 
@@ -126,9 +126,9 @@ It maps HAL shared state, reads the selected CoreAudio sample rate, starts the p
 
 A 48 -> 44.1 transition exposed a useful lifecycle edge case: immediately after a rate change/re-enumeration, a first child attempt can temporarily observe a stale/transitional FireWire state such as node `0x0` and unknown AV/C rate. The supervisor retry then reacquires the normal node and succeeds. The eventual persistent service should explicitly wait for/reacquire a stable operational unit rather than relying on a failed child/retry cycle.
 
-## Capture/input staging
+## Capture/input
 
-The capture topology is already known from `analysis/stream-topology.md`. At 44.1/48 kHz the incoming FW410 AMDTP stream is DBS=5:
+The capture topology is known from `analysis/stream-topology.md`. At 44.1/48 kHz the incoming FW410 AMDTP stream is DBS=5:
 
 ```text
 raw position 1  S/PDIF In L
@@ -138,7 +138,7 @@ raw position 4  Analog In 2
 raw position 5  MIDI
 ```
 
-The planned CoreAudio-facing order is:
+The CoreAudio-facing order is:
 
 ```text
 CoreAudio Input 1  Analog In 1
@@ -147,35 +147,53 @@ CoreAudio Input 3  S/PDIF In L
 CoreAudio Input 4  S/PDIF In R
 ```
 
-Capture is being staged independently before changing the HAL input object:
+Capture is staged through a separate 4-channel Float32 shared ring:
 
-- `hal/include/macfw_hal_capture_shm.h` defines a separate 4-channel Float32 capture shared ring;
-- `tools/transport/capture_shared.h` consumes the cyclic `AmdtpReceiveRing`, decodes MBLA-24 samples and permutes raw positions into the CoreAudio-facing order;
-- `tools/transport/capturebridge48000` establishes the required duplex 48 kHz ISO state and feeds that capture ring;
-- `tools/transport/captureprobe` drains a 2-second window and reports peak/RMS activity for Analog In 1/2 and S/PDIF L/R.
+- `hal/include/macfw_hal_capture_shm.h` defines the capture ABI;
+- `tools/transport/capture_shared.h` decodes MBLA-24 samples and permutes raw positions into the CoreAudio-facing order;
+- `tools/transport/capturebridge48000` establishes the required duplex 48 kHz ISO state and feeds the capture ring;
+- `tools/transport/captureprobe` reports peak/RMS activity for Analog In 1/2 and S/PDIF L/R.
 
-### First capture bring-up findings
+### 48 kHz capture transport hardware validation
 
-The first isolated `capturebridge48000` run exposed two implementation bugs and one important device-behavior requirement:
+The 48 kHz FireWire -> Float32 capture transport is hardware-confirmed.
 
-1. The receive pump initially stopped scanning as soon as its cursor reached one untouched/unchanged NuDCL slot. The first hardware run decoded only 16 frames and then remained stuck. The pump now scans one complete cyclic receive ring per service pass and processes every slot whose timestamp/header signature has changed.
-2. The capture shared-memory object was not robust across repeated bridge runs. The writer now unlinks/recreates the object on startup and unlinks it on shutdown so each bridge instance gets a clean ABI-sized mapping.
-3. Most importantly, the standalone bridge originally created a finite prebuilt 48 kHz host->device transmit ring but never serviced it. The FW410 capture side requires continuously valid duplex AMDTP traffic to remain sample-bearing. After boot, the unserviced transmit program could leave capture at NODATA/zero frames. `capturebridge48000` now uses the same `AmdtpPcmStream48k` service loop as the proven playback engine, with an empty 10-channel PCM FIFO so it continuously emits correctly timed digital silence as the duplex keepalive.
+After fixing NuDCL receive metadata updates, `capturebridge48000` produced steady two-second deltas around 95,000-97,000 decoded frames, consistent with the expected 48 kHz cadence. The decoder reported zero malformed packets and zero invalid MBLA labels.
 
-The next gate is to re-run `capturebridge48000` after these fixes and verify that decoded frames increase continuously at approximately 48,000 frames/s and that `captureprobe` sees the expected analog/SPDIF activity. After that succeeds, the HAL will gain a 4-channel input stream and implement CoreAudio `ReadInput` from the same shared ring.
+A hardware signal applied to Analog Input 1 produced clear channel-separated activity in `captureprobe` while Analog Input 2 remained near the noise floor and S/PDIF stayed silent. One observed probe window reported approximately:
+
+```text
+Analog In 1  peak=1.000000  rms=0.186567
+Analog In 2  peak=0.002982  rms=0.000589
+S/PDIF L     peak=0
+S/PDIF R     peak=0
+```
+
+Large `droppedFrames` values during standalone probing are expected because `captureprobe` is an occasional reader of a finite 32,768-frame ring while the producer runs continuously. They are not evidence of FireWire capture failure. In normal CoreAudio operation, `ReadInput` is intended to drain the capture ring continuously.
+
+Important capture bring-up findings:
+
+1. The receive ring must publish current NuDCL receive metadata on each cyclic pass. `AmdtpReceiveRing` now configures an update set so header/status/timestamp data remains current across ring revolutions.
+2. The FW410 requires continuously valid host->device AMDTP traffic for sample-bearing capture. `capturebridge48000` therefore services the proven `AmdtpPcmStream48k` scheduler continuously with an empty 10-channel PCM FIFO, producing digital silence as duplex keepalive.
+3. The capture shared-memory object is recreated cleanly between standalone bridge runs.
+
+### CoreAudio input integration
+
+The HAL now exposes a second stream object with 4 input channels and advertises `kAudioServerPlugInIOOperationReadInput`. `StartIO` maps the capture shared ring outside the hot I/O callback. `ReadInput` performs only lock-free shared-memory reads and zero-fills when capture is unavailable or under-runs.
+
+The immediate validation target is **48 kHz CoreAudio recording** from Analog Inputs 1/2 and S/PDIF L/R. Native 44.1 capture has not yet been integrated into the normal transport and should be treated as pending even though the input stream advertises the device's global 44.1/48 kHz formats.
 
 ## Immediate sequence
 
-1. Hardware-validate the corrected `capturebridge48000` + `captureprobe` against Analog Inputs 1/2 and, when available, S/PDIF L/R.
-2. Add the 4-channel CoreAudio HAL input stream and `ReadInput` shared-ring consumer.
-3. Integrate capture production into the normal rate-aware transport rather than using a standalone capture test process.
-4. Add native 44.1 capture handling and preserve the 44.1 startup quirk in full-duplex operation.
-5. Extract common 44.1/48 device/CMP/ISO lifecycle into a reusable transport core.
-6. Move latency-sensitive transport servicing away from logging/control work and add finer jitter timing diagnostics.
-7. Make transport startup automatic so a user does not manually launch a companion binary.
-8. Add bus-reset, generation/node change, disconnect/reconnect and rate-change recovery.
-9. Add mixer/routing/headphone and MIDI integration.
-10. Finish packaging/release automation once the runtime is reproducibly installable.
+1. Hardware-validate the new 4-channel CoreAudio HAL input stream at 48 kHz using `capturebridge48000` as the transport producer.
+2. Integrate capture production into the normal rate-aware transport rather than using a standalone capture test process.
+3. Add native 44.1 capture handling and preserve the 44.1 startup quirk in full-duplex operation.
+4. Extract common 44.1/48 device/CMP/ISO lifecycle into a reusable transport core.
+5. Move latency-sensitive transport servicing away from logging/control work and add finer jitter timing diagnostics.
+6. Make transport startup automatic so a user does not manually launch a companion binary.
+7. Add bus-reset, generation/node change, disconnect/reconnect and rate-change recovery.
+8. Add mixer/routing/headphone and MIDI integration.
+9. Finish packaging/release automation once the runtime is reproducibly installable.
 
 ## Bootloader / interface boot mode
 
