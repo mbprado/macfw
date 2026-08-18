@@ -1,8 +1,10 @@
+#include "macfw/amdtp_pcm_stream.h"
 #include "macfw/amdtp_receive_ring.h"
 #include "macfw/amdtp_transmit_ring.h"
 #include "macfw/cmp.h"
 #include "macfw/firewire_device.h"
 #include "macfw/isoch_allocation.h"
+#include "macfw/pcm_ring_buffer.h"
 #include "../capture_shared.h"
 
 #include <CoreFoundation/CoreFoundation.h>
@@ -17,6 +19,9 @@ constexpr UInt32 kCaptureMaxPacket = 168;
 constexpr UInt32 kPlaybackMaxPacket = 360;
 constexpr std::size_t kCaptureSlots = 256;
 constexpr std::size_t kPlaybackSlots = 640;
+constexpr std::size_t kHalfPackets = 320;
+constexpr std::size_t kPlaybackPcmChannels = 10;
+constexpr std::size_t kPlaybackPcmCapacityFrames = 16384;
 constexpr UInt32 kCycleLead = 256;
 constexpr UInt32 kCyclesPerSecond = 8000;
 
@@ -51,15 +56,25 @@ bool run() {
     auto native = device.nativeHandle();
     UInt32 cycleTime = 0;
     if ((*native)->GetCycleTime(native, &cycleTime) != kIOReturnSuccess) return false;
-    const UInt32 firstCycle = (cycleCount(cycleTime) + kCycleLead) % kCyclesPerSecond;
+    const UInt32 initialCycle = cycleCount(cycleTime);
+    const UInt32 firstCycle = (initialCycle + kCycleLead) % kCyclesPerSecond;
 
+    // The FW410 capture side only stays in the sample-bearing operating state
+    // when valid host->device AMDTP continues flowing. Use the same continuously
+    // serviced 48 kHz scheduler as the proven playback path, with an empty PCM
+    // FIFO so it emits correctly timed digital silence.
+    macfw::PcmRingBuffer playbackPcm(kPlaybackPcmCapacityFrames, kPlaybackPcmChannels);
     auto rx = macfw::AmdtpReceiveRing::create(device, kCaptureSlots, kCaptureMaxPacket);
     auto tx = macfw::AmdtpTransmitRing::createSilence48k(device, firstCycle, kPlaybackSlots);
     auto capture = macfw::IsochAllocation::create(
         device, macfw::IsochAllocation::Direction::DeviceToHost, kCaptureMaxPacket);
     auto playback = macfw::IsochAllocation::create(
         device, macfw::IsochAllocation::Direction::HostToDevice, kPlaybackMaxPacket);
-    if (!rx || !tx || !capture || !playback) return false;
+    if (!playbackPcm.valid() || !rx || !tx || !capture || !playback) return false;
+
+    macfw::AmdtpPcmStream48k playbackStreamer(
+        tx, playbackPcm, initialCycle, firstCycle, kHalfPackets);
+    if (!playbackStreamer.valid() || !playbackStreamer.prime()) return false;
 
     (*capture.nativeChannel())->AddListener(
         capture.nativeChannel(),
@@ -99,6 +114,7 @@ bool run() {
 
     std::cout << "macfw capturebridge48000 — FW410 capture to shared memory\n"
               << "duplex ISO started\n"
+              << "playback keepalive: native 48 kHz AMDTP scheduler, digital silence\n"
               << "capture order: Analog In 1, Analog In 2, S/PDIF L, S/PDIF R\n"
               << "run ../captureprobe/captureprobe in another terminal; Ctrl-C to stop\n";
 
@@ -107,16 +123,25 @@ bool run() {
         std::uint64_t lastFrames = 0;
         while (!gStopRequested) {
             CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.0005, false);
+
+            UInt32 nowCycleTime = 0;
+            if ((*native)->GetCycleTime(native, &nowCycleTime) == kIOReturnSuccess)
+                playbackStreamer.service(cycleCount(nowCycleTime));
+
             capturePump.service(rx, *captureShared.ring());
+
             const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
             if (now - lastStatus >= 2.0) {
                 const auto frames = captureShared.ring()->decodedFrames.load(std::memory_order_acquire);
+                const auto& txStats = playbackStreamer.stats();
                 std::cout << "capture frames=" << frames
                           << " (delta " << (frames - lastFrames) << ")"
                           << " queued=" << macfw::hal::capture::availableFrames(*captureShared.ring())
                           << " drops=" << captureShared.ring()->droppedFrames.load(std::memory_order_acquire)
                           << " malformed=" << captureShared.ring()->malformedPackets.load(std::memory_order_acquire)
                           << " invalid=" << captureShared.ring()->invalidLabels.load(std::memory_order_acquire)
+                          << " tx-late=" << txStats.lateCyclePolls
+                          << " tx-silence=" << txStats.framesSilenced
                           << '\n';
                 lastFrames = frames;
                 lastStatus = now;
