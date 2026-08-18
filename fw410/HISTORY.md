@@ -50,3 +50,28 @@ The committed path also uses a 16,384-frame PCM FIFO, drains shared-memory backl
 Small load-sensitive dropouts can still occur during unrelated desktop activity. Current diagnostics show zero scheduler-inserted silence at those moments and no distinctive spike in `lateCyclePolls`, so this remains a transport-service jitter issue rather than a proven AMDTP underrun.
 
 With both native 44.1 and 48 kHz playback proven, development moved to a rate-aware `haltransport` supervisor that selects the matching native engine from the HAL-selected CoreAudio rate without rewriting either known-good packet path first.
+
+## 2026-08-18 — Full 10-channel CoreAudio playback validated in Logic Pro
+
+The HAL output stream was expanded from the temporary stereo presentation to the FW410's full 10-channel host playback topology using the mapping already documented in `analysis/stream-topology.md`.
+
+CoreAudio now presents the channels in physical/user-facing order:
+
+1. Analog Out 1
+2. Analog Out 2
+3. Analog Out 3
+4. Analog Out 4
+5. Analog Out 5
+6. Analog Out 6
+7. Analog Out 7
+8. Analog Out 8
+9. S/PDIF Out L
+10. S/PDIF Out R
+
+The transport explicitly permutes these into the FW410's BridgeCo/AMDTP slot order rather than exposing the unusual raw stream positions to applications.
+
+Hardware validation was performed in Logic Pro X. Independent output routing confirmed that **all eight analog outputs and both S/PDIF output channels play correctly**. Ordinary stereo playback continues to land on Analog Outputs 1/2 as intended.
+
+Logic Pro also produced noticeably fewer audible dropouts than browser/YouTube playback during the same development state. This suggests the remaining occasional glitches are influenced by client/system scheduling or buffering as well as the transport service, and are not a blocker for the playback architecture.
+
+This milestone establishes the full FW410 playback side as functionally usable from a multichannel CoreAudio application.
