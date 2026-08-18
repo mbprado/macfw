@@ -4,6 +4,7 @@
 #include <mach/mach_time.h>
 
 #include "../include/macfw_hal_shm.h"
+#include "../include/macfw_hal_capture_shm.h"
 
 #include <atomic>
 #include <cerrno>
@@ -21,7 +22,7 @@ constexpr AudioObjectID kInputStreamID = 4;
 constexpr Float64 kRate44100 = 44100.0;
 constexpr Float64 kRate48000 = 48000.0;
 constexpr UInt32 kOutputChannels = macfw::hal::kChannels;
-constexpr UInt32 kInputChannels = 4;
+constexpr UInt32 kInputChannels = macfw::hal::capture::kChannels;
 
 AudioServerPlugInHostRef gHost = nullptr;
 std::atomic<UInt32> gRefCount{1};
@@ -31,6 +32,8 @@ UInt64 gStartHostTime = 0;
 mach_timebase_info_data_t gTimebase{};
 int gShmFd = -1;
 macfw::hal::SharedPcmRing* gRing = nullptr;
+int gCaptureShmFd = -1;
+macfw::hal::capture::SharedCaptureRing* gCaptureRing = nullptr;
 
 extern AudioServerPlugInDriverInterface gInterface;
 static AudioServerPlugInDriverInterface* gInterfacePtr = &gInterface;
@@ -57,6 +60,33 @@ bool MapSharedRing() {
     return true;
 }
 
+bool MapCaptureRing() {
+    if (gCaptureRing && macfw::hal::capture::valid(*gCaptureRing)) return true;
+    if (gCaptureRing) {
+        munmap(gCaptureRing, sizeof(*gCaptureRing));
+        gCaptureRing = nullptr;
+    }
+    if (gCaptureShmFd >= 0) {
+        close(gCaptureShmFd);
+        gCaptureShmFd = -1;
+    }
+    gCaptureShmFd = shm_open(macfw::hal::capture::kShmName, O_RDWR, 0);
+    if (gCaptureShmFd < 0) return false;
+    void* p = mmap(nullptr, sizeof(macfw::hal::capture::SharedCaptureRing),
+                   PROT_READ | PROT_WRITE, MAP_SHARED, gCaptureShmFd, 0);
+    if (p == MAP_FAILED) {
+        close(gCaptureShmFd); gCaptureShmFd = -1; return false;
+    }
+    gCaptureRing = static_cast<macfw::hal::capture::SharedCaptureRing*>(p);
+    if (!macfw::hal::capture::valid(*gCaptureRing)) {
+        munmap(gCaptureRing, sizeof(*gCaptureRing));
+        gCaptureRing = nullptr;
+        close(gCaptureShmFd); gCaptureShmFd = -1;
+        return false;
+    }
+    return true;
+}
+
 AudioStreamBasicDescription Format(Float64 rate, UInt32 channels) {
     AudioStreamBasicDescription f{};
     f.mSampleRate = rate;
@@ -76,7 +106,6 @@ AudioStreamBasicDescription InputFormat(Float64 rate) { return Format(rate, kInp
 bool ScopeIsOutput(AudioObjectPropertyScope scope) {
     return scope == kAudioObjectPropertyScopeOutput;
 }
-
 bool ScopeIsInput(AudioObjectPropertyScope scope) {
     return scope == kAudioObjectPropertyScopeInput;
 }
@@ -275,7 +304,7 @@ OSStatus GetCommon(AudioObjectID object, const AudioObjectPropertyAddress& a,
         const CFStringRef v = object == kAudioObjectPlugInObject ? CFSTR("macfw FW410 HAL") :
                               object == kDeviceID ? CFSTR("M-Audio FireWire 410") :
                               object == kOutputStreamID ? CFSTR("Analog 1-8 + S/PDIF Out") :
-                              CFSTR("Analog 1-2 + S/PDIF In (staged)");
+                              CFSTR("Analog 1-2 + S/PDIF In");
         return CopyString(inSize, outSize, outData, v);
     }
     if (a.mSelector == kAudioObjectPropertyManufacturer)
@@ -314,15 +343,13 @@ OSStatus STDMETHODCALLTYPE GetPropertyData(AudioServerPlugInDriverRef driver, Au
                 if (a->mScope == kAudioObjectPropertyScopeGlobal) {
                     if (inSize < 2 * sizeof(AudioObjectID)) return kAudioHardwareBadPropertySizeError;
                     auto* ids = static_cast<AudioObjectID*>(outData);
-                    ids[0] = kOutputStreamID;
-                    ids[1] = kInputStreamID;
+                    ids[0] = kOutputStreamID; ids[1] = kInputStreamID;
                     *outSize = 2 * sizeof(AudioObjectID);
                     return kAudioHardwareNoError;
                 }
                 if (ScopeIsOutput(a->mScope)) return CopyScalar(inSize, outSize, outData, kOutputStreamID);
                 if (ScopeIsInput(a->mScope)) return CopyScalar(inSize, outSize, outData, kInputStreamID);
-                *outSize = 0;
-                return kAudioHardwareNoError;
+                *outSize = 0; return kAudioHardwareNoError;
             }
             case kAudioDevicePropertyDeviceUID: return CopyString(inSize, outSize, outData, CFSTR("com.mbprado.macfw.fw410.device"));
             case kAudioDevicePropertyModelUID: return CopyString(inSize, outSize, outData, CFSTR("com.mbprado.macfw.fw410.model"));
@@ -344,17 +371,15 @@ OSStatus STDMETHODCALLTYPE GetPropertyData(AudioServerPlugInDriverRef driver, Au
             case kAudioDevicePropertyAvailableNominalSampleRates: {
                 if (inSize < 2 * sizeof(AudioValueRange)) return kAudioHardwareBadPropertySizeError;
                 auto* v = static_cast<AudioValueRange*>(outData);
-                v[0] = {kRate44100, kRate44100};
-                v[1] = {kRate48000, kRate48000};
-                *outSize = 2 * sizeof(AudioValueRange);
-                return kAudioHardwareNoError;
+                v[0] = {kRate44100, kRate44100}; v[1] = {kRate48000, kRate48000};
+                *outSize = 2 * sizeof(AudioValueRange); return kAudioHardwareNoError;
             }
             default: break;
         }
     }
     if (object == kOutputStreamID || object == kInputStreamID) {
         const bool isInput = object == kInputStreamID;
-        const auto currentFormat = isInput ? InputFormat(gSampleRate) : OutputFormat(gSampleRate);
+        const auto format = isInput ? InputFormat(gSampleRate) : OutputFormat(gSampleRate);
         switch (s) {
             case kAudioObjectPropertyOwnedObjects: *outSize = 0; return kAudioHardwareNoError;
             case kAudioStreamPropertyIsActive: return CopyScalar(inSize, outSize, outData, static_cast<UInt32>(1));
@@ -363,7 +388,7 @@ OSStatus STDMETHODCALLTYPE GetPropertyData(AudioServerPlugInDriverRef driver, Au
             case kAudioStreamPropertyStartingChannel: return CopyScalar(inSize, outSize, outData, static_cast<UInt32>(1));
             case kAudioStreamPropertyLatency: return CopyScalar(inSize, outSize, outData, static_cast<UInt32>(0));
             case kAudioStreamPropertyVirtualFormat: case kAudioStreamPropertyPhysicalFormat:
-                return CopyScalar(inSize, outSize, outData, currentFormat);
+                return CopyScalar(inSize, outSize, outData, format);
             case kAudioStreamPropertyAvailableVirtualFormats: case kAudioStreamPropertyAvailablePhysicalFormats: {
                 if (inSize < 2 * sizeof(AudioStreamRangedDescription)) return kAudioHardwareBadPropertySizeError;
                 auto* v = static_cast<AudioStreamRangedDescription*>(outData);
@@ -374,8 +399,7 @@ OSStatus STDMETHODCALLTYPE GetPropertyData(AudioServerPlugInDriverRef driver, Au
                     v[0] = {OutputFormat(kRate44100), {kRate44100, kRate44100}};
                     v[1] = {OutputFormat(kRate48000), {kRate48000, kRate48000}};
                 }
-                *outSize = 2 * sizeof(AudioStreamRangedDescription);
-                return kAudioHardwareNoError;
+                *outSize = 2 * sizeof(AudioStreamRangedDescription); return kAudioHardwareNoError;
             }
             default: break;
         }
@@ -404,6 +428,7 @@ OSStatus STDMETHODCALLTYPE SetPropertyData(AudioServerPlugInDriverRef driver, Au
 
 OSStatus STDMETHODCALLTYPE StartIO(AudioServerPlugInDriverRef, AudioObjectID d, UInt32) {
     if (d != kDeviceID) return kAudioHardwareBadObjectError;
+    MapCaptureRing();
     if (gRunningClients.fetch_add(1) == 0) {
         gStartHostTime = mach_absolute_time();
         if (gRing) gRing->active.store(1, std::memory_order_release);
@@ -434,9 +459,6 @@ OSStatus STDMETHODCALLTYPE GetZeroTimeStamp(AudioServerPlugInDriverRef, AudioObj
 OSStatus STDMETHODCALLTYPE WillDoIOOperation(AudioServerPlugInDriverRef, AudioObjectID d, UInt32,
                                              UInt32 op, Boolean* willDo, Boolean* inPlace) {
     if (d != kDeviceID || !willDo || !inPlace) return kAudioHardwareIllegalOperationError;
-    // Stage B: advertise the CoreAudio input operation, but return digital
-    // silence only. Capture shared memory remains completely disconnected so
-    // this checkpoint isolates the HAL I/O contract from capture transport.
     *willDo = op == kAudioServerPlugInIOOperationWriteMix ||
               op == kAudioServerPlugInIOOperationReadInput;
     *inPlace = true;
@@ -457,11 +479,20 @@ OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef, AudioObject
         return kAudioHardwareNoError;
     }
 
-    // Stage B input: prove ReadInput scheduling without touching capture SHM.
-    // A valid input buffer is filled with deterministic silence.
     if (stream == kInputStreamID && op == kAudioServerPlugInIOOperationReadInput) {
         if (!mainBuffer) return kAudioHardwareIllegalOperationError;
-        std::memset(mainBuffer, 0, frames * kInputChannels * sizeof(Float32));
+        float* dst = static_cast<float*>(mainBuffer);
+        std::size_t got = 0;
+        if (gCaptureRing && macfw::hal::capture::valid(*gCaptureRing) &&
+            gCaptureRing->active.load(std::memory_order_acquire) != 0 &&
+            gCaptureRing->sampleRate.load(std::memory_order_acquire) ==
+                static_cast<std::uint32_t>(gSampleRate)) {
+            got = macfw::hal::capture::read(*gCaptureRing, dst, frames);
+        }
+        if (got < frames) {
+            std::memset(dst + got * kInputChannels, 0,
+                        (frames - got) * kInputChannels * sizeof(float));
+        }
         return kAudioHardwareNoError;
     }
 
