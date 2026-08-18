@@ -22,31 +22,27 @@ public:
             munmap(ring_, sizeof(*ring_));
         }
         if (fd_ >= 0) close(fd_);
-        // The capture writer owns this diagnostic/runtime object. Remove the
-        // name on shutdown so the next bridge run always creates a fresh ring.
-        shm_unlink(macfw::hal::capture::kShmName);
+        // Do not unlink the named object here. coreaudiod is a long-lived
+        // consumer and may already have this mapping open. Recreating the name
+        // would silently split producer and consumer onto different objects.
     }
 
     bool open(std::uint32_t sampleRate) {
-        // A previous bridge may have exited without unlinking the object.
-        // Existing mappings remain valid for old readers after unlink(), while
-        // this run gets a clean object with the expected ABI and size.
-        shm_unlink(macfw::hal::capture::kShmName);
-        fd_ = shm_open(macfw::hal::capture::kShmName, O_CREAT | O_EXCL | O_RDWR, 0666);
+        fd_ = shm_open(macfw::hal::capture::kShmName, O_CREAT | O_RDWR, 0666);
         if (fd_ < 0) return false;
         if (ftruncate(fd_, sizeof(macfw::hal::capture::SharedCaptureRing)) != 0) {
             close(fd_); fd_ = -1;
-            shm_unlink(macfw::hal::capture::kShmName);
             return false;
         }
         void* p = mmap(nullptr, sizeof(macfw::hal::capture::SharedCaptureRing),
                        PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
         if (p == MAP_FAILED) {
             close(fd_); fd_ = -1;
-            shm_unlink(macfw::hal::capture::kShmName);
             return false;
         }
         ring_ = static_cast<macfw::hal::capture::SharedCaptureRing*>(p);
+        // Reinitialize the existing persistent object in place so any mapping
+        // already held by coreaudiod remains attached to this producer.
         macfw::hal::capture::initialize(*ring_, sampleRate);
         ring_->active.store(1, std::memory_order_release);
         return true;
@@ -68,11 +64,6 @@ public:
         if (rx.packetCount() == 0 || rx.packetCount() > lastSignature_.size()) return 0;
 
         std::size_t totalFrames = 0;
-        // NuDCL receive slots are rewritten cyclically. Do not stop scanning
-        // when the current cursor points at an untouched/unchanged slot: that
-        // can permanently pin the cursor while later slots continue changing.
-        // Scan one complete ring per service pass and process every slot whose
-        // timestamp/header signature has changed since we last saw it.
         for (std::size_t checked = 0; checked < rx.packetCount(); ++checked) {
             const std::size_t index = cursor_;
             cursor_ = (cursor_ + 1) % rx.packetCount();
@@ -122,10 +113,6 @@ private:
                     ++invalid;
                 }
             }
-            // Device stream positions:
-            //   0 S/PDIF L, 1 Analog 1, 2 S/PDIF R, 3 Analog 2, 4 MIDI.
-            // CoreAudio-facing order:
-            //   Analog 1, Analog 2, S/PDIF L, S/PDIF R.
             const std::size_t b = event * macfw::hal::capture::kChannels;
             decoded[b + 0] = static_cast<float>(raw[1] / 8388608.0);
             decoded[b + 1] = static_cast<float>(raw[3] / 8388608.0);
