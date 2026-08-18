@@ -40,6 +40,14 @@ constexpr UInt32 kFcpResponseLo = 0xf0000d00;
 constexpr UInt32 kFcpResponseSize = 0x200;
 constexpr double kFcpTimeoutSeconds = 1.0;
 
+// CoreAudio physical order -> zero-based FW410 audio position within the
+// 10-channel PCM portion of the 11-slot AMDTP stream.
+// CoreAudio: A1,A2,A3,A4,A5,A6,A7,A8,SPDIF-L,SPDIF-R
+// FW410:     S1,A1,A3,A5,A7,S2,A2,A4,A6,A8
+constexpr std::array<std::size_t, macfw::hal::kChannels> kCoreAudioToFw410{
+    1, 6, 2, 7, 3, 8, 4, 9, 0, 5
+};
+
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
 
@@ -141,19 +149,22 @@ private:
 };
 
 std::size_t pumpShared(macfw::hal::SharedPcmRing& shared, macfw::PcmRingBuffer& pcm,
-                       std::vector<float>& stereo, std::vector<std::int32_t>& mapped) {
-    const std::size_t frames = std::min<std::size_t>({pcm.freeFrames(), macfw::hal::availableFrames(shared), stereo.size()/2});
+                       std::vector<float>& audio, std::vector<std::int32_t>& mapped) {
+    const std::size_t frames = std::min<std::size_t>({
+        pcm.freeFrames(), macfw::hal::availableFrames(shared),
+        audio.size() / macfw::hal::kChannels
+    });
     if (!frames) return 0;
-    const std::size_t got = macfw::hal::read(shared, stereo.data(), frames);
+    const std::size_t got = macfw::hal::read(shared, audio.data(), frames);
     for (std::size_t i=0;i<got;++i) {
-        const double l = std::max(-1.0,std::min(1.0,static_cast<double>(stereo[i*2])));
-        const double r = std::max(-1.0,std::min(1.0,static_cast<double>(stereo[i*2+1])));
-        const auto ls = static_cast<std::int32_t>(l * 8388607.0);
-        const auto rs = static_cast<std::int32_t>(r * 8388607.0);
-        const std::size_t b=i*kPcmChannels;
-        std::fill_n(mapped.data()+b,kPcmChannels,0);
-        mapped[b+1]=ls;
-        mapped[b+6]=rs;
+        const std::size_t base=i*kPcmChannels;
+        std::fill_n(mapped.data()+base,kPcmChannels,0);
+        for (std::size_t ch=0; ch<macfw::hal::kChannels; ++ch) {
+            const double s=std::max(-1.0,std::min(1.0,
+                static_cast<double>(audio[i*macfw::hal::kChannels+ch])));
+            mapped[base+kCoreAudioToFw410[ch]]=
+                static_cast<std::int32_t>(s*8388607.0);
+        }
     }
     return pcm.write(mapped.data(), got);
 }
@@ -219,14 +230,15 @@ bool run() {
     if (!fcp.reassert44100()) goto cleanup;
 
     {
-        std::vector<float> stereo(4096*2,0.0f);
+        std::vector<float> audio(4096*macfw::hal::kChannels,0.0f);
         std::vector<std::int32_t> mapped(4096*kPcmChannels,0);
         std::uint64_t lastWrite=input.ring()->writeFrame.load(std::memory_order_acquire);
         CFAbsoluteTime lastStatus=CFAbsoluteTimeGetCurrent();
-        std::cout << "HAL bridge active: play audio to M-Audio FireWire 410 at 44.1 kHz; Ctrl-C to stop\n";
+        std::cout << "CoreAudio outputs: Analog 1-8, S/PDIF L/R (10 channels)\n"
+                  << "HAL bridge active: play audio to M-Audio FireWire 410 at 44.1 kHz; Ctrl-C to stop\n";
         while (!gStopRequested) {
             CFRunLoopRunInMode(kCFRunLoopDefaultMode,0.001,false);
-            pumpShared(*input.ring(),pcm,stereo,mapped);
+            pumpShared(*input.ring(),pcm,audio,mapped);
             UInt32 nowCt=0;
             if ((*native)->GetCycleTime(native,&nowCt)==kIOReturnSuccess) streamer.service(cycleCount(nowCt));
             const CFAbsoluteTime now=CFAbsoluteTimeGetCurrent();
