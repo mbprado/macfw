@@ -23,17 +23,23 @@ constexpr std::size_t kPcmChannels = 10;
 constexpr UInt32 kCycleLead = 256;
 constexpr double kPi = 3.14159265358979323846;
 
-std::vector<std::int32_t> makeStereoTestBuffer() {
+std::vector<std::int32_t> makeTestBuffer(int position) {
     std::vector<std::int32_t> pcm(kPcmFrames * kPcmChannels, 0);
     constexpr double amplitude = 131072.0;
     for (std::size_t frame = 0; frame < kPcmFrames; ++frame) {
         const double t = static_cast<double>(frame) / 48000.0;
-        // FW410 physical Analog Output 1 = stream PCM position 2 (index 1).
-        pcm[frame * kPcmChannels + 1] = static_cast<std::int32_t>(
-            std::sin(2.0 * kPi * 440.0 * t) * amplitude);
-        // FW410 physical Analog Output 2 = stream PCM position 7 (index 6).
-        pcm[frame * kPcmChannels + 6] = static_cast<std::int32_t>(
-            std::sin(2.0 * kPi * 880.0 * t) * amplitude);
+        if (position >= 1 && position <= static_cast<int>(kPcmChannels)) {
+            pcm[frame * kPcmChannels + static_cast<std::size_t>(position - 1)] =
+                static_cast<std::int32_t>(std::sin(2.0 * kPi * 440.0 * t) * amplitude);
+        } else {
+            // Historical stereo regression mode. Known mappings:
+            // Analog Output 1 = stream PCM position 2 (index 1).
+            // Analog Output 2 = stream PCM position 7 (index 6).
+            pcm[frame * kPcmChannels + 1] = static_cast<std::int32_t>(
+                std::sin(2.0 * kPi * 440.0 * t) * amplitude);
+            pcm[frame * kPcmChannels + 6] = static_cast<std::int32_t>(
+                std::sin(2.0 * kPi * 880.0 * t) * amplitude);
+        }
     }
     return pcm;
 }
@@ -55,7 +61,7 @@ void dumpCapture(const macfw::AmdtpReceiveRing& ring) {
               << '\n';
 }
 
-bool run(bool execute) {
+bool run(bool execute, int position) {
     auto device = macfw::FireWireDevice::findByProductName("FW 410");
     if (!device) {
         std::cout << "No operational FW 410 unit found.\n";
@@ -74,26 +80,29 @@ bool run(bool execute) {
     std::uint32_t opcr0 = 0, ipcr0 = 0;
     if (macfw::cmp::readOpcr0(device, opcr0) != kIOReturnSuccess ||
         macfw::cmp::readIpcr0(device, ipcr0) != kIOReturnSuccess) {
-        std::cout << "PCR read failed\n";
-        return false;
+        std::cout << "PCR read failed\n"; return false;
     }
     if (!macfw::cmp::ready(macfw::cmp::decodePcr(opcr0)) ||
         !macfw::cmp::ready(macfw::cmp::decodePcr(ipcr0))) {
-        std::cout << "status: REFUSED - PCR0 offline or already connected\n";
-        return false;
+        std::cout << "status: REFUSED - PCR0 offline or already connected\n"; return false;
     }
 
-    auto pcmStorage = makeStereoTestBuffer();
+    auto pcmStorage = makeTestBuffer(position);
     macfw::PcmBufferView pcm{pcmStorage.data(), kPcmFrames, kPcmChannels, true};
 
     std::cout << "PCM buffer test:\n"
               << "    sample rate:       48000 Hz\n"
               << "    frames:            " << pcm.frameCount << '\n'
               << "    stream positions:  " << pcm.channelCount << '\n'
-              << "    loop:              yes\n"
-              << "    Analog Output 1:   440 Hz (PCM position 2)\n"
-              << "    Analog Output 2:   880 Hz (PCM position 7)\n"
-              << "    amplitude:         ~-36 dBFS\n";
+              << "    loop:              yes\n";
+    if (position >= 1) {
+        std::cout << "    active position:   " << position << " / 10\n"
+                  << "    tone:              440 Hz\n";
+    } else {
+        std::cout << "    Analog Output 1:   440 Hz (PCM position 2)\n"
+                  << "    Analog Output 2:   880 Hz (PCM position 7)\n";
+    }
+    std::cout << "    amplitude:         ~-36 dBFS\n";
 
     auto native = device.nativeHandle();
     UInt32 cycleTime = 0;
@@ -103,29 +112,25 @@ bool run(bool execute) {
 
     if (!execute) {
         std::cout << "status: PASS - dry run only; no stream started\n"
-                  << "to execute: ./pcmbufferplayback --execute\n";
+                  << "to execute: ./pcmbufferplayback --execute [--position 1..10]\n";
         return true;
     }
 
     auto rx = macfw::AmdtpReceiveRing::create(device, kCaptureSlots, kCaptureMaxPacket48k);
-    auto tx = macfw::AmdtpTransmitRing::createPcm48k(
-        device, firstCycle, pcm, kPlaybackSlots);
+    auto tx = macfw::AmdtpTransmitRing::createPcm48k(device, firstCycle, pcm, kPlaybackSlots);
     auto capture = macfw::IsochAllocation::create(
         device, macfw::IsochAllocation::Direction::DeviceToHost, kCaptureMaxPacket48k);
     auto playback = macfw::IsochAllocation::create(
         device, macfw::IsochAllocation::Direction::HostToDevice, kPlaybackMaxPacket48k);
 
     if (!rx || !tx || !capture || !playback) {
-        std::cout << "transport object creation failed\n";
-        return false;
+        std::cout << "transport object creation failed\n"; return false;
     }
 
     (*capture.nativeChannel())->AddListener(
-        capture.nativeChannel(),
-        reinterpret_cast<IOFireWireLibIsochPortRef>(rx.nativeLocalPort()));
+        capture.nativeChannel(), reinterpret_cast<IOFireWireLibIsochPortRef>(rx.nativeLocalPort()));
     if (playback.bindHostToDeviceTalkerFirst(tx.nativeLocalPort()) != kIOReturnSuccess) {
-        std::cout << "playback port binding failed\n";
-        return false;
+        std::cout << "playback port binding failed\n"; return false;
     }
 
     bool callbackDispatcher = false;
@@ -144,8 +149,7 @@ bool run(bool execute) {
     if ((*native)->TurnOnNotification(native)) notifications = true;
 
     if (capture.allocate() != kIOReturnSuccess || playback.allocate() != kIOReturnSuccess) {
-        std::cout << "ISO resource allocation failed\n";
-        goto cleanup;
+        std::cout << "ISO resource allocation failed\n"; goto cleanup;
     }
 
     std::cout << "ISO resources:\n"
@@ -167,8 +171,11 @@ bool run(bool execute) {
     captureStarted = true;
 
     std::cout << "duplex ISO: started (direct interleaved PCM buffer)\n"
-              << "observation window: 2.0 s\n"
-              << "listen for 440 Hz on Analog Out 1 and 880 Hz on Analog Out 2\n";
+              << "observation window: 2.0 s\n";
+    if (position >= 1)
+        std::cout << "identify which physical output carries PCM position " << position << '\n';
+    else
+        std::cout << "listen for 440 Hz on Analog Out 1 and 880 Hz on Analog Out 2\n";
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 2.0, false);
     dumpCapture(rx);
     ok = true;
@@ -204,15 +211,27 @@ cleanup:
 
 int main(int argc, char** argv) {
     bool execute = false;
+    int position = 0;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
-        if (arg == "--execute") execute = true;
-        else {
-            std::cerr << "usage: ./pcmbufferplayback [--execute]\n";
+        if (arg == "--execute") {
+            execute = true;
+        } else if (arg == "--position" && i + 1 < argc) {
+            try {
+                position = std::stoi(argv[++i]);
+            } catch (...) {
+                position = 0;
+            }
+            if (position < 1 || position > 10) {
+                std::cerr << "--position must be between 1 and 10\n";
+                return 64;
+            }
+        } else {
+            std::cerr << "usage: ./pcmbufferplayback [--execute] [--position 1..10]\n";
             return 64;
         }
     }
 
     std::cout << "macfw pcmbufferplayback — direct FW410 PCM-buffer playback test\n\n";
-    return run(execute) ? 0 : 1;
+    return run(execute, position) ? 0 : 1;
 }
