@@ -6,9 +6,9 @@
 
 namespace macfw::hal::capture {
 
-constexpr const char* kShmName = "/macfw_fw410_capture_v1";
+constexpr const char* kShmName = "/macfw_fw410_capture_v2";
 constexpr std::uint32_t kMagic = 0x4d464349; // MFCI
-constexpr std::uint32_t kVersion = 1;
+constexpr std::uint32_t kVersion = 2;
 constexpr std::uint32_t kChannels = 4;
 constexpr std::uint32_t kCapacityFrames = 32768;
 
@@ -31,6 +31,15 @@ struct SharedCaptureRing {
     std::atomic<std::uint64_t> decodedFrames;
     std::atomic<std::uint64_t> malformedPackets;
     std::atomic<std::uint64_t> invalidLabels;
+
+    // HAL consumer diagnostics. These live in the capture ring so we can tell
+    // whether CoreAudio is actually issuing ReadInput and whether the HAL is
+    // consuming live FW410 frames or zero-filling an underrun/unmapped period.
+    std::atomic<std::uint64_t> halReadCalls;
+    std::atomic<std::uint64_t> halRequestedFrames;
+    std::atomic<std::uint64_t> halFramesFromRing;
+    std::atomic<std::uint64_t> halZeroFilledFrames;
+
     float samples[kCapacityFrames * kChannels];
 };
 
@@ -48,6 +57,10 @@ inline void initialize(SharedCaptureRing& ring, std::uint32_t rate) {
     ring.decodedFrames.store(0, std::memory_order_relaxed);
     ring.malformedPackets.store(0, std::memory_order_relaxed);
     ring.invalidLabels.store(0, std::memory_order_relaxed);
+    ring.halReadCalls.store(0, std::memory_order_relaxed);
+    ring.halRequestedFrames.store(0, std::memory_order_relaxed);
+    ring.halFramesFromRing.store(0, std::memory_order_relaxed);
+    ring.halZeroFilledFrames.store(0, std::memory_order_relaxed);
 }
 
 inline bool valid(const SharedCaptureRing& ring) {
