@@ -18,7 +18,7 @@ constexpr AudioObjectID kDeviceID = 2;
 constexpr AudioObjectID kOutputStreamID = 3;
 constexpr Float64 kRate44100 = 44100.0;
 constexpr Float64 kRate48000 = 48000.0;
-constexpr UInt32 kChannels = 2;
+constexpr UInt32 kChannels = macfw::hal::kChannels;
 constexpr UInt32 kBytesPerFrame = sizeof(Float32) * kChannels;
 
 AudioServerPlugInHostRef gHost = nullptr;
@@ -257,7 +257,8 @@ OSStatus GetCommon(AudioObjectID object, const AudioObjectPropertyAddress& a,
     }
     if (a.mSelector == kAudioObjectPropertyName) {
         const CFStringRef v = object == kAudioObjectPlugInObject ? CFSTR("macfw FW410 HAL") :
-                              object == kDeviceID ? CFSTR("M-Audio FireWire 410") : CFSTR("Output 1/2");
+                              object == kDeviceID ? CFSTR("M-Audio FireWire 410") :
+                              CFSTR("Analog 1-8 + S/PDIF Out");
         return CopyString(inSize, outSize, outData, v);
     }
     if (a.mSelector == kAudioObjectPropertyManufacturer)
