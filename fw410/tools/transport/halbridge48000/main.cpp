@@ -11,6 +11,7 @@
 #include <IOKit/firewire/IOFireWireLib.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <csignal>
 #include <cstdint>
@@ -31,6 +32,14 @@ constexpr std::size_t kPcmChannels = 10;
 constexpr std::size_t kPcmCapacityFrames = 16384;
 constexpr UInt32 kCycleLead = 256;
 constexpr UInt32 kCyclesPerSecond = 8000;
+
+// CoreAudio physical order -> zero-based FW410 audio position within the
+// 10-channel PCM portion of the 11-slot AMDTP stream.
+// CoreAudio: A1,A2,A3,A4,A5,A6,A7,A8,SPDIF-L,SPDIF-R
+// FW410:     S1,A1,A3,A5,A7,S2,A2,A4,A6,A8
+constexpr std::array<std::size_t, macfw::hal::kChannels> kCoreAudioToFw410{
+    1, 6, 2, 7, 3, 8, 4, 9, 0, 5
+};
 
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
@@ -70,27 +79,30 @@ private:
 };
 
 std::size_t pumpShared(macfw::hal::SharedPcmRing& shared, macfw::PcmRingBuffer& pcm,
-                       std::vector<float>& stereo, std::vector<std::int32_t>& mapped) {
-    const std::size_t frames = std::min<std::size_t>({pcm.freeFrames(), macfw::hal::availableFrames(shared), stereo.size()/2});
+                       std::vector<float>& audio, std::vector<std::int32_t>& mapped) {
+    const std::size_t frames = std::min<std::size_t>({
+        pcm.freeFrames(), macfw::hal::availableFrames(shared),
+        audio.size() / macfw::hal::kChannels
+    });
     if (!frames) return 0;
-    const std::size_t got = macfw::hal::read(shared, stereo.data(), frames);
+    const std::size_t got = macfw::hal::read(shared, audio.data(), frames);
     for (std::size_t i = 0; i < got; ++i) {
-        const double l = std::max(-1.0, std::min(1.0, static_cast<double>(stereo[i*2])));
-        const double r = std::max(-1.0, std::min(1.0, static_cast<double>(stereo[i*2+1])));
-        const auto ls = static_cast<std::int32_t>(l * 8388607.0);
-        const auto rs = static_cast<std::int32_t>(r * 8388607.0);
-        const std::size_t b = i * kPcmChannels;
-        std::fill_n(mapped.data() + b, kPcmChannels, 0);
-        mapped[b+1] = ls;
-        mapped[b+6] = rs;
+        const std::size_t base = i * kPcmChannels;
+        std::fill_n(mapped.data() + base, kPcmChannels, 0);
+        for (std::size_t ch = 0; ch < macfw::hal::kChannels; ++ch) {
+            const double s = std::max(-1.0, std::min(1.0,
+                static_cast<double>(audio[i * macfw::hal::kChannels + ch])));
+            mapped[base + kCoreAudioToFw410[ch]] =
+                static_cast<std::int32_t>(s * 8388607.0);
+        }
     }
     return pcm.write(mapped.data(), got);
 }
 
 void drainShared(macfw::hal::SharedPcmRing& shared, macfw::PcmRingBuffer& pcm,
-                 std::vector<float>& stereo, std::vector<std::int32_t>& mapped) {
+                 std::vector<float>& audio, std::vector<std::int32_t>& mapped) {
     while (macfw::hal::availableFrames(shared) != 0 && pcm.freeFrames() != 0) {
-        if (pumpShared(shared, pcm, stereo, mapped) == 0) break;
+        if (pumpShared(shared, pcm, audio, mapped) == 0) break;
     }
 }
 
@@ -149,7 +161,7 @@ bool run() {
     if ((*capture.nativeChannel())->Start(capture.nativeChannel())!=kIOReturnSuccess) goto cleanup; capStart=true;
 
     {
-        std::vector<float> stereo(4096*2,0.0f);
+        std::vector<float> audio(4096 * macfw::hal::kChannels, 0.0f);
         std::vector<std::int32_t> mapped(4096*kPcmChannels,0);
         std::uint64_t lastWrite=input.ring()->writeFrame.load(std::memory_order_acquire);
         CFAbsoluteTime lastStatus=CFAbsoluteTimeGetCurrent();
@@ -157,13 +169,11 @@ bool run() {
         std::cout << "duplex ISO started\n"
                   << "TX ring: 640 cycles / 320-cycle refill halves\n"
                   << "PCM FIFO: 16384 frames\n"
+                  << "CoreAudio outputs: Analog 1-8, S/PDIF L/R (10 channels)\n"
                   << "HAL bridge active: play audio to M-Audio FireWire 410 at 48 kHz; Ctrl-C to stop\n";
         while (!gStopRequested) {
-            // Keep the FireWire callback run loop responsive, then catch up all queued
-            // HAL frames before servicing the transmit scheduler. A 1 ms fixed wait was
-            // measurably vulnerable to scheduler jitter under desktop load.
             CFRunLoopRunInMode(kCFRunLoopDefaultMode,0.00025,false);
-            drainShared(*input.ring(),pcm,stereo,mapped);
+            drainShared(*input.ring(),pcm,audio,mapped);
             UInt32 nowCt=0;
             if ((*native)->GetCycleTime(native,&nowCt)==kIOReturnSuccess) streamer.service(cycleCount(nowCt));
             const CFAbsoluteTime now=CFAbsoluteTimeGetCurrent();
