@@ -1,5 +1,5 @@
 CONTROL := avcprobe fcpprobe mixerprobe plugprobe topologyprobe headphoneprobe rateprobe
-TRANSPORT := cmpconnect cmpprobe coreaudiobridge coreaudiodiag formatprobe halbridge44100 isocapture isoduplex isoplayback pcm44100playback pcmbufferplayback pcmstreamplayback shmprobe streamprobe amdtp44probe
+TRANSPORT := cmpconnect cmpprobe coreaudiobridge coreaudiodiag formatprobe halbridge44100 halbridge48000 haltransport isocapture isoduplex isoplayback pcm44100playback pcmbufferplayback pcmstreamplayback shmprobe streamprobe amdtp44probe
 DEVICE := fwboot fwprobe
 TOOLS := $(CONTROL) $(TRANSPORT) $(DEVICE)
 
