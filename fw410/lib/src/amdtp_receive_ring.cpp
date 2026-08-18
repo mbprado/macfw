@@ -1,4 +1,5 @@
 #include "macfw/amdtp_receive_ring.h"
+#include <CoreFoundation/CoreFoundation.h>
 #include <cstring>
 #include <new>
 #include <sys/mman.h>
@@ -58,6 +59,14 @@ AmdtpReceiveRing AmdtpReceiveRing::create(FireWireDevice& device, std::size_t pa
         CFUUIDGetUUIDBytes(kIOFireWireNuDCLPoolInterfaceID));
     if (!ring.pool_) { ring.reset(); return ring; }
 
+    // Receive NuDCL metadata (iso header/status/timestamp) is only guaranteed
+    // current after an update has run. Put every receive descriptor into one
+    // update set and have the last descriptor update the complete ring once per
+    // revolution. With 256 slots this publishes a fresh batch about every
+    // 32 ms at the 8 kHz FireWire cycle rate, while keeping the data path cyclic.
+    CFMutableSetRef updateSet = CFSetCreateMutable(kCFAllocatorDefault, 0, nullptr);
+    if (!updateSet) { ring.reset(); return ring; }
+
     NuDCLRef first = nullptr, last = nullptr;
     for (std::size_t i = 0; i < packetCount; ++i) {
         auto* raw = reinterpret_cast<RawSlot*>(ring.storage_ + i * ring.rawSlotBytes_);
@@ -66,15 +75,25 @@ AmdtpReceiveRing AmdtpReceiveRing::create(FireWireDevice& device, std::size_t pa
             {reinterpret_cast<IOVirtualAddress>(&raw->isoHeader), static_cast<IOByteCount>(sizeof(raw->isoHeader))},
             {reinterpret_cast<IOVirtualAddress>(payload), static_cast<IOByteCount>(packetCapacity)}
         };
-        auto dcl = (*ring.pool_)->AllocateReceivePacket(ring.pool_, nullptr, 4, 2, ranges);
-        if (!dcl) { ring.reset(); return ring; }
+        auto dcl = (*ring.pool_)->AllocateReceivePacket(ring.pool_, updateSet, 4, 2, ranges);
+        if (!dcl) {
+            CFRelease(updateSet);
+            ring.reset();
+            return ring;
+        }
         const NuDCLRef ref = reinterpret_cast<NuDCLRef>(dcl);
         if (!first) first = ref;
         last = ref;
         (*ring.pool_)->SetDCLStatusPtr(ref, &raw->status);
         (*ring.pool_)->SetDCLTimeStampPtr(ref, &raw->timestamp);
     }
-    if (!first || !last || (*ring.pool_)->SetDCLBranch(last, first) != kIOReturnSuccess) {
+
+    const bool updateOk = last &&
+        (*ring.pool_)->SetDCLUpdateList(last, updateSet) == kIOReturnSuccess;
+    CFRelease(updateSet);
+
+    if (!first || !last || !updateOk ||
+        (*ring.pool_)->SetDCLBranch(last, first) != kIOReturnSuccess) {
         ring.reset(); return ring;
     }
 
