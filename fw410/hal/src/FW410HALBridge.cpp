@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <cerrno>
+#include <cstring>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -433,10 +434,11 @@ OSStatus STDMETHODCALLTYPE GetZeroTimeStamp(AudioServerPlugInDriverRef, AudioObj
 OSStatus STDMETHODCALLTYPE WillDoIOOperation(AudioServerPlugInDriverRef, AudioObjectID d, UInt32,
                                              UInt32 op, Boolean* willDo, Boolean* inPlace) {
     if (d != kDeviceID || !willDo || !inPlace) return kAudioHardwareIllegalOperationError;
-    // Stage A: preserve the known-good output I/O contract exactly. The input
-    // stream is metadata-only for this checkpoint; ReadInput is deliberately
-    // not advertised yet.
-    *willDo = op == kAudioServerPlugInIOOperationWriteMix;
+    // Stage B: advertise the CoreAudio input operation, but return digital
+    // silence only. Capture shared memory remains completely disconnected so
+    // this checkpoint isolates the HAL I/O contract from capture transport.
+    *willDo = op == kAudioServerPlugInIOOperationWriteMix ||
+              op == kAudioServerPlugInIOOperationReadInput;
     *inPlace = true;
     return kAudioHardwareNoError;
 }
@@ -447,12 +449,23 @@ OSStatus STDMETHODCALLTYPE BeginIOOperation(AudioServerPlugInDriverRef, AudioObj
 OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef, AudioObjectID d, AudioObjectID stream,
                                          UInt32, UInt32 op, UInt32 frames,
                                          const AudioServerPlugInIOCycleInfo*, void* mainBuffer, void*) {
-    // Stage A intentionally leaves the hardware-proven output path untouched.
-    if (d != kDeviceID || stream != kOutputStreamID) return kAudioHardwareBadObjectError;
-    if (op != kAudioServerPlugInIOOperationWriteMix) return kAudioHardwareUnsupportedOperationError;
-    if (gRing && mainBuffer && macfw::hal::valid(*gRing))
-        macfw::hal::write(*gRing, static_cast<const float*>(mainBuffer), frames);
-    return kAudioHardwareNoError;
+    if (d != kDeviceID) return kAudioHardwareBadObjectError;
+
+    if (stream == kOutputStreamID && op == kAudioServerPlugInIOOperationWriteMix) {
+        if (gRing && mainBuffer && macfw::hal::valid(*gRing))
+            macfw::hal::write(*gRing, static_cast<const float*>(mainBuffer), frames);
+        return kAudioHardwareNoError;
+    }
+
+    // Stage B input: prove ReadInput scheduling without touching capture SHM.
+    // A valid input buffer is filled with deterministic silence.
+    if (stream == kInputStreamID && op == kAudioServerPlugInIOOperationReadInput) {
+        if (!mainBuffer) return kAudioHardwareIllegalOperationError;
+        std::memset(mainBuffer, 0, frames * kInputChannels * sizeof(Float32));
+        return kAudioHardwareNoError;
+    }
+
+    return kAudioHardwareUnsupportedOperationError;
 }
 OSStatus STDMETHODCALLTYPE EndIOOperation(AudioServerPlugInDriverRef, AudioObjectID, UInt32,
                                           UInt32, UInt32, const AudioServerPlugInIOCycleInfo*) {
