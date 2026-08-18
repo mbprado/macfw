@@ -45,7 +45,7 @@ The post-start rate reassertion is an FW410/M-Audio startup quirk and must stay 
 
 ## Native 48 kHz
 
-`tools/transport/halbridge48000` is the current native 48 kHz integration test.
+`tools/transport/halbridge48000` is hardware-confirmed with clear native 48 kHz output.
 
 The HAL producer was measured at essentially exactly 48,000 frames/s, proving that the earlier poor 48 kHz audio was not caused by CoreAudio or sample-rate conversion. The decisive A/B result was transmit scheduling margin:
 
@@ -61,27 +61,52 @@ new / clear:
     half window:  ~40 ms
 ```
 
-The current committed 48 kHz test also uses:
+The committed 48 kHz path also uses:
 
 - 16,384-frame internal PCM FIFO;
 - drain-until-caught-up shared-memory consumption;
-- user-interactive pthread QoS as the current scheduler-jitter experiment;
+- user-interactive pthread QoS;
 - a shorter CoreFoundation callback-service interval;
-- diagnostics for `lateCyclePolls` and scheduler-inserted silence;
-- query-before-set behavior so an FW410 already at 48 kHz is not disturbed by redundant no-op AV/C rate CONTROL.
+- query-before-set behavior so an FW410 already at 48 kHz is not disturbed by redundant no-op AV/C rate CONTROL;
+- diagnostics for `lateCyclePolls` and scheduler-inserted silence.
 
-Small residual dropouts seen before the QoS change correlated with unrelated desktop activity and temporary shared-memory backlog. Treat this as user-space scheduling jitter unless new evidence indicates otherwise.
+### Residual load-sensitive dropouts
+
+Small dropouts can still occur when the Mac is busy with unrelated desktop work. Current evidence does **not** identify these as PCM starvation or scheduler-generated silence:
+
+- `framesSilenced` remains at zero when a dropout is heard;
+- `lateCyclePolls` increases gradually during normal playback but does not show a distinct jump at dropout moments;
+- the HAL producer remains at the expected 48 kHz cadence;
+- enlarging the TX ring solved the major corruption, leaving only occasional load-sensitive glitches.
+
+Treat this as unresolved user-space/FireWire servicing jitter below or beside the current high-level counters. Do not regress the proven 640/320 geometry while investigating it. A future transport-core refactor should separate lifecycle/logging from the latency-sensitive service loop and add finer timing instrumentation around cycle polling, TX-half refill/commit and callback wakeups.
+
+## Rate-aware transport supervisor
+
+`tools/transport/haltransport` is the first unified runtime entry point.
+
+It deliberately does **not** duplicate or refactor the two hardware-proven packet engines yet. Instead it:
+
+1. maps the HAL shared state;
+2. reads the CoreAudio-selected sample rate;
+3. starts the proven native `halbridge44100` or `halbridge48000` engine;
+4. watches for HAL sample-rate changes;
+5. cleanly stops the old engine and starts the matching native engine;
+6. forwards SIGINT/SIGTERM shutdown through the child engine's guarded CMP/ISO cleanup.
+
+This supervisor is an integration step, not the final service architecture. Once rate switching is hardware-validated through this entry point, common transport lifecycle code can be extracted into `fw410/lib` without rewriting the known-good AMDTP paths first.
 
 ## Immediate sequence
 
-1. Hardware-validate the committed 48 kHz QoS/jitter changes under desktop load.
-2. Replace `halbridge44100` and `halbridge48000` with one rate-aware transport service that reads the HAL-selected rate and selects the native 44.1 or 48 scheduler automatically.
-3. Expand the HAL playback presentation from temporary stereo to the real FW410 playback-channel topology.
-4. Add FW410 -> macOS capture/input using the already-proven receive/AM824 code.
-5. Make transport startup automatic so a user does not manually launch a companion binary.
-6. Add bus-reset, generation/node change, disconnect/reconnect and rate-change recovery.
-7. Add mixer/routing/headphone, S/PDIF and MIDI integration.
-8. Finish packaging/release automation once the runtime is reproducibly installable.
+1. Hardware-validate `haltransport` at 44.1 and 48 kHz, including changing the HAL format while the supervisor is running.
+2. Extract common 44.1/48 device/CMP/ISO lifecycle into a reusable transport core while preserving the proven rate-specific schedulers and the 44.1 startup quirk.
+3. Move the latency-sensitive transport service loop away from logging/control work and add finer jitter timing diagnostics.
+4. Expand the HAL playback presentation from temporary stereo to the real FW410 playback-channel topology.
+5. Add FW410 -> macOS capture/input using the already-proven receive/AM824 code.
+6. Make transport startup automatic so a user does not manually launch a companion binary.
+7. Add bus-reset, generation/node change, disconnect/reconnect and rate-change recovery.
+8. Add mixer/routing/headphone, S/PDIF and MIDI integration.
+9. Finish packaging/release automation once the runtime is reproducibly installable.
 
 ## Bootloader / interface boot mode
 
