@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <fcntl.h>
 #include <iostream>
+#include <pthread.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <vector>
@@ -24,16 +25,24 @@ namespace {
 constexpr UInt32 kCaptureMaxPacket = 168;
 constexpr UInt32 kPlaybackMaxPacket = 360;
 constexpr std::size_t kCaptureSlots = 256;
-constexpr std::size_t kPlaybackSlots = 128;
-constexpr std::size_t kHalfPackets = 64;
+constexpr std::size_t kPlaybackSlots = 640;
+constexpr std::size_t kHalfPackets = 320;
 constexpr std::size_t kPcmChannels = 10;
-constexpr std::size_t kPcmCapacityFrames = 8192;
+constexpr std::size_t kPcmCapacityFrames = 16384;
 constexpr UInt32 kCycleLead = 256;
 constexpr UInt32 kCyclesPerSecond = 8000;
 
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
 UInt32 cycleCount(UInt32 cycleTime) { return (cycleTime >> 12) & 0x1fffu; }
+
+void requestInteractiveQos() {
+    const int rc = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+    if (rc == 0)
+        std::cout << "transport thread QoS: user-interactive\n";
+    else
+        std::cout << "transport thread QoS: request failed (" << rc << ")\n";
+}
 
 class SharedInput {
 public:
@@ -76,6 +85,13 @@ std::size_t pumpShared(macfw::hal::SharedPcmRing& shared, macfw::PcmRingBuffer& 
         mapped[b+6] = rs;
     }
     return pcm.write(mapped.data(), got);
+}
+
+void drainShared(macfw::hal::SharedPcmRing& shared, macfw::PcmRingBuffer& pcm,
+                 std::vector<float>& stereo, std::vector<std::int32_t>& mapped) {
+    while (macfw::hal::availableFrames(shared) != 0 && pcm.freeFrames() != 0) {
+        if (pumpShared(shared, pcm, stereo, mapped) == 0) break;
+    }
 }
 
 bool run() {
@@ -137,20 +153,29 @@ bool run() {
         std::vector<std::int32_t> mapped(4096*kPcmChannels,0);
         std::uint64_t lastWrite=input.ring()->writeFrame.load(std::memory_order_acquire);
         CFAbsoluteTime lastStatus=CFAbsoluteTimeGetCurrent();
+        requestInteractiveQos();
         std::cout << "duplex ISO started\n"
+                  << "TX ring: 640 cycles / 320-cycle refill halves\n"
+                  << "PCM FIFO: 16384 frames\n"
                   << "HAL bridge active: play audio to M-Audio FireWire 410 at 48 kHz; Ctrl-C to stop\n";
         while (!gStopRequested) {
-            CFRunLoopRunInMode(kCFRunLoopDefaultMode,0.001,false);
-            pumpShared(*input.ring(),pcm,stereo,mapped);
+            // Keep the FireWire callback run loop responsive, then catch up all queued
+            // HAL frames before servicing the transmit scheduler. A 1 ms fixed wait was
+            // measurably vulnerable to scheduler jitter under desktop load.
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode,0.00025,false);
+            drainShared(*input.ring(),pcm,stereo,mapped);
             UInt32 nowCt=0;
             if ((*native)->GetCycleTime(native,&nowCt)==kIOReturnSuccess) streamer.service(cycleCount(nowCt));
             const CFAbsoluteTime now=CFAbsoluteTimeGetCurrent();
             if (now-lastStatus>=2.0) {
                 const auto w=input.ring()->writeFrame.load(std::memory_order_acquire);
+                const auto& stats=streamer.stats();
                 std::cout << "HAL frames=" << w << " (delta " << (w-lastWrite) << ")"
                           << " shared=" << macfw::hal::availableFrames(*input.ring())
                           << " pcm=" << pcm.availableFrames()
-                          << " drops=" << input.ring()->droppedFrames.load() << '\n';
+                          << " drops=" << input.ring()->droppedFrames.load()
+                          << " late=" << stats.lateCyclePolls
+                          << " silence=" << stats.framesSilenced << '\n';
                 lastWrite=w; lastStatus=now;
             }
         }
