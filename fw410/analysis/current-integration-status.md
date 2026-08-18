@@ -154,11 +154,19 @@ Capture is being staged independently before changing the HAL input object:
 - `tools/transport/capturebridge48000` establishes the required duplex 48 kHz ISO state and feeds that capture ring;
 - `tools/transport/captureprobe` drains a 2-second window and reports peak/RMS activity for Analog In 1/2 and S/PDIF L/R.
 
-The next gate is hardware validation of this decoded capture ring. After that succeeds, the HAL will gain a 4-channel input stream and implement CoreAudio `ReadInput` from the same shared ring.
+### First capture bring-up findings
+
+The first isolated `capturebridge48000` run exposed two implementation bugs and one important device-behavior requirement:
+
+1. The receive pump initially stopped scanning as soon as its cursor reached one untouched/unchanged NuDCL slot. The first hardware run decoded only 16 frames and then remained stuck. The pump now scans one complete cyclic receive ring per service pass and processes every slot whose timestamp/header signature has changed.
+2. The capture shared-memory object was not robust across repeated bridge runs. The writer now unlinks/recreates the object on startup and unlinks it on shutdown so each bridge instance gets a clean ABI-sized mapping.
+3. Most importantly, the standalone bridge originally created a finite prebuilt 48 kHz host->device transmit ring but never serviced it. The FW410 capture side requires continuously valid duplex AMDTP traffic to remain sample-bearing. After boot, the unserviced transmit program could leave capture at NODATA/zero frames. `capturebridge48000` now uses the same `AmdtpPcmStream48k` service loop as the proven playback engine, with an empty 10-channel PCM FIFO so it continuously emits correctly timed digital silence as the duplex keepalive.
+
+The next gate is to re-run `capturebridge48000` after these fixes and verify that decoded frames increase continuously at approximately 48,000 frames/s and that `captureprobe` sees the expected analog/SPDIF activity. After that succeeds, the HAL will gain a 4-channel input stream and implement CoreAudio `ReadInput` from the same shared ring.
 
 ## Immediate sequence
 
-1. Hardware-validate `capturebridge48000` + `captureprobe` against Analog Inputs 1/2 and, when available, S/PDIF L/R.
+1. Hardware-validate the corrected `capturebridge48000` + `captureprobe` against Analog Inputs 1/2 and, when available, S/PDIF L/R.
 2. Add the 4-channel CoreAudio HAL input stream and `ReadInput` shared-ring consumer.
 3. Integrate capture production into the normal rate-aware transport rather than using a standalone capture test process.
 4. Add native 44.1 capture handling and preserve the 44.1 startup quirk in full-duplex operation.
