@@ -22,15 +22,30 @@ public:
             munmap(ring_, sizeof(*ring_));
         }
         if (fd_ >= 0) close(fd_);
+        // The capture writer owns this diagnostic/runtime object. Remove the
+        // name on shutdown so the next bridge run always creates a fresh ring.
+        shm_unlink(macfw::hal::capture::kShmName);
     }
 
     bool open(std::uint32_t sampleRate) {
-        fd_ = shm_open(macfw::hal::capture::kShmName, O_CREAT | O_RDWR, 0666);
+        // A previous bridge may have exited without unlinking the object.
+        // Existing mappings remain valid for old readers after unlink(), while
+        // this run gets a clean object with the expected ABI and size.
+        shm_unlink(macfw::hal::capture::kShmName);
+        fd_ = shm_open(macfw::hal::capture::kShmName, O_CREAT | O_EXCL | O_RDWR, 0666);
         if (fd_ < 0) return false;
-        if (ftruncate(fd_, sizeof(macfw::hal::capture::SharedCaptureRing)) != 0) return false;
+        if (ftruncate(fd_, sizeof(macfw::hal::capture::SharedCaptureRing)) != 0) {
+            close(fd_); fd_ = -1;
+            shm_unlink(macfw::hal::capture::kShmName);
+            return false;
+        }
         void* p = mmap(nullptr, sizeof(macfw::hal::capture::SharedCaptureRing),
                        PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
-        if (p == MAP_FAILED) return false;
+        if (p == MAP_FAILED) {
+            close(fd_); fd_ = -1;
+            shm_unlink(macfw::hal::capture::kShmName);
+            return false;
+        }
         ring_ = static_cast<macfw::hal::capture::SharedCaptureRing*>(p);
         macfw::hal::capture::initialize(*ring_, sampleRate);
         ring_->active.store(1, std::memory_order_release);
@@ -50,24 +65,27 @@ public:
 
     std::size_t service(const macfw::AmdtpReceiveRing& rx,
                         macfw::hal::capture::SharedCaptureRing& out) {
-        if (rx.packetCount() == 0) return 0;
-        if (lastSignature_.size() != rx.packetCount()) {
-            lastSignature_.fill(0);
-            cursor_ = 0;
-        }
+        if (rx.packetCount() == 0 || rx.packetCount() > lastSignature_.size()) return 0;
 
         std::size_t totalFrames = 0;
+        // NuDCL receive slots are rewritten cyclically. Do not stop scanning
+        // when the current cursor points at an untouched/unchanged slot: that
+        // can permanently pin the cursor while later slots continue changing.
+        // Scan one complete ring per service pass and process every slot whose
+        // timestamp/header signature has changed since we last saw it.
         for (std::size_t checked = 0; checked < rx.packetCount(); ++checked) {
-            const auto& slot = rx.slot(cursor_);
+            const std::size_t index = cursor_;
+            cursor_ = (cursor_ + 1) % rx.packetCount();
+
+            const auto& slot = rx.slot(index);
             const std::uint64_t signature =
                 (static_cast<std::uint64_t>(slot.timestamp) << 32) |
                 static_cast<std::uint64_t>(slot.isoHeader);
-            if (!slot.touched() || signature == 0 || signature == lastSignature_[cursor_])
-                break;
+            if (!slot.touched() || signature == 0 || signature == lastSignature_[index])
+                continue;
 
-            lastSignature_[cursor_] = signature;
+            lastSignature_[index] = signature;
             totalFrames += decodePacket(slot.packet(), out);
-            cursor_ = (cursor_ + 1) % rx.packetCount();
         }
         return totalFrames;
     }
@@ -124,7 +142,6 @@ private:
 
     std::uint8_t expectedFdf_ = 0;
     std::size_t cursor_ = 0;
-    // Current receive-ring size is 256 slots. Keep this fixed-size and allocation-free.
     std::array<std::uint64_t, 256> lastSignature_{};
 };
 
