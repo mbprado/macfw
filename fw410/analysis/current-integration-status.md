@@ -13,8 +13,9 @@ Hardware-backed normal application playback is confirmed at both native rates:
 - **44.1 kHz:** clear output using `AmdtpPcmStream44100` and the required FW410 post-start AV/C 44.1 reassertion.
 - **48 kHz:** clear output with no SRC after enlarging the TX scheduler from the old 128/64-cycle geometry to 640/320 cycles.
 - **rate switching:** `haltransport` has been hardware-confirmed switching 44.1 -> 48 -> 44.1 while running, selecting the matching native transport automatically.
+- **full playback topology:** Logic Pro X hardware-validated all 10 CoreAudio output channels: Analog 1-8 and S/PDIF L/R.
 
-The proven architecture is:
+The proven playback architecture is:
 
 ```text
 macOS application
@@ -65,7 +66,9 @@ CoreAudio 9   S/PDIF Out L   -> FW410 PCM position 1
 CoreAudio 10  S/PDIF Out R   -> FW410 PCM position 6
 ```
 
-The HAL/shared-memory ABI is now version 3 and carries 10 interleaved Float32 output channels in this physical order. Both native transports explicitly permute that order into the FW410 AMDTP positions above.
+The HAL/shared-memory ABI is version 3 and carries 10 interleaved Float32 output channels in this physical order. Both native transports explicitly permute that order into the FW410 AMDTP positions above.
+
+Logic Pro X independently routed and hardware-validated every channel in this layout, including both S/PDIF channels. Browser/YouTube playback showed more occasional dropouts than Logic Pro, suggesting client/system buffering and scheduling contribute to the remaining jitter behavior.
 
 ## Native 44.1 kHz
 
@@ -81,7 +84,7 @@ Required startup behavior on the tested FW410:
 
 The post-start rate reassertion is an FW410/M-Audio startup quirk and must stay in the device transport state machine rather than the generic AMDTP packet generator.
 
-The 44.1 status output now reports the same `drops`, `late` and `silence` counters as the 48 kHz path.
+The 44.1 status output reports the same `drops`, `late` and `silence` counters as the 48 kHz path.
 
 ## Native 48 kHz
 
@@ -110,9 +113,10 @@ Small dropouts can still occur when the Mac is busy with unrelated desktop work.
 - `framesSilenced` remains zero when a dropout is heard;
 - `lateCyclePolls` increases gradually but does not spike at dropout moments;
 - the HAL producer remains at the expected 48 kHz cadence;
-- enlarging the TX ring solved the major corruption, leaving only occasional load-sensitive glitches.
+- enlarging the TX ring solved the major corruption, leaving only occasional load-sensitive glitches;
+- Logic Pro X produced noticeably fewer glitches than browser/YouTube playback.
 
-Treat this as unresolved user-space/FireWire servicing jitter below or beside the current high-level counters. Do not regress the proven 640/320 geometry while investigating it.
+Treat this as unresolved user-space/client/FireWire servicing jitter below or beside the current high-level counters. Do not regress the proven 640/320 geometry while investigating it.
 
 ## Rate-aware transport supervisor
 
@@ -122,17 +126,48 @@ It maps HAL shared state, reads the selected CoreAudio sample rate, starts the p
 
 A 48 -> 44.1 transition exposed a useful lifecycle edge case: immediately after a rate change/re-enumeration, a first child attempt can temporarily observe a stale/transitional FireWire state such as node `0x0` and unknown AV/C rate. The supervisor retry then reacquires the normal node and succeeds. The eventual persistent service should explicitly wait for/reacquire a stable operational unit rather than relying on a failed child/retry cycle.
 
+## Capture/input staging
+
+The capture topology is already known from `analysis/stream-topology.md`. At 44.1/48 kHz the incoming FW410 AMDTP stream is DBS=5:
+
+```text
+raw position 1  S/PDIF In L
+raw position 2  Analog In 1
+raw position 3  S/PDIF In R
+raw position 4  Analog In 2
+raw position 5  MIDI
+```
+
+The planned CoreAudio-facing order is:
+
+```text
+CoreAudio Input 1  Analog In 1
+CoreAudio Input 2  Analog In 2
+CoreAudio Input 3  S/PDIF In L
+CoreAudio Input 4  S/PDIF In R
+```
+
+Capture is being staged independently before changing the HAL input object:
+
+- `hal/include/macfw_hal_capture_shm.h` defines a separate 4-channel Float32 capture shared ring;
+- `tools/transport/capture_shared.h` consumes the cyclic `AmdtpReceiveRing`, decodes MBLA-24 samples and permutes raw positions into the CoreAudio-facing order;
+- `tools/transport/capturebridge48000` establishes the required duplex 48 kHz ISO state and feeds that capture ring;
+- `tools/transport/captureprobe` drains a 2-second window and reports peak/RMS activity for Analog In 1/2 and S/PDIF L/R.
+
+The next gate is hardware validation of this decoded capture ring. After that succeeds, the HAL will gain a 4-channel input stream and implement CoreAudio `ReadInput` from the same shared ring.
+
 ## Immediate sequence
 
-1. Hardware-validate the new 10-channel HAL/shared-memory/transport path at 44.1 and 48 kHz.
-2. Verify multichannel routing from CoreAudio applications/Audio MIDI Setup, especially Analog 1-8 and S/PDIF L/R ordering.
-3. Extract common 44.1/48 device/CMP/ISO lifecycle into a reusable transport core while preserving the proven rate-specific schedulers and 44.1 startup quirk.
-4. Move latency-sensitive transport servicing away from logging/control work and add finer jitter timing diagnostics.
-5. Add FW410 -> macOS capture/input using the already-proven receive/AM824 code.
-6. Make transport startup automatic so a user does not manually launch a companion binary.
-7. Add bus-reset, generation/node change, disconnect/reconnect and rate-change recovery.
-8. Add mixer/routing/headphone and MIDI integration.
-9. Finish packaging/release automation once the runtime is reproducibly installable.
+1. Hardware-validate `capturebridge48000` + `captureprobe` against Analog Inputs 1/2 and, when available, S/PDIF L/R.
+2. Add the 4-channel CoreAudio HAL input stream and `ReadInput` shared-ring consumer.
+3. Integrate capture production into the normal rate-aware transport rather than using a standalone capture test process.
+4. Add native 44.1 capture handling and preserve the 44.1 startup quirk in full-duplex operation.
+5. Extract common 44.1/48 device/CMP/ISO lifecycle into a reusable transport core.
+6. Move latency-sensitive transport servicing away from logging/control work and add finer jitter timing diagnostics.
+7. Make transport startup automatic so a user does not manually launch a companion binary.
+8. Add bus-reset, generation/node change, disconnect/reconnect and rate-change recovery.
+9. Add mixer/routing/headphone and MIDI integration.
+10. Finish packaging/release automation once the runtime is reproducibly installable.
 
 ## Bootloader / interface boot mode
 
