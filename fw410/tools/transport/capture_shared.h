@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace macfw::transport {
@@ -30,6 +31,17 @@ public:
     bool open(std::uint32_t sampleRate) {
         fd_ = shm_open(macfw::hal::capture::kShmName, O_CREAT | O_RDWR, 0666);
         if (fd_ < 0) return false;
+
+        // shm_open()'s creation mode is filtered by the process umask. On a
+        // normal shell this commonly turns 0666 into 0644, which prevents the
+        // CoreAudio HAL service (running as another user) from reopening the
+        // ring O_RDWR so it can advance readFrame. Force the persistent object
+        // to be writable by both producer and HAL consumer.
+        if (fchmod(fd_, 0666) != 0) {
+            close(fd_); fd_ = -1;
+            return false;
+        }
+
         if (ftruncate(fd_, sizeof(macfw::hal::capture::SharedCaptureRing)) != 0) {
             close(fd_); fd_ = -1;
             return false;
