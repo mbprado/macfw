@@ -70,8 +70,16 @@ bool MapCaptureRing() {
         close(gCaptureShmFd);
         gCaptureShmFd = -1;
     }
-    gCaptureShmFd = shm_open(macfw::hal::capture::kShmName, O_RDWR, 0);
+
+    // The HAL owns creation of the persistent capture object so coreaudiod can
+    // establish one stable mapping before the FireWire capture producer starts.
+    // capturebridge48000 later opens this same object and reinitializes it in
+    // place, avoiding both the stale-mapping split and the producer-start race.
+    gCaptureShmFd = shm_open(macfw::hal::capture::kShmName, O_CREAT | O_RDWR, 0666);
     if (gCaptureShmFd < 0) return false;
+    if (ftruncate(gCaptureShmFd, sizeof(macfw::hal::capture::SharedCaptureRing)) != 0) {
+        close(gCaptureShmFd); gCaptureShmFd = -1; return false;
+    }
     void* p = mmap(nullptr, sizeof(macfw::hal::capture::SharedCaptureRing),
                    PROT_READ | PROT_WRITE, MAP_SHARED, gCaptureShmFd, 0);
     if (p == MAP_FAILED) {
@@ -79,10 +87,9 @@ bool MapCaptureRing() {
     }
     gCaptureRing = static_cast<macfw::hal::capture::SharedCaptureRing*>(p);
     if (!macfw::hal::capture::valid(*gCaptureRing)) {
-        munmap(gCaptureRing, sizeof(*gCaptureRing));
-        gCaptureRing = nullptr;
-        close(gCaptureShmFd); gCaptureShmFd = -1;
-        return false;
+        macfw::hal::capture::initialize(*gCaptureRing,
+            static_cast<std::uint32_t>(gSampleRate));
+        gCaptureRing->active.store(0, std::memory_order_release);
     }
     return true;
 }
@@ -155,6 +162,7 @@ OSStatus STDMETHODCALLTYPE Initialize(AudioServerPlugInDriverRef, AudioServerPlu
     mach_timebase_info(&gTimebase);
     gStartHostTime = mach_absolute_time();
     MapSharedRing();
+    MapCaptureRing();
     return kAudioHardwareNoError;
 }
 OSStatus STDMETHODCALLTYPE CreateDevice(AudioServerPlugInDriverRef, CFDictionaryRef,
