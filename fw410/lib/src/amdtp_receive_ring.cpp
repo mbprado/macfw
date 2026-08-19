@@ -25,10 +25,14 @@ void AmdtpReceiveRing::moveFrom(AmdtpReceiveRing&& other) noexcept {
     device_ = other.device_; storage_ = other.storage_; slots_ = other.slots_;
     packetCount_ = other.packetCount_; packetCapacity_ = other.packetCapacity_;
     rawSlotBytes_ = other.rawSlotBytes_; storageBytes_ = other.storageBytes_;
+    updateChunkSlots_ = other.updateChunkSlots_; updateChunkCount_ = other.updateChunkCount_;
+    chunkGenerations_ = other.chunkGenerations_;
     completed_ = other.completed_; pool_ = other.pool_; localPort_ = other.localPort_;
     other.device_ = nullptr; other.storage_ = nullptr; other.slots_ = nullptr;
     other.packetCount_ = 0; other.packetCapacity_ = 0; other.rawSlotBytes_ = 0;
-    other.storageBytes_ = 0; other.completed_ = false; other.pool_ = nullptr; other.localPort_ = nullptr;
+    other.storageBytes_ = 0; other.updateChunkSlots_ = 0; other.updateChunkCount_ = 0;
+    other.chunkGenerations_ = nullptr; other.completed_ = false;
+    other.pool_ = nullptr; other.localPort_ = nullptr;
 }
 
 AmdtpReceiveRing AmdtpReceiveRing::create(FireWireDevice& device, std::size_t packetCount,
@@ -37,14 +41,22 @@ AmdtpReceiveRing AmdtpReceiveRing::create(FireWireDevice& device, std::size_t pa
     if (!device.nativeHandle() || packetCount == 0 || packetCapacity < 8) return ring;
     ring.device_ = &device; ring.packetCount_ = packetCount; ring.packetCapacity_ = packetCapacity;
     ring.rawSlotBytes_ = sizeof(RawSlot) + packetCapacity;
-    ring.storageBytes_ = ring.rawSlotBytes_ * packetCount;
+    ring.updateChunkSlots_ = 32;
+    ring.updateChunkCount_ = (packetCount + ring.updateChunkSlots_ - 1) / ring.updateChunkSlots_;
+    const std::size_t slotStorageBytes = ring.rawSlotBytes_ * packetCount;
+    const std::size_t generationOffset = (slotStorageBytes + alignof(std::uint32_t) - 1) &
+                                         ~(alignof(std::uint32_t) - 1);
+    ring.storageBytes_ = generationOffset + ring.updateChunkCount_ * sizeof(std::uint32_t);
 
     // Match the known-good probe: every receive slot lives in one contiguous
-    // DMA mapping as [isoHeader,status,timestamp,payload].
+    // DMA mapping as [isoHeader,status,timestamp,payload]. Generation words live
+    // at the end of the same mapping so NuDCL update commands can publish an
+    // explicit completed-chunk marker without another DMA mapping.
     ring.storage_ = static_cast<std::uint8_t*>(mmap(nullptr, ring.storageBytes_,
         PROT_READ | PROT_WRITE, MAP_ANON | MAP_SHARED, -1, 0));
     if (ring.storage_ == MAP_FAILED) { ring.storage_ = nullptr; ring.reset(); return ring; }
     std::memset(ring.storage_, 0, ring.storageBytes_);
+    ring.chunkGenerations_ = reinterpret_cast<std::uint32_t*>(ring.storage_ + generationOffset);
     ring.slots_ = new (std::nothrow) PacketSlot[packetCount];
     if (!ring.slots_) { ring.reset(); return ring; }
 
@@ -55,25 +67,16 @@ AmdtpReceiveRing AmdtpReceiveRing::create(FireWireDevice& device, std::size_t pa
     }
 
     auto native = device.nativeHandle();
-    ring.pool_ = (*native)->CreateNuDCLPool(native, static_cast<UInt32>(packetCount),
+    // One extra NuDCL per publication chunk is used as a completion marker.
+    ring.pool_ = (*native)->CreateNuDCLPool(native,
+        static_cast<UInt32>(packetCount + ring.updateChunkCount_),
         CFUUIDGetUUIDBytes(kIOFireWireNuDCLPoolInterfaceID));
     if (!ring.pool_) { ring.reset(); return ring; }
-
-    // Receive NuDCL metadata (iso header/status/timestamp) is only guaranteed
-    // current after an update has run. Publishing the entire 256-slot ring only
-    // at its final DCL made capture arrive to userspace in ~32 ms bursts and
-    // left a narrow window where early payload slots could already be reused by
-    // the next revolution while userspace was still consuming the old batch.
-    //
-    // Publish smaller 32-cycle groups instead. At the 8 kHz FireWire cycle rate
-    // this exposes a completed receive batch roughly every 4 ms, while leaving
-    // the 256-slot DMA ring and its cyclic branch unchanged.
-    constexpr std::size_t kUpdateChunkSlots = 32;
 
     NuDCLRef first = nullptr, last = nullptr;
     CFMutableSetRef updateSet = nullptr;
     for (std::size_t i = 0; i < packetCount; ++i) {
-        if ((i % kUpdateChunkSlots) == 0) {
+        if ((i % ring.updateChunkSlots_) == 0) {
             updateSet = CFSetCreateMutable(kCFAllocatorDefault, 0, nullptr);
             if (!updateSet) { ring.reset(); return ring; }
         }
@@ -96,15 +99,33 @@ AmdtpReceiveRing AmdtpReceiveRing::create(FireWireDevice& device, std::size_t pa
         (*ring.pool_)->SetDCLStatusPtr(ref, &raw->status);
         (*ring.pool_)->SetDCLTimeStampPtr(ref, &raw->timestamp);
 
-        const bool endOfChunk = ((i + 1) % kUpdateChunkSlots) == 0 || (i + 1) == packetCount;
+        const bool endOfChunk = ((i + 1) % ring.updateChunkSlots_) == 0 || (i + 1) == packetCount;
         if (endOfChunk) {
-            const IOReturn updateResult = (*ring.pool_)->SetDCLUpdateList(ref, updateSet);
+            const std::size_t chunk = i / ring.updateChunkSlots_;
+            const std::uint32_t generation = static_cast<std::uint32_t>(chunk + 1);
+            IOVirtualRange markerRange = {
+                reinterpret_cast<IOVirtualAddress>(&ring.chunkGenerations_[chunk]),
+                static_cast<IOByteCount>(sizeof(std::uint32_t))
+            };
+            auto marker = (*ring.pool_)->AllocateSendPacket(ring.pool_, nullptr, 0, 1, &markerRange);
+            if (!marker) {
+                CFRelease(updateSet);
+                ring.reset();
+                return ring;
+            }
+            const NuDCLRef markerRef = reinterpret_cast<NuDCLRef>(marker);
+            // The marker DCL is used only as an update boundary. Publishing the
+            // completed receive set from it ensures the whole preceding chunk
+            // has finished before userspace sees its generation change.
+            const IOReturn updateResult = (*ring.pool_)->SetDCLUpdateList(markerRef, updateSet);
             CFRelease(updateSet);
             updateSet = nullptr;
             if (updateResult != kIOReturnSuccess) {
                 ring.reset();
                 return ring;
             }
+            ring.chunkGenerations_[chunk] = generation;
+            last = markerRef;
         }
     }
 
@@ -141,13 +162,18 @@ std::size_t AmdtpReceiveRing::touchedCount() const {
         syncSlot(i); if (slots_[i].touched()) ++count;
     } return count;
 }
+std::uint32_t AmdtpReceiveRing::chunkGeneration(std::size_t chunk) const {
+    if (!chunkGenerations_ || chunk >= updateChunkCount_) return 0;
+    return chunkGenerations_[chunk];
+}
 void AmdtpReceiveRing::reset() {
     if (localPort_) { (*localPort_)->Release(localPort_); localPort_ = nullptr; }
     if (pool_) { (*pool_)->Release(pool_); pool_ = nullptr; }
     delete[] slots_; slots_ = nullptr;
     if (storage_) { munmap(storage_, storageBytes_); storage_ = nullptr; }
     device_ = nullptr; packetCount_ = 0; packetCapacity_ = 0; rawSlotBytes_ = 0;
-    storageBytes_ = 0; completed_ = false;
+    storageBytes_ = 0; updateChunkSlots_ = 0; updateChunkCount_ = 0;
+    chunkGenerations_ = nullptr; completed_ = false;
 }
 
 } // namespace macfw
