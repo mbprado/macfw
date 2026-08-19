@@ -1,4 +1,5 @@
 #include "../../../hal/include/macfw_hal_shm.h"
+#include "../../../hal/include/macfw_hal_capture_shm.h"
 
 #include <CoreAudio/AudioServerPlugIn.h>
 
@@ -24,6 +25,46 @@ const char* operationName(std::uint32_t op) {
 
 void printOperation(const char* label, std::uint32_t op) {
     std::printf("    %-18s %u (%s)\n", label, op, operationName(op));
+}
+
+void printCaptureState() {
+    const int fd = shm_open(macfw::hal::capture::kShmName, O_RDWR, 0);
+    if (fd < 0) {
+        std::printf("Capture shared ring: unavailable (%s)\n", std::strerror(errno));
+        return;
+    }
+    void* p = mmap(nullptr, sizeof(macfw::hal::capture::SharedCaptureRing),
+                   PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (p == MAP_FAILED) {
+        std::printf("Capture shared ring: mmap failed (%s)\n", std::strerror(errno));
+        close(fd);
+        return;
+    }
+
+    auto* ring = static_cast<macfw::hal::capture::SharedCaptureRing*>(p);
+    const bool valid = macfw::hal::capture::valid(*ring);
+    std::printf("Capture shared ring: %s\n", valid ? "PASS" : "INVALID");
+    if (valid) {
+        std::printf("Capture state:\n");
+        std::printf("    sample rate:        %u Hz\n", ring->sampleRate.load(std::memory_order_acquire));
+        std::printf("    active:             %u\n", ring->active.load(std::memory_order_acquire));
+        std::printf("    write frame:        %llu\n", static_cast<unsigned long long>(ring->writeFrame.load(std::memory_order_acquire)));
+        std::printf("    read frame:         %llu\n", static_cast<unsigned long long>(ring->readFrame.load(std::memory_order_acquire)));
+        std::printf("    available:          %llu frames\n", static_cast<unsigned long long>(macfw::hal::capture::availableFrames(*ring)));
+        std::printf("    dropped frames:     %llu\n", static_cast<unsigned long long>(ring->droppedFrames.load(std::memory_order_acquire)));
+        std::printf("    decoded packets:    %llu\n", static_cast<unsigned long long>(ring->decodedPackets.load(std::memory_order_acquire)));
+        std::printf("    decoded frames:     %llu\n", static_cast<unsigned long long>(ring->decodedFrames.load(std::memory_order_acquire)));
+        std::printf("    malformed:          %llu\n", static_cast<unsigned long long>(ring->malformedPackets.load(std::memory_order_acquire)));
+        std::printf("    invalid labels:     %llu\n", static_cast<unsigned long long>(ring->invalidLabels.load(std::memory_order_acquire)));
+        std::printf("HAL capture consumption:\n");
+        std::printf("    ReadInput calls:    %llu\n", static_cast<unsigned long long>(ring->halReadCalls.load(std::memory_order_acquire)));
+        std::printf("    requested frames:   %llu\n", static_cast<unsigned long long>(ring->halRequestedFrames.load(std::memory_order_acquire)));
+        std::printf("    frames from ring:   %llu\n", static_cast<unsigned long long>(ring->halFramesFromRing.load(std::memory_order_acquire)));
+        std::printf("    zero-filled frames: %llu\n", static_cast<unsigned long long>(ring->halZeroFilledFrames.load(std::memory_order_acquire)));
+    }
+
+    munmap(p, sizeof(*ring));
+    close(fd);
 }
 
 } // namespace
@@ -77,5 +118,8 @@ int main() {
 
     munmap(p, sizeof(*ring));
     close(fd);
+
+    std::printf("\n");
+    printCaptureState();
     return isValid ? 0 : 2;
 }
