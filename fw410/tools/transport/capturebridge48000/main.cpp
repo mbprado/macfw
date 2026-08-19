@@ -60,10 +60,6 @@ bool run() {
     const UInt32 initialCycle = cycleCount(cycleTime);
     const UInt32 firstCycle = (initialCycle + kCycleLead) % kCyclesPerSecond;
 
-    // The FW410 capture side only stays in the sample-bearing operating state
-    // when valid host->device AMDTP continues flowing. Use the same continuously
-    // serviced 48 kHz scheduler as the proven playback path, with an empty PCM
-    // FIFO so it emits correctly timed digital silence.
     macfw::PcmRingBuffer playbackPcm(kPlaybackPcmCapacityFrames, kPlaybackPcmChannels);
     auto rx = macfw::AmdtpReceiveRing::create(device, kCaptureSlots, kCaptureMaxPacket);
     auto tx = macfw::AmdtpTransmitRing::createSilence48k(device, firstCycle, kPlaybackSlots);
@@ -121,7 +117,8 @@ bool run() {
               << "capture prefill: " << kCapturePrefillFrames
               << " frames (~85 ms), armed after CoreAudio ReadInput begins\n"
               << "receive metadata publication: 32-cycle chunks (~4 ms)\n"
-              << "receive ordering: AMDTP DBC continuity\n"
+              << "receive consumption: terminal-slot completed chunks\n"
+              << "receive ordering: AMDTP DBC continuity inside each completed chunk\n"
               << "run ../captureprobe/captureprobe in another terminal; Ctrl-C to stop\n";
 
     {
@@ -153,6 +150,7 @@ bool run() {
                           << " drops=" << captureShared.ring()->droppedFrames.load(std::memory_order_acquire)
                           << " malformed=" << captureShared.ring()->malformedPackets.load(std::memory_order_acquire)
                           << " invalid=" << captureShared.ring()->invalidLabels.load(std::memory_order_acquire)
+                          << " chunks=" << rxStats.completedChunks
                           << " dbc-gap=" << rxStats.dbcDiscontinuities
                           << " ts-back=" << rxStats.timestampRegressions
                           << " reorder=" << rxStats.reorderedPackets
