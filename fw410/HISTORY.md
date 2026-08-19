@@ -80,9 +80,9 @@ This milestone establishes the full FW410 playback side as functionally usable f
 
 The first real FW410 input signal was successfully recorded through the complete user-space capture path at 48 kHz:
 
-Screenshot: [`pictures/Screenshot2.jpg`](pictures/screenshot2.jpg)
+Screenshot: [`pictures/Screenshot2.jpg`](pictures/Screenshot2.jpg)
 
-![First macfw FW410 CoreAudio capture milestone](pictures/screenshotr2.jpg)  
+![First macfw FW410 CoreAudio capture milestone](pictures/Screenshot2.jpg)  
 
 `FW410 Analog In 1 -> FireWire ISO receive -> AMDTP/MBLA decode -> 4-channel shared capture ring -> AudioServerPlugIn ReadInput -> Logic Pro`
 
