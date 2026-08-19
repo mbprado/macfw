@@ -89,7 +89,29 @@ public:
 
         // Reinitialize the persistent object in place. Existing HAL mappings
         // remain attached to this exact object; only its producer state resets.
+        // Keep the ring inactive until CoreAudio is actually issuing ReadInput
+        // and a modest prefill has accumulated. This prevents the HAL consumer
+        // from outrunning the bursty NuDCL producer during startup.
         macfw::hal::capture::initialize(*ring_, sampleRate);
+        ring_->active.store(0, std::memory_order_release);
+        return true;
+    }
+
+    bool activateForConsumer(std::size_t prefillFrames) {
+        if (!ring_) return false;
+        if (ring_->active.load(std::memory_order_acquire) != 0) return true;
+        if (ring_->halReadCalls.load(std::memory_order_acquire) == 0) return false;
+
+        const auto w = ring_->writeFrame.load(std::memory_order_acquire);
+        const auto r = ring_->readFrame.load(std::memory_order_acquire);
+        const std::size_t available = static_cast<std::size_t>(w - r);
+        if (available < prefillFrames) return false;
+
+        // If the producer was running before the CoreAudio consumer appeared,
+        // discard old backlog and begin close to the live edge with exactly the
+        // requested cushion. ReadInput does not advance readFrame while active
+        // is zero, so publish the new cursor before publishing active=1.
+        ring_->readFrame.store(w - prefillFrames, std::memory_order_release);
         ring_->active.store(1, std::memory_order_release);
         return true;
     }
