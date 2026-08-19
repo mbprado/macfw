@@ -6,8 +6,10 @@
 
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -29,32 +31,62 @@ public:
     }
 
     bool open(std::uint32_t sampleRate) {
-        fd_ = shm_open(macfw::hal::capture::kShmName, O_CREAT | O_RDWR, 0666);
-        if (fd_ < 0) return false;
-
-        // shm_open()'s creation mode is filtered by the process umask. On a
-        // normal shell this commonly turns 0666 into 0644, which prevents the
-        // CoreAudio HAL service (running as another user) from reopening the
-        // ring O_RDWR so it can advance readFrame. Force the persistent object
-        // to be writable by both producer and HAL consumer.
-        if (fchmod(fd_, 0666) != 0) {
-            close(fd_); fd_ = -1;
+        bool created = false;
+        fd_ = shm_open(macfw::hal::capture::kShmName,
+                       O_CREAT | O_EXCL | O_RDWR, 0666);
+        if (fd_ >= 0) {
+            created = true;
+        } else if (errno == EEXIST) {
+            fd_ = shm_open(macfw::hal::capture::kShmName, O_RDWR, 0);
+        }
+        if (fd_ < 0) {
+            std::fprintf(stderr, "capture shm_open failed: %s\n", std::strerror(errno));
             return false;
         }
 
-        if (ftruncate(fd_, sizeof(macfw::hal::capture::SharedCaptureRing)) != 0) {
-            close(fd_); fd_ = -1;
-            return false;
+        // Only the process that actually created the POSIX SHM object changes
+        // its mode. A producer opening an object created by coreaudiod/HAL may
+        // not own it, and an unconditional fchmod() then fails with EPERM.
+        if (created) {
+            if (fchmod(fd_, 0666) != 0) {
+                std::fprintf(stderr, "capture fchmod failed: %s\n", std::strerror(errno));
+                close(fd_); fd_ = -1;
+                return false;
+            }
+            if (ftruncate(fd_, sizeof(macfw::hal::capture::SharedCaptureRing)) != 0) {
+                std::fprintf(stderr, "capture ftruncate failed: %s\n", std::strerror(errno));
+                close(fd_); fd_ = -1;
+                return false;
+            }
+        } else {
+            struct stat st{};
+            if (fstat(fd_, &st) != 0) {
+                std::fprintf(stderr, "capture fstat failed: %s\n", std::strerror(errno));
+                close(fd_); fd_ = -1;
+                return false;
+            }
+            if (static_cast<std::size_t>(st.st_size) !=
+                sizeof(macfw::hal::capture::SharedCaptureRing)) {
+                std::fprintf(stderr,
+                             "capture shared ring size mismatch: got %lld, expected %zu\n",
+                             static_cast<long long>(st.st_size),
+                             sizeof(macfw::hal::capture::SharedCaptureRing));
+                close(fd_); fd_ = -1;
+                return false;
+            }
         }
+
         void* p = mmap(nullptr, sizeof(macfw::hal::capture::SharedCaptureRing),
                        PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
         if (p == MAP_FAILED) {
+            std::fprintf(stderr, "capture mmap failed: %s\n", std::strerror(errno));
             close(fd_); fd_ = -1;
             return false;
         }
         ring_ = static_cast<macfw::hal::capture::SharedCaptureRing*>(p);
-        // Reinitialize the existing persistent object in place so any mapping
-        // already held by coreaudiod remains attached to this producer.
+
+        // Reinitialize the persistent object in place. Existing HAL mappings
+        // remain attached to this exact object; only its producer state resets.
         macfw::hal::capture::initialize(*ring_, sampleRate);
         ring_->active.store(1, std::memory_order_release);
         return true;
