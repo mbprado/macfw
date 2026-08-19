@@ -22,6 +22,7 @@ constexpr std::size_t kPlaybackSlots = 640;
 constexpr std::size_t kHalfPackets = 320;
 constexpr std::size_t kPlaybackPcmChannels = 10;
 constexpr std::size_t kPlaybackPcmCapacityFrames = 16384;
+constexpr std::size_t kCapturePrefillFrames = 4096;
 constexpr UInt32 kCycleLead = 256;
 constexpr UInt32 kCyclesPerSecond = 8000;
 
@@ -89,6 +90,7 @@ bool run() {
     bool playbackStarted = false;
     bool opConnected = false;
     bool ipConnected = false;
+    bool captureReady = false;
     bool ok = false;
 
     if ((*native)->AddCallbackDispatcherToRunLoop(native, CFRunLoopGetCurrent()) == kIOReturnSuccess)
@@ -116,6 +118,8 @@ bool run() {
               << "duplex ISO started\n"
               << "playback keepalive: native 48 kHz AMDTP scheduler, digital silence\n"
               << "capture order: Analog In 1, Analog In 2, S/PDIF L, S/PDIF R\n"
+              << "capture prefill: " << kCapturePrefillFrames
+              << " frames (~85 ms), armed after CoreAudio ReadInput begins\n"
               << "run ../captureprobe/captureprobe in another terminal; Ctrl-C to stop\n";
 
     {
@@ -130,16 +134,23 @@ bool run() {
 
             capturePump.service(rx, *captureShared.ring());
 
+            if (!captureReady && captureShared.activateForConsumer(kCapturePrefillFrames)) {
+                captureReady = true;
+                std::cout << "capture prefill ready: CoreAudio consumer detected; live capture enabled\n";
+            }
+
             const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
             if (now - lastStatus >= 2.0) {
                 const auto frames = captureShared.ring()->decodedFrames.load(std::memory_order_acquire);
                 const auto& txStats = playbackStreamer.stats();
                 std::cout << "capture frames=" << frames
                           << " (delta " << (frames - lastFrames) << ")"
+                          << " active=" << captureShared.ring()->active.load(std::memory_order_acquire)
                           << " queued=" << macfw::hal::capture::availableFrames(*captureShared.ring())
                           << " drops=" << captureShared.ring()->droppedFrames.load(std::memory_order_acquire)
                           << " malformed=" << captureShared.ring()->malformedPackets.load(std::memory_order_acquire)
                           << " invalid=" << captureShared.ring()->invalidLabels.load(std::memory_order_acquire)
+                          << " hal-read=" << captureShared.ring()->halReadCalls.load(std::memory_order_acquire)
                           << " tx-late=" << txStats.lateCyclePolls
                           << " tx-silence=" << txStats.framesSilenced
                           << '\n';
