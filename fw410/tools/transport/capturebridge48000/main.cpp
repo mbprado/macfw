@@ -47,7 +47,7 @@ bool run() {
 
     std::uint32_t opcr0 = 0, ipcr0 = 0;
     if (macfw::cmp::readOpcr0(device, opcr0) != kIOReturnSuccess ||
-        macfw::cmp::readIpcr0(device, ipcr0) != kIOReturnSuccess) return false;
+        !device || macfw::cmp::readIpcr0(device, ipcr0) != kIOReturnSuccess) return false;
     if (!macfw::cmp::ready(macfw::cmp::decodePcr(opcr0)) ||
         !macfw::cmp::ready(macfw::cmp::decodePcr(ipcr0))) {
         std::cerr << "PCR0 offline or already connected; stop haltransport before this isolated capture test\n";
@@ -120,6 +120,7 @@ bool run() {
               << "capture order: Analog In 1, Analog In 2, S/PDIF L, S/PDIF R\n"
               << "capture prefill: " << kCapturePrefillFrames
               << " frames (~85 ms), armed after CoreAudio ReadInput begins\n"
+              << "receive metadata publication: 32-cycle chunks (~4 ms)\n"
               << "run ../captureprobe/captureprobe in another terminal; Ctrl-C to stop\n";
 
     {
@@ -143,6 +144,7 @@ bool run() {
             if (now - lastStatus >= 2.0) {
                 const auto frames = captureShared.ring()->decodedFrames.load(std::memory_order_acquire);
                 const auto& txStats = playbackStreamer.stats();
+                const auto& rxStats = capturePump.stats();
                 std::cout << "capture frames=" << frames
                           << " (delta " << (frames - lastFrames) << ")"
                           << " active=" << captureShared.ring()->active.load(std::memory_order_acquire)
@@ -150,6 +152,8 @@ bool run() {
                           << " drops=" << captureShared.ring()->droppedFrames.load(std::memory_order_acquire)
                           << " malformed=" << captureShared.ring()->malformedPackets.load(std::memory_order_acquire)
                           << " invalid=" << captureShared.ring()->invalidLabels.load(std::memory_order_acquire)
+                          << " dbc-gap=" << rxStats.dbcDiscontinuities
+                          << " ts-back=" << rxStats.timestampRegressions
                           << " hal-read=" << captureShared.ring()->halReadCalls.load(std::memory_order_acquire)
                           << " tx-late=" << txStats.lateCyclePolls
                           << " tx-silence=" << txStats.framesSilenced
