@@ -60,15 +60,24 @@ AmdtpReceiveRing AmdtpReceiveRing::create(FireWireDevice& device, std::size_t pa
     if (!ring.pool_) { ring.reset(); return ring; }
 
     // Receive NuDCL metadata (iso header/status/timestamp) is only guaranteed
-    // current after an update has run. Put every receive descriptor into one
-    // update set and have the last descriptor update the complete ring once per
-    // revolution. With 256 slots this publishes a fresh batch about every
-    // 32 ms at the 8 kHz FireWire cycle rate, while keeping the data path cyclic.
-    CFMutableSetRef updateSet = CFSetCreateMutable(kCFAllocatorDefault, 0, nullptr);
-    if (!updateSet) { ring.reset(); return ring; }
+    // current after an update has run. Publishing the entire 256-slot ring only
+    // at its final DCL made capture arrive to userspace in ~32 ms bursts and
+    // left a narrow window where early payload slots could already be reused by
+    // the next revolution while userspace was still consuming the old batch.
+    //
+    // Publish smaller 32-cycle groups instead. At the 8 kHz FireWire cycle rate
+    // this exposes a completed receive batch roughly every 4 ms, while leaving
+    // the 256-slot DMA ring and its cyclic branch unchanged.
+    constexpr std::size_t kUpdateChunkSlots = 32;
 
     NuDCLRef first = nullptr, last = nullptr;
+    CFMutableSetRef updateSet = nullptr;
     for (std::size_t i = 0; i < packetCount; ++i) {
+        if ((i % kUpdateChunkSlots) == 0) {
+            updateSet = CFSetCreateMutable(kCFAllocatorDefault, 0, nullptr);
+            if (!updateSet) { ring.reset(); return ring; }
+        }
+
         auto* raw = reinterpret_cast<RawSlot*>(ring.storage_ + i * ring.rawSlotBytes_);
         auto* payload = reinterpret_cast<std::uint8_t*>(raw) + sizeof(RawSlot);
         IOVirtualRange ranges[2] = {
@@ -77,7 +86,7 @@ AmdtpReceiveRing AmdtpReceiveRing::create(FireWireDevice& device, std::size_t pa
         };
         auto dcl = (*ring.pool_)->AllocateReceivePacket(ring.pool_, updateSet, 4, 2, ranges);
         if (!dcl) {
-            CFRelease(updateSet);
+            if (updateSet) CFRelease(updateSet);
             ring.reset();
             return ring;
         }
@@ -86,13 +95,22 @@ AmdtpReceiveRing AmdtpReceiveRing::create(FireWireDevice& device, std::size_t pa
         last = ref;
         (*ring.pool_)->SetDCLStatusPtr(ref, &raw->status);
         (*ring.pool_)->SetDCLTimeStampPtr(ref, &raw->timestamp);
+
+        const bool endOfChunk = ((i + 1) % kUpdateChunkSlots) == 0 || (i + 1) == packetCount;
+        if (endOfChunk) {
+            const IOReturn updateResult = (*ring.pool_)->SetDCLUpdateList(ref, updateSet);
+            CFRelease(updateSet);
+            updateSet = nullptr;
+            if (updateResult != kIOReturnSuccess) {
+                ring.reset();
+                return ring;
+            }
+        }
     }
 
-    const bool updateOk = last &&
-        (*ring.pool_)->SetDCLUpdateList(last, updateSet) == kIOReturnSuccess;
-    CFRelease(updateSet);
+    if (updateSet) CFRelease(updateSet);
 
-    if (!first || !last || !updateOk ||
+    if (!first || !last ||
         (*ring.pool_)->SetDCLBranch(last, first) != kIOReturnSuccess) {
         ring.reset(); return ring;
     }
