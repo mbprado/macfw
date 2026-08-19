@@ -50,14 +50,6 @@ public:
     std::size_t touchedCount() const;
     bool completed() const { return completed_; }
 
-    // Receive metadata is published in fixed-size NuDCL chunks. The update DCL
-    // writes a monotonically increasing generation marker only after all slots
-    // in that chunk have been refreshed, giving userspace an explicit completed
-    // batch boundary instead of inferring freshness by scanning the whole ring.
-    std::size_t updateChunkSlots() const { return updateChunkSlots_; }
-    std::size_t updateChunkCount() const { return updateChunkCount_; }
-    std::uint32_t chunkGeneration(std::size_t chunk) const;
-
 private:
     struct RawSlot;
 
@@ -72,9 +64,6 @@ private:
     std::size_t packetCapacity_ = 0;
     std::size_t rawSlotBytes_ = 0;
     std::size_t storageBytes_ = 0;
-    std::size_t updateChunkSlots_ = 0;
-    std::size_t updateChunkCount_ = 0;
-    std::uint32_t* chunkGenerations_ = nullptr;
     bool completed_ = false;
     IOFireWireLibNuDCLPoolRef pool_ = nullptr;
     IOFireWireLibLocalIsochPortRef localPort_ = nullptr;
