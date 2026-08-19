@@ -47,7 +47,7 @@ bool run() {
 
     std::uint32_t opcr0 = 0, ipcr0 = 0;
     if (macfw::cmp::readOpcr0(device, opcr0) != kIOReturnSuccess ||
-        !device || macfw::cmp::readIpcr0(device, ipcr0) != kIOReturnSuccess) return false;
+        macfw::cmp::readIpcr0(device, ipcr0) != kIOReturnSuccess) return false;
     if (!macfw::cmp::ready(macfw::cmp::decodePcr(opcr0)) ||
         !macfw::cmp::ready(macfw::cmp::decodePcr(ipcr0))) {
         std::cerr << "PCR0 offline or already connected; stop haltransport before this isolated capture test\n";
@@ -121,6 +121,7 @@ bool run() {
               << "capture prefill: " << kCapturePrefillFrames
               << " frames (~85 ms), armed after CoreAudio ReadInput begins\n"
               << "receive metadata publication: 32-cycle chunks (~4 ms)\n"
+              << "receive ordering: AMDTP DBC continuity\n"
               << "run ../captureprobe/captureprobe in another terminal; Ctrl-C to stop\n";
 
     {
@@ -154,6 +155,8 @@ bool run() {
                           << " invalid=" << captureShared.ring()->invalidLabels.load(std::memory_order_acquire)
                           << " dbc-gap=" << rxStats.dbcDiscontinuities
                           << " ts-back=" << rxStats.timestampRegressions
+                          << " reorder=" << rxStats.reorderedPackets
+                          << " stale=" << rxStats.stalePackets
                           << " hal-read=" << captureShared.ring()->halReadCalls.load(std::memory_order_acquire)
                           << " tx-late=" << txStats.lateCyclePolls
                           << " tx-silence=" << txStats.framesSilenced
