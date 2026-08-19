@@ -25,9 +25,6 @@ public:
             munmap(ring_, sizeof(*ring_));
         }
         if (fd_ >= 0) close(fd_);
-        // Do not unlink the named object here. coreaudiod is a long-lived
-        // consumer and may already have this mapping open. Recreating the name
-        // would silently split producer and consumer onto different objects.
     }
 
     bool open(std::uint32_t sampleRate) {
@@ -44,9 +41,6 @@ public:
             return false;
         }
 
-        // Only the process that actually created the POSIX SHM object changes
-        // its mode. A producer opening an object created by coreaudiod/HAL may
-        // not own it, and an unconditional fchmod() then fails with EPERM.
         if (created) {
             if (fchmod(fd_, 0666) != 0) {
                 std::fprintf(stderr, "capture fchmod failed: %s\n", std::strerror(errno));
@@ -66,9 +60,6 @@ public:
                 return false;
             }
             const std::size_t required = sizeof(macfw::hal::capture::SharedCaptureRing);
-            // Darwin may report a POSIX SHM object's backing size rounded up to
-            // the VM page size. A larger object is safe because we only mmap
-            // the current ABI struct length; reject only a truncated object.
             if (st.st_size < 0 || static_cast<std::size_t>(st.st_size) < required) {
                 std::fprintf(stderr,
                              "capture shared ring too small: got %lld, need at least %zu\n",
@@ -86,12 +77,6 @@ public:
             return false;
         }
         ring_ = static_cast<macfw::hal::capture::SharedCaptureRing*>(p);
-
-        // Reinitialize the persistent object in place. Existing HAL mappings
-        // remain attached to this exact object; only its producer state resets.
-        // Keep the ring inactive until CoreAudio is actually issuing ReadInput
-        // and a modest prefill has accumulated. This prevents the HAL consumer
-        // from outrunning the bursty NuDCL producer during startup.
         macfw::hal::capture::initialize(*ring_, sampleRate);
         ring_->active.store(0, std::memory_order_release);
         return true;
@@ -107,10 +92,6 @@ public:
         const std::size_t available = static_cast<std::size_t>(w - r);
         if (available < prefillFrames) return false;
 
-        // If the producer was running before the CoreAudio consumer appeared,
-        // discard old backlog and begin close to the live edge with exactly the
-        // requested cushion. ReadInput does not advance readFrame while active
-        // is zero, so publish the new cursor before publishing active=1.
         ring_->readFrame.store(w - prefillFrames, std::memory_order_release);
         ring_->active.store(1, std::memory_order_release);
         return true;
@@ -130,69 +111,96 @@ public:
         std::uint64_t timestampRegressions = 0;
         std::uint64_t reorderedPackets = 0;
         std::uint64_t stalePackets = 0;
+        std::uint64_t completedChunks = 0;
     };
 
     explicit CaptureReceivePump(std::uint8_t expectedFdf) : expectedFdf_(expectedFdf) {}
 
     std::size_t service(const macfw::AmdtpReceiveRing& rx,
                         macfw::hal::capture::SharedCaptureRing& out) {
-        if (rx.packetCount() == 0 || rx.packetCount() > lastSignature_.size()) return 0;
+        constexpr std::size_t kChunkSlots = 32;
+        if (rx.packetCount() == 0 || rx.packetCount() > 256) return 0;
 
-        std::array<Candidate, 256> candidates{};
-        std::size_t candidateCount = 0;
+        std::size_t totalFrames = 0;
+        const std::size_t chunkCount = (rx.packetCount() + kChunkSlots - 1) / kChunkSlots;
 
-        // First snapshot all newly published receive slots. Do not decode while
-        // walking the DCL array: a NuDCL update chunk can become visible with a
-        // ring-wrap boundary in the middle, so array-index order is not always
-        // bus-time order.
-        for (std::size_t checked = 0; checked < rx.packetCount(); ++checked) {
-            const std::size_t index = cursor_;
-            cursor_ = (cursor_ + 1) % rx.packetCount();
+        for (std::size_t chunk = 0; chunk < chunkCount; ++chunk) {
+            const std::size_t begin = chunk * kChunkSlots;
+            const std::size_t end = (begin + kChunkSlots < rx.packetCount())
+                ? begin + kChunkSlots : rx.packetCount();
+            const std::size_t terminalIndex = end - 1;
 
-            const auto& slot = rx.slot(index);
-            const std::uint64_t signature =
-                (static_cast<std::uint64_t>(slot.timestamp) << 32) |
-                static_cast<std::uint64_t>(slot.isoHeader);
-            if (!slot.touched() || signature == 0 || signature == lastSignature_[index])
+            // SetDCLUpdateList() is attached to this terminal receive DCL. Its
+            // metadata changes only when the complete preceding 32-slot group
+            // has been published by NuDCL, so use it as the receive-only batch
+            // completion token. This avoids mixing slots from different DMA
+            // generations while preserving the proven receive program.
+            const auto& terminal = rx.slot(terminalIndex);
+            const std::uint64_t terminalSignature =
+                (static_cast<std::uint64_t>(terminal.timestamp) << 32) |
+                static_cast<std::uint64_t>(terminal.isoHeader);
+            if (!terminal.touched() || terminalSignature == 0 ||
+                terminalSignature == lastChunkSignature_[chunk])
                 continue;
 
-            lastSignature_[index] = signature;
+            lastChunkSignature_[chunk] = terminalSignature;
+            ++stats_.completedChunks;
+            totalFrames += processCompletedChunk(rx, begin, end, out);
+        }
+
+        return totalFrames;
+    }
+
+    const Stats& stats() const { return stats_; }
+
+private:
+    struct Candidate {
+        macfw::amdtp::PacketView packet{};
+        std::uint32_t timestamp = 0;
+        std::uint8_t dbc = 0;
+        std::size_t events = 0;
+        std::size_t index = 0;
+        bool used = false;
+    };
+
+    std::size_t processCompletedChunk(const macfw::AmdtpReceiveRing& rx,
+                                      std::size_t begin,
+                                      std::size_t end,
+                                      macfw::hal::capture::SharedCaptureRing& out) {
+        std::array<Candidate, 32> candidates{};
+        std::size_t candidateCount = 0;
+
+        for (std::size_t index = begin; index < end; ++index) {
+            const auto& slot = rx.slot(index);
+            if (!slot.touched()) continue;
+
             const auto packet = slot.packet();
             if (!packet.hasCip() || packet.length <= 8) continue;
             const auto h = packet.cip();
-            const std::size_t events = packet.dataLength() / 20;
-            if (h.dbs != 5 || h.fmt != 0x10 || h.fdf != expectedFdf_ ||
-                packet.dataLength() % 20 != 0 || events == 0 || events > 8) {
+            if (packet.dataLength() % 20 != 0) {
                 out.malformedPackets.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
-
+            const std::size_t events = packet.dataLength() / 20;
+            if (h.dbs != 5 || h.fmt != 0x10 || h.fdf != expectedFdf_ ||
+                events == 0 || events > 8) {
+                out.malformedPackets.fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
             candidates[candidateCount++] = Candidate{packet, slot.timestamp, h.dbc, events, index, false};
         }
 
         if (candidateCount == 0) return 0;
-
         std::size_t totalFrames = 0;
         std::size_t emitted = 0;
 
-        // At startup we do not yet have a DBC expectation. Pick the oldest
-        // timestamp in this snapshot as the sequence anchor; after that DBC is
-        // authoritative and naturally wraps at 8 bits.
         if (!haveExpectedDbc_) {
-            std::size_t first = 0;
-            for (std::size_t i = 1; i < candidateCount; ++i) {
-                const auto delta = static_cast<std::int32_t>(candidates[i].timestamp -
-                                                             candidates[first].timestamp);
-                if (delta < 0) first = i;
-            }
+            std::size_t first = oldestUnused(candidates, candidateCount);
             totalFrames += decodeCandidate(candidates[first], out);
             candidates[first].used = true;
             ++emitted;
         }
 
-        // Greedily emit exactly the packet that continues the current DBC. This
-        // reorders chunks that became visible out of DCL-array order without
-        // inventing samples or changing the HAL buffering model.
         while (emitted < candidateCount) {
             std::size_t match = candidateCount;
             for (std::size_t i = 0; i < candidateCount; ++i) {
@@ -208,21 +216,18 @@ public:
             ++emitted;
         }
 
-        // Anything left cannot continue the current DBC sequence. Keep the
-        // discontinuity visible, then resync to the oldest remaining packet so
-        // capture continues instead of stalling indefinitely.
         while (emitted < candidateCount) {
             ++stats_.dbcDiscontinuities;
-            std::size_t next = oldestUnused(candidates, candidateCount);
+            const std::size_t next = oldestUnused(candidates, candidateCount);
             if (next == candidateCount) break;
             const std::uint8_t delta = static_cast<std::uint8_t>(candidates[next].dbc - expectedDbc_);
             if (delta > 128) {
-                // Packet is behind the live sequence (duplicate/stale snapshot).
                 candidates[next].used = true;
                 ++emitted;
                 ++stats_.stalePackets;
                 continue;
             }
+
             totalFrames += decodeCandidate(candidates[next], out);
             candidates[next].used = true;
             ++emitted;
@@ -246,26 +251,16 @@ public:
         return totalFrames;
     }
 
-    const Stats& stats() const { return stats_; }
-
-private:
-    struct Candidate {
-        macfw::amdtp::PacketView packet{};
-        std::uint32_t timestamp = 0;
-        std::uint8_t dbc = 0;
-        std::size_t events = 0;
-        std::size_t index = 0;
-        bool used = false;
-    };
-
-    static std::size_t firstUnused(const std::array<Candidate, 256>& candidates,
+    template <std::size_t N>
+    static std::size_t firstUnused(const std::array<Candidate, N>& candidates,
                                    std::size_t count) {
         for (std::size_t i = 0; i < count; ++i)
             if (!candidates[i].used) return i;
         return count;
     }
 
-    static std::size_t oldestUnused(const std::array<Candidate, 256>& candidates,
+    template <std::size_t N>
+    static std::size_t oldestUnused(const std::array<Candidate, N>& candidates,
                                     std::size_t count) {
         std::size_t oldest = count;
         for (std::size_t i = 0; i < count; ++i) {
@@ -324,8 +319,7 @@ private:
     }
 
     std::uint8_t expectedFdf_ = 0;
-    std::size_t cursor_ = 0;
-    std::array<std::uint64_t, 256> lastSignature_{};
+    std::array<std::uint64_t, 8> lastChunkSignature_{};
     Stats stats_{};
     bool haveExpectedDbc_ = false;
     std::uint8_t expectedDbc_ = 0;
