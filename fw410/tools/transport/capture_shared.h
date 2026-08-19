@@ -128,6 +128,8 @@ public:
     struct Stats {
         std::uint64_t dbcDiscontinuities = 0;
         std::uint64_t timestampRegressions = 0;
+        std::uint64_t reorderedPackets = 0;
+        std::uint64_t stalePackets = 0;
     };
 
     explicit CaptureReceivePump(std::uint8_t expectedFdf) : expectedFdf_(expectedFdf) {}
@@ -136,7 +138,13 @@ public:
                         macfw::hal::capture::SharedCaptureRing& out) {
         if (rx.packetCount() == 0 || rx.packetCount() > lastSignature_.size()) return 0;
 
-        std::size_t totalFrames = 0;
+        std::array<Candidate, 256> candidates{};
+        std::size_t candidateCount = 0;
+
+        // First snapshot all newly published receive slots. Do not decode while
+        // walking the DCL array: a NuDCL update chunk can become visible with a
+        // ring-wrap boundary in the middle, so array-index order is not always
+        // bus-time order.
         for (std::size_t checked = 0; checked < rx.packetCount(); ++checked) {
             const std::size_t index = cursor_;
             cursor_ = (cursor_ + 1) % rx.packetCount();
@@ -149,58 +157,151 @@ public:
                 continue;
 
             lastSignature_[index] = signature;
-            totalFrames += decodePacket(slot.packet(), slot.timestamp, out);
+            const auto packet = slot.packet();
+            if (!packet.hasCip() || packet.length <= 8) continue;
+            const auto h = packet.cip();
+            const std::size_t events = packet.dataLength() / 20;
+            if (h.dbs != 5 || h.fmt != 0x10 || h.fdf != expectedFdf_ ||
+                packet.dataLength() % 20 != 0 || events == 0 || events > 8) {
+                out.malformedPackets.fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
+
+            candidates[candidateCount++] = Candidate{packet, slot.timestamp, h.dbc, events, index, false};
         }
+
+        if (candidateCount == 0) return 0;
+
+        std::size_t totalFrames = 0;
+        std::size_t emitted = 0;
+
+        // At startup we do not yet have a DBC expectation. Pick the oldest
+        // timestamp in this snapshot as the sequence anchor; after that DBC is
+        // authoritative and naturally wraps at 8 bits.
+        if (!haveExpectedDbc_) {
+            std::size_t first = 0;
+            for (std::size_t i = 1; i < candidateCount; ++i) {
+                const auto delta = static_cast<std::int32_t>(candidates[i].timestamp -
+                                                             candidates[first].timestamp);
+                if (delta < 0) first = i;
+            }
+            totalFrames += decodeCandidate(candidates[first], out);
+            candidates[first].used = true;
+            ++emitted;
+        }
+
+        // Greedily emit exactly the packet that continues the current DBC. This
+        // reorders chunks that became visible out of DCL-array order without
+        // inventing samples or changing the HAL buffering model.
+        while (emitted < candidateCount) {
+            std::size_t match = candidateCount;
+            for (std::size_t i = 0; i < candidateCount; ++i) {
+                if (!candidates[i].used && candidates[i].dbc == expectedDbc_) {
+                    match = i;
+                    break;
+                }
+            }
+            if (match == candidateCount) break;
+            if (match != firstUnused(candidates, candidateCount)) ++stats_.reorderedPackets;
+            totalFrames += decodeCandidate(candidates[match], out);
+            candidates[match].used = true;
+            ++emitted;
+        }
+
+        // Anything left cannot continue the current DBC sequence. Keep the
+        // discontinuity visible, then resync to the oldest remaining packet so
+        // capture continues instead of stalling indefinitely.
+        while (emitted < candidateCount) {
+            ++stats_.dbcDiscontinuities;
+            std::size_t next = oldestUnused(candidates, candidateCount);
+            if (next == candidateCount) break;
+            const std::uint8_t delta = static_cast<std::uint8_t>(candidates[next].dbc - expectedDbc_);
+            if (delta > 128) {
+                // Packet is behind the live sequence (duplicate/stale snapshot).
+                candidates[next].used = true;
+                ++emitted;
+                ++stats_.stalePackets;
+                continue;
+            }
+            totalFrames += decodeCandidate(candidates[next], out);
+            candidates[next].used = true;
+            ++emitted;
+
+            while (emitted < candidateCount) {
+                std::size_t match = candidateCount;
+                for (std::size_t i = 0; i < candidateCount; ++i) {
+                    if (!candidates[i].used && candidates[i].dbc == expectedDbc_) {
+                        match = i;
+                        break;
+                    }
+                }
+                if (match == candidateCount) break;
+                if (match != firstUnused(candidates, candidateCount)) ++stats_.reorderedPackets;
+                totalFrames += decodeCandidate(candidates[match], out);
+                candidates[match].used = true;
+                ++emitted;
+            }
+        }
+
         return totalFrames;
     }
 
     const Stats& stats() const { return stats_; }
 
 private:
-    std::size_t decodePacket(const macfw::amdtp::PacketView& packet,
-                             std::uint32_t timestamp,
-                             macfw::hal::capture::SharedCaptureRing& out) {
-        if (!packet.hasCip() || packet.length <= 8) return 0;
-        const auto h = packet.cip();
-        if (h.dbs != 5 || h.fmt != 0x10 || h.fdf != expectedFdf_) {
-            out.malformedPackets.fetch_add(1, std::memory_order_relaxed);
-            return 0;
+    struct Candidate {
+        macfw::amdtp::PacketView packet{};
+        std::uint32_t timestamp = 0;
+        std::uint8_t dbc = 0;
+        std::size_t events = 0;
+        std::size_t index = 0;
+        bool used = false;
+    };
+
+    static std::size_t firstUnused(const std::array<Candidate, 256>& candidates,
+                                   std::size_t count) {
+        for (std::size_t i = 0; i < count; ++i)
+            if (!candidates[i].used) return i;
+        return count;
+    }
+
+    static std::size_t oldestUnused(const std::array<Candidate, 256>& candidates,
+                                    std::size_t count) {
+        std::size_t oldest = count;
+        for (std::size_t i = 0; i < count; ++i) {
+            if (candidates[i].used) continue;
+            if (oldest == count) {
+                oldest = i;
+                continue;
+            }
+            const auto delta = static_cast<std::int32_t>(candidates[i].timestamp -
+                                                         candidates[oldest].timestamp);
+            if (delta < 0) oldest = i;
         }
-        if (packet.dataLength() % 20 != 0) {
-            out.malformedPackets.fetch_add(1, std::memory_order_relaxed);
-            return 0;
+        return oldest;
+    }
+
+    std::size_t decodeCandidate(const Candidate& candidate,
+                                macfw::hal::capture::SharedCaptureRing& out) {
+        const auto h = candidate.packet.cip();
+
+        if (haveExpectedDbc_ && h.dbc != expectedDbc_)
+            ++stats_.dbcDiscontinuities;
+        expectedDbc_ = static_cast<std::uint8_t>(h.dbc + candidate.events);
+        haveExpectedDbc_ = true;
+
+        if (haveTimestamp_) {
+            const auto delta = static_cast<std::int32_t>(candidate.timestamp - lastTimestamp_);
+            if (delta <= 0) ++stats_.timestampRegressions;
         }
+        lastTimestamp_ = candidate.timestamp;
+        haveTimestamp_ = true;
 
         constexpr std::size_t kMaxEvents = 8;
         std::array<float, kMaxEvents * macfw::hal::capture::kChannels> decoded{};
-        const std::size_t events = packet.dataLength() / 20;
-        if (events > kMaxEvents || events == 0) {
-            out.malformedPackets.fetch_add(1, std::memory_order_relaxed);
-            return 0;
-        }
-
-        // DBC is the AMDTP data-block counter. At 48 kHz each accepted packet
-        // advances it by the number of decoded data blocks in that packet. A
-        // mismatch means userspace observed a gap, duplicate or reordering.
-        if (haveExpectedDbc_ && h.dbc != expectedDbc_)
-            ++stats_.dbcDiscontinuities;
-        expectedDbc_ = static_cast<std::uint8_t>(h.dbc + events);
-        haveExpectedDbc_ = true;
-
-        // NuDCL timestamps are 32-bit FireWire cycle-time values. Unsigned
-        // subtraction followed by a signed interpretation preserves forward
-        // ordering across the natural wrap as long as adjacent observations
-        // are much less than half the counter range apart (true here).
-        if (haveTimestamp_) {
-            const auto delta = static_cast<std::int32_t>(timestamp - lastTimestamp_);
-            if (delta <= 0) ++stats_.timestampRegressions;
-        }
-        lastTimestamp_ = timestamp;
-        haveTimestamp_ = true;
-
-        const std::uint8_t* p = packet.data();
+        const std::uint8_t* p = candidate.packet.data();
         std::uint64_t invalid = 0;
-        for (std::size_t event = 0; event < events; ++event) {
+        for (std::size_t event = 0; event < candidate.events; ++event) {
             std::int32_t raw[4] = {};
             for (std::size_t pos = 0; pos < 4; ++pos) {
                 if (!macfw::am824::decodeMbla24(macfw::am824::be32(p + pos * 4), raw[pos])) {
@@ -218,8 +319,8 @@ private:
 
         if (invalid) out.invalidLabels.fetch_add(invalid, std::memory_order_relaxed);
         out.decodedPackets.fetch_add(1, std::memory_order_relaxed);
-        out.decodedFrames.fetch_add(events, std::memory_order_relaxed);
-        return macfw::hal::capture::write(out, decoded.data(), events);
+        out.decodedFrames.fetch_add(candidate.events, std::memory_order_relaxed);
+        return macfw::hal::capture::write(out, decoded.data(), candidate.events);
     }
 
     std::uint8_t expectedFdf_ = 0;
