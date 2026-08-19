@@ -1,45 +1,38 @@
 # FW410 isochronous transport bring-up
 
-Last updated: 2026-08-19
+This document records the hardware-confirmed IEEE 1394/CIP/AMDTP transport behavior used by the current macfw FW410 runtime.
 
-This document summarizes the hardware-confirmed user-space IEEE 1394 isochronous transport behavior of the M-Audio FireWire 410 on Intel macOS.
+## Confirmed transport path
 
-## Confirmed path
+The following path is experimentally confirmed in user space on Intel macOS:
 
-The following sequence works entirely from user space:
-
-1. detect the `FW Bootloader` personality;
-2. execute the guarded boot-from-flash cue with `fwboot --execute`;
+1. detect `FW Bootloader`;
+2. execute the guarded boot-from-flash cue;
 3. wait for re-enumeration as operational `FW 410`;
-4. perform FCP/AV/C control;
-5. allocate IRM channel/bandwidth resources;
-6. establish both CMP directions;
-7. run cyclic NuDCL receive and transmit programs;
-8. decode device-to-host AM824 capture;
-9. encode and schedule host-to-device AM824 playback;
-10. restore exact original PCR state on exit.
+4. perform raw FCP/AV/C command/response transport;
+5. discover stream topology and supported formations;
+6. allocate FireWire IRM channel/bandwidth resources;
+7. establish both CMP directions and restore the exact PCR state on exit;
+8. run local NuDCL receive/transmit programs;
+9. decode AM824 MBLA capture to signed 24-bit PCM;
+10. transmit native 48 kHz and 44.1 kHz playback PCM;
+11. feed/consume CoreAudio PCM through shared memory.
 
-The FW410 requires real packet flow in both directions. Established CMP connections alone are insufficient for sample-bearing capture.
+The FW410 requires packet flow in both directions for normal sample-bearing capture. Two CMP connections alone are not enough.
 
-## 48 kHz capture formation
+## 48 kHz device-to-host capture
 
-Data-bearing capture packets are 168 bytes:
+Observed data-bearing formation:
 
 ```text
-8-byte CIP header
-+ 8 events * 5 positions * 4 bytes
-= 168 bytes
+FMT  0x10 (AM824)
+FDF  0x02 (48 kHz)
+DBS  5
+packet length 168 bytes
+8 events per data-bearing packet
 ```
 
-Observed formation:
-
-- FMT `0x10` — AM824
-- FDF `0x02` — 48 kHz
-- DBS `5`
-- 8 sample events per data packet
-- repeating 3 data / 1 NODATA blocking cadence
-
-Raw stream positions:
+Raw positions:
 
 ```text
 1  S/PDIF In L
@@ -49,97 +42,115 @@ Raw stream positions:
 5  MIDI
 ```
 
-The four audio positions use MBLA label `0x40`; the low 24 bits are signed PCM. The MIDI position carries AM824 MIDI/no-data words.
+The first four positions carry AM824 MBLA words; the low 24 bits are signed PCM. The fifth position is the MIDI slot.
 
-The 3:1 cadence produces exactly 48 kHz:
+At 48 kHz the FW410 uses the expected blocking cadence: three 8-event data packets for every NODATA packet. This yields exactly 48,000 sample events/sec:
 
 ```text
 3 * 8 events / (4 * 125 us) = 48,000 events/sec
 ```
 
-DBC advances by eight for each data-bearing packet and is retained across NODATA packets.
+DBC advances by eight on each data-bearing packet and is retained across NODATA.
 
-## 48 kHz playback formation
+## Physical input validation
 
-At 44.1/48 kHz, host playback uses ten PCM positions plus one MIDI position (`DBS=11`). The maximum blocking-mode packet is 360 bytes:
+A controlled signal on Analog Input 1 was previously confirmed at raw PCM position 2 while Analog Input 2 remained near the noise floor and both S/PDIF positions remained silent. This established the physical-to-stream mapping used by the CoreAudio capture layer.
 
-```text
-8-byte CIP header
-+ 8 events * 11 positions * 4 bytes
-= 360 bytes
-```
+## Host-to-device playback
 
-Valid host-to-device AMDTP, including correctly timed digital silence, is enough to keep FW410 capture sample-bearing.
+At 44.1/48 kHz playback is 10 PCM positions plus one MIDI slot (`DBS=11`). The transport permutes CoreAudio's physical/user-facing output order into the FW410 raw stream order documented in `stream-topology.md`.
 
-Clear 48 kHz playback required a 640-cycle TX ring with two 320-cycle refill halves. The earlier 128/64 geometry did not provide enough service margin under the HAL workload.
+Native 48 kHz playback is clean with the current 640-cycle TX ring / 320-cycle refill geometry. Native 44.1 playback is also clean after the FW410-specific post-start AV/C 44.1 reassertion.
 
-## Native 44.1 kHz
+## Capture requires duplex AMDTP
 
-Native 44.1 playback is accepted only after the FW410-specific startup sequence:
+The FW410 does not continue real capture when only the device-to-host side is active. A valid host-to-device AMDTP stream must be continuously serviced.
 
-1. select 44.1 kHz in both AV/C directions;
-2. establish duplex CMP and ISO;
-3. begin valid native 44.1 AMDTP;
-4. reassert 44.1 kHz on both directions while streaming is live;
-5. continue the normal blocking schedule.
+For isolated capture testing, `capturebridge48000` therefore runs the real 48 kHz transmit scheduler with an empty 10-channel PCM FIFO. It sends correctly timed digital silence while the receive side delivers actual capture samples.
 
-The startup reassertion is device-specific and must not be hidden in the generic packet generator.
+The production full-duplex runtime should replace this silence with the normal CoreAudio playback ring rather than remove the transmit scheduler.
 
-## Receive publication and capture quality
+## NuDCL receive publication evolution
 
-### Full-ring publication failure mode
+### Full-ring publication — corrupted
 
-The first reusable receive ring published metadata for all 256 slots only at the final DCL. At 8,000 FireWire cycles per second this exposed roughly 32 ms batches.
+The early receive abstraction published receive metadata for all 256 DCL slots only at the end of a ring revolution. At 8,000 FireWire cycles/sec, this exposed receive data in ~32 ms batches.
 
-Capture decoded correctly and reached CoreAudio, but sounded broken. The shared PCM ring was healthy and showed no drops; corruption occurred because userspace could read slot payloads while early DMA locations were already being reused in the next cyclic revolution.
+Although packets decoded and capture levels looked correct, recorded audio was badly broken. The failure was temporal: by the time userspace scanned the full batch, early payload slots could already be reused by the next DMA revolution.
 
-### 32-cycle publication
+### 32-cycle publication — almost clean
 
-Publishing metadata in 32-slot groups reduced the exposure interval to approximately 4 ms and made the recording almost clean.
+Changing `AmdtpReceiveRing` to publish metadata every 32 slots reduced the visibility interval to ~4 ms and made capture almost clean.
 
-However, scanning every changed slot across all 256 descriptors could still combine groups published at different times. Global DBC ordering repaired much of this but left occasional small discontinuities.
+A global userspace scan still gathered all changed slots from the 256-slot ring into one candidate set and reordered them by AMDTP DBC. This fixed most corruption but still allowed independently published groups to be combined around a ring/update boundary.
 
-### Completed-group consumption
+Controlled test 19 remained subjectively very good but still contained occasional small cracks.
 
-The validated solution preserves a receive-only DCL program:
+### Terminal-slot completed groups — validated clean
 
-- each 32-slot group has its update list attached to the group's terminal receive DCL;
-- userspace watches the terminal slot's `(timestamp, isoHeader)` signature;
-- when that signature changes, the exact 32-slot group is considered completed;
-- only that group is snapshotted;
-- DBC continuity and ordering are applied inside that completed group.
+The final rule does not globally infer freshness.
 
-This prevents mixed-generation payload snapshots.
+For each 32-slot receive group:
+
+1. the group's terminal receive DCL executes `SetDCLUpdateList` for that group's metadata;
+2. userspace watches the terminal slot's `(timestamp, isoHeader)` signature;
+3. a changed terminal signature means that exact group's publication completed;
+4. userspace snapshots only those 32 slots;
+5. DBC continuity is validated/ordered only inside that group.
+
+No mixed send/receive completion-marker DCL is used. The receive program remains receive-only.
 
 Representative final status:
 
 ```text
-capture frames=940064 (delta 96000)
-queued=3968
-drops=0 malformed=0 invalid=0
-chunks=4981
-dbc-gap=0 ts-back=4 reorder=0 stale=0
+capture frames=76064 (delta 76064)
+active=1 queued=4096 drops=0
+malformed=0 invalid=0
+chunks=481 dbc-gap=0 ts-back=0 reorder=0 stale=0
+
+capture frames=172064 (delta 96000)
+active=1 queued=4096 drops=0
+malformed=0 invalid=0
+chunks=981 dbc-gap=0 ts-back=0 reorder=0 stale=0
 ```
 
-A controlled 1 kHz source produced no significant steady-state discontinuities after this change.
+The steady-state producer cadence then remained at exactly 96,000 frames per two-second report. `chunks` increased by ~500 per report, matching:
 
-See [`capture-pipeline.md`](capture-pipeline.md) for the full CoreAudio capture architecture and quality comparison.
+```text
+8000 cycles/sec / 32 cycles/group = 250 groups/sec
+```
 
-## Capture prefill
+The final controlled recording had no significant steady-state discontinuities.
 
-The capture producer initializes the shared ring inactive, waits for HAL `ReadInput`, accumulates 4,096 frames and then activates capture with an approximately 85 ms live-edge cushion.
+## Shared capture ring and prefill
 
-This handles startup sequencing without masking receive-order defects or growing latency indefinitely.
+Decoded capture is written into a separate four-channel Float32 POSIX shared-memory ring consumed by the HAL `ReadInput` callback.
 
-## Cleanup behavior
+The producer waits for HAL consumer activity and accumulates 4,096 frames (~85 ms) before setting the capture ring active. This controlled prefill prevents startup zero-fill from being mistaken for a steady-state transport problem.
 
-Transport tools save original oPCR0/iPCR0 values and restore them on normal exit and guarded failure paths. This requirement must remain in the persistent runtime.
+During the validated final run:
 
-## Remaining transport work
+- shared-ring `drops` stayed zero;
+- capture queue remained around 4k frames;
+- `dbc-gap`, `reorder`, and `stale` stayed zero;
+- small timestamp-regression diagnostics did not correspond to audible/sample-level discontinuities.
 
-1. merge the proven capture path with real ten-channel playback in the normal rate-aware transport;
-2. validate sustained full-duplex operation;
-3. add native 44.1 capture;
-4. add bus-reset, generation-change and reconnect recovery;
-5. move boot/rate/CMP/ISO lifecycle into an automatically started companion service;
-6. preserve completed-group receive publication in future abstraction work.
+## Cleanup and lifecycle
+
+Transport experiments save the exact original oPCR0/iPCR0 values and restore them during cleanup. This behavior must remain in the production stream engine.
+
+Rate changes, device boot, reconnects and bus resets can change FireWire generation/node identity. Long-running code must reacquire the device rather than retain stale node/generation assumptions.
+
+## Current next work
+
+The basic 48 kHz transport is no longer a proof-of-concept blocker. The next transport milestone is to combine the proven receive engine with the proven real playback engine in one rate-aware full-duplex process:
+
+```text
+10-channel CoreAudio playback SHM
+              ->
+        full-duplex FW410 transport
+              ->
+4-channel CoreAudio capture SHM
+```
+
+After native 48 kHz full duplex is stable, integrate native 44.1 capture while preserving the already-confirmed M-Audio 44.1 startup quirk.

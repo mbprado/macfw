@@ -1,64 +1,82 @@
 # M-Audio FireWire 410 — Modern macOS Driver / DevKit
 
-Reverse-engineering and user-space driver/development-kit project for the M-Audio FireWire 410.
+Reverse-engineering and user-space driver/DevKit project for the M-Audio FireWire 410 (FW410).
 
-## Current result
+## Goal
 
-On the tested Intel Mac, macfw now publishes **M-Audio FireWire 410** as a normal CoreAudio device through an AudioServerPlugIn and connects that device to real FireWire hardware from user space.
-
-Hardware-validated today:
-
-- guarded bootloader-to-operational transition;
-- asynchronous FireWire and FCP/AV/C control;
-- IRM/CMP duplex connection management;
-- user-space NuDCL receive and transmit;
-- native 44.1 and 48 kHz playback;
-- all 10 playback channels validated in Logic Pro: Analog 1-8 and S/PDIF L/R;
-- native 48 kHz four-channel CoreAudio capture validated in Logic Pro;
-- capture inputs exposed as Analog 1/2 and S/PDIF L/R;
-- controlled 1 kHz capture with no significant steady-state discontinuities after completed-chunk receive handling;
-- rate-aware 44.1/48 playback transport supervision;
-- AV/C sample-rate control and FW410-specific native-44.1 startup handling.
-
-The present architecture is:
+The goal is not to port the original M-Audio kext. The project is building a modern macOS audio stack that keeps the CoreAudio-facing driver separate from a user-space FireWire transport service and can eventually be reused for other legacy FireWire audio interfaces.
 
 ```text
-macOS application
-    -> CoreAudio
-    -> macfw AudioServerPlugIn
-    -> versioned shared-memory playback/capture rings
-    -> user-space macfw transport
-    -> AV/C / CMP / NuDCL / AMDTP
-    -> M-Audio FireWire 410
+CoreAudio application
+        |
+macfw AudioServerPlugIn
+        |
+versioned shared-memory audio rings
+        |
+macfw transport service
+        |
+AV/C / CMP / CIP / AMDTP / NuDCL / IOFireWireLib
+        |
+M-Audio FireWire 410
 ```
 
-The HAL callback never owns FireWire. It only performs real-time-safe shared-memory audio transfer. Device boot, rate control, CMP, ISO scheduling, startup quirks and eventual bus-reset recovery remain in the companion transport/service layer.
+## Hardware-validated status
 
-## Primary goal
+On the tested Intel Mac, ordinary user-space processes using Apple's `IOFireWireLib` can:
 
-The goal is not to port the original M-Audio kernel extension. The goal is a reusable modern macOS user-space audio stack for legacy FireWire interfaces, with the FW410 as the first proven backend.
+- discover and boot the FW410 from its bootloader personality;
+- perform asynchronous FireWire reads/writes and FCP/AV/C transactions;
+- discover plug topology, supported rates and stream formations;
+- allocate IRM resources and establish/restore both CMP directions;
+- transmit and receive NuDCL isochronous programs entirely from user space;
+- decode FW410 AM824 capture to signed 24-bit PCM;
+- transmit correctly timed 48 kHz and native 44.1 kHz AM824 playback;
+- read and change the FW410 sample rate through AV/C;
+- expose the interface as a normal macOS CoreAudio device through an AudioServerPlugIn.
 
-Only FW410-specific layers should contain M-Audio assumptions.
+CoreAudio integration is hardware-confirmed for:
 
-## Hardware
+- native 44.1 kHz playback;
+- native 48 kHz playback;
+- all 10 playback channels: Analog Out 1-8 and S/PDIF L/R;
+- native 48 kHz four-channel capture: Analog In 1/2 and S/PDIF In L/R;
+- application recording in Logic Pro;
+- runtime 44.1 <-> 48 kHz playback switching through `haltransport`.
 
-- Device: M-Audio FireWire 410
-- Interface: IEEE 1394 / FireWire
-- Family: BridgeCo/BeBoB FireWire audio
-- Tested platform: Intel macOS with Apple `IOFireWireLib`
+The 48 kHz capture path was validated with a controlled 1 kHz source. After the final receive-side fix, a representative run held exact 96,000-frame two-second cadence with zero shared-ring drops, zero malformed packets, zero invalid MBLA labels, zero DBC gaps, zero packet reorders and zero stale packets. The final controlled recording contained no significant steady-state discontinuities.
 
-Confirmed identity transition:
+Detailed capture design and evidence: [`analysis/capture-pipeline.md`](analysis/capture-pipeline.md).
+
+## Boot identity
 
 ```text
 before: FW Bootloader / model 0x00010058
 after:  FW 410        / model 0x00010046
 ```
 
+The eventual persistent transport service must handle this personality transition automatically and reacquire fresh FireWire generation/node state after re-enumeration.
+
 ## Playback
 
-### CoreAudio presentation
+### Native 44.1 kHz
 
-At 44.1/48 kHz, CoreAudio exposes:
+Native 44.1 playback is hardware-confirmed. The FW410 requires an M-Audio-specific startup ritual:
+
+1. select 44100 in both AV/C signal-format directions;
+2. establish duplex CMP/ISO;
+3. begin valid native 44.1 AMDTP traffic;
+4. while duplex streaming is live, reassert 44100 on OUTPUT plug 0 and INPUT plug 0;
+5. continue normal data-bearing scheduling.
+
+This quirk belongs in the FW410 transport state machine, not in the generic AMDTP packet generator.
+
+### Native 48 kHz
+
+Native 48 kHz CoreAudio playback became clean after increasing transmit scheduling margin from the early 128/64-cycle geometry to a 640-cycle TX ring with 320-cycle refill halves. The committed path also uses a 16,384-frame PCM FIFO and user-interactive transport QoS.
+
+### Playback topology
+
+At 44.1/48 kHz CoreAudio exposes:
 
 1. Analog Out 1
 2. Analog Out 2
@@ -71,156 +89,110 @@ At 44.1/48 kHz, CoreAudio exposes:
 9. S/PDIF Out L
 10. S/PDIF Out R
 
-The transport permutes this physical order into the FW410's raw AMDTP stream positions. Every output was independently validated in Logic Pro.
+The transport permutes this user-facing order into the FW410's raw AMDTP positions. Logic Pro hardware-validated every channel.
 
-### Native 44.1 kHz
-
-The FW410 requires an M-Audio-specific startup sequence:
-
-1. select 44.1 kHz in both AV/C signal-format directions;
-2. establish duplex CMP/ISO;
-3. start valid native 44.1 AMDTP;
-4. while streaming is live, reassert 44.1 kHz on both OUTPUT plug 0 and INPUT plug 0;
-5. continue the normal data-bearing schedule.
-
-The reassertion is a device startup quirk, not generic AMDTP behavior.
-
-### Native 48 kHz
-
-Clear 48 kHz playback required increasing transmit scheduling margin from the early 128-cycle/64-cycle-half geometry to 640 cycles with 320-cycle refill halves. The committed path also uses a 16,384-frame PCM FIFO and a continuously serviced native scheduler.
+See [`analysis/stream-topology.md`](analysis/stream-topology.md).
 
 ## Capture
 
-Native 48 kHz CoreAudio capture is hardware-validated.
-
-CoreAudio presents:
+At 44.1/48 kHz the FW410 device-to-host stream contains four PCM positions plus one MIDI position. CoreAudio presents:
 
 1. Analog In 1
 2. Analog In 2
 3. S/PDIF In L
 4. S/PDIF In R
 
-The raw FW410 capture formation is `DBS=5`: four PCM positions plus MIDI. The transport decodes AM824 MBLA-24 samples and permutes the raw order into the CoreAudio-facing order above.
+The proven 48 kHz capture path is:
 
-The decisive receive fix was to stop scanning arbitrary changed slots across the full cyclic receive ring. Metadata is published in 32-cycle groups, and userspace consumes a group only after its terminal receive slot proves that the group was completed. DBC continuity is then validated within that completed group.
+```text
+FW410 input
+ -> device-to-host ISO
+ -> 256-slot NuDCL receive ring
+ -> 32-cycle metadata publication groups
+ -> terminal-slot-confirmed completed groups
+ -> DBC/CIP validation
+ -> AM824 MBLA-24 decode
+ -> 4-channel Float32 shared capture ring
+ -> AudioServerPlugIn ReadInput
+ -> CoreAudio application
+```
 
-A controlled 1 kHz validation showed the progression:
+The receive-side breakthrough was to stop treating a global scan of changed DMA slots as one coherent batch. Metadata is published in 32-cycle (~4 ms) groups, and userspace consumes a group only after its terminal receive slot changes, proving that group's update list has completed. In the validated run this eliminated the DBC gaps/reorders seen in the earlier almost-clean implementation.
 
-| Test | Receive behavior | Detected discontinuity clusters |
-|---|---|---:|
-| 17 | early/full-ring path | 434 |
-| 19 | 32-cycle publication and global ordering | 70 |
-| 20 | terminal-slot completed chunks | 1 startup event |
+The shared capture ring uses a controlled 4,096-frame (~85 ms) prefill before it becomes active so CoreAudio cannot outrun the FireWire producer during startup.
 
-After startup in test 20, no significant periodic discontinuities were detected and no further dropouts were audible.
+Native 44.1 capture remains to be integrated and validated.
 
-See [`analysis/capture-pipeline.md`](analysis/capture-pipeline.md) for the complete capture design, diagnostics and validation evidence.
+## Project milestones
 
-## Stream topology
+### M1 — User-space FireWire
 
-The channel mapping source of truth is [`analysis/stream-topology.md`](analysis/stream-topology.md).
-
-At 44.1/48 kHz:
-
-- host playback: 10 PCM + 1 MIDI;
-- host capture: 4 PCM + 1 MIDI.
-
-Higher-rate formations have been probed but are not yet equivalent to the validated native 44.1/48 paths.
-
-## Development milestones
-
-### M1 — User-space FireWire proof
-
-- [x] Detect and boot the FW410
-- [x] Read configuration ROM and BeBoB information
-- [x] Async read/write and FCP/AV/C
-- [x] Allocate isochronous resources
-- [x] Establish duplex transport
-- [ ] Repeat the complete path on newer Intel macOS
-
-### M2 — FireWire transport
-
-- [x] Node discovery
-- [x] FCP transport
-- [x] IRM allocation and CMP lifecycle
+- [x] boot/discovery
+- [x] async transactions
+- [x] FCP/AV/C
+- [x] IRM/CMP
 - [x] NuDCL RX/TX
+
+### M2 — Transport
+
+- [x] reusable RX/TX rings
 - [x] CIP/AM824 parsing
-- [x] Reusable RX/TX ring infrastructure
-- [x] Native 44.1 and 48 kHz playback
-- [x] Stable 48 kHz completed-chunk capture
-- [ ] Bus-reset-safe persistent stream restart
+- [x] native 48 kHz live PCM
+- [x] native 44.1 kHz playback
+- [x] stable 48 kHz completed-chunk capture
+- [ ] long-running bus-reset-safe stream engine
 
 ### M3 — FW410 / BeBoB protocol
 
-- [x] Device/firmware identification and boot
-- [x] Stream formation and channel mapping
-- [x] Duplex packet-flow requirement
-- [x] 44.1/48 sample-rate control
-- [x] Native-44.1 startup quirk
-- [x] Mixer/selector topology and headphone selector candidate
-- [ ] Complete clock/control mapping
+- [x] boot/device identity
+- [x] plug and stream formation discovery
+- [x] 44.1/48 rate control
+- [x] M-Audio 44.1 startup quirk
+- [x] basic mixer/selector probing
+- [ ] complete mixer/control mapping
 - [ ] MIDI byte transport validation
 
 ### M4 — Audio DevKit
 
-- [x] Playback PCM encoder
-- [x] Capture PCM decoder
-- [x] PCM rings and native schedulers
-- [x] Versioned shared playback/capture ABIs
-- [x] Completed-group receive consumption
-- [ ] Unified persistent transport lifecycle
-- [ ] Generic controls and MIDI abstractions
+- [x] playback encoder
+- [x] capture decoder
+- [x] PCM/shared-ring abstractions
+- [x] native 44.1/48 playback engines
+- [x] validated 48 kHz capture engine
+- [ ] unified full-duplex transport core
+- [ ] automatic lifecycle/recovery service
 
 ### M5 — CoreAudio integration
 
-- [x] CoreAudio device visible in Audio MIDI Setup
-- [x] Native 44.1/48 playback exposed to applications
-- [x] Ten playback channels exposed and validated
-- [x] Four 48 kHz capture channels exposed and validated
-- [x] Shared-memory HAL/transport bridge
-- [ ] Merge proven capture with real playback in the normal full-duplex transport
-- [ ] Native 44.1 capture validation
-- [ ] Automatic companion-service startup and recovery
+- [x] FW410 appears as a normal CoreAudio device
+- [x] native 44.1/48 playback
+- [x] 10 playback channels
+- [x] four input channels exposed
+- [x] native 48 kHz recording in Logic Pro
+- [ ] full-duplex capture + real playback in one runtime
+- [ ] native 44.1 capture
+- [ ] controls
 
-### M6 — Complete FW410 runtime
+## Current phase
 
-- [ ] Persistent service and packaging
-- [ ] Bus-reset/disconnect recovery
-- [ ] Mixer/control panel and routing
-- [ ] Headphone controls
-- [ ] MIDI
-- [ ] Higher sample rates
+The primary next step is **full-duplex runtime integration**.
 
-## Repository guide
+`capturebridge48000` currently owns the proven 48 kHz capture engine while transmitting correctly timed digital silence as the host-to-device keepalive. `haltransport` owns the proven real playback engines. The next milestone is to merge those paths so one transport process simultaneously consumes the 10-channel playback shared ring and produces the four-channel capture shared ring.
 
-- `tools/device/` — discovery, ROM and guarded boot tools
-- `tools/control/` — AV/C, topology, rate and mixer probes
-- `tools/transport/` — playback, capture and CoreAudio transport experiments
-- `lib/` — reusable FireWire/AMDTP components
-- `hal/` — AudioServerPlugIn and shared-memory ABIs
-- `analysis/` — current handoffs and reverse-engineering findings
-- `pictures/` — milestone images and short validation media
+After 48 kHz full duplex is stable, add native 44.1 capture while preserving the FW410 post-start rate-reassertion quirk.
 
-Current handoffs:
+## Documentation
 
-- [`analysis/current-integration-status.md`](analysis/current-integration-status.md)
-- [`analysis/capture-pipeline.md`](analysis/capture-pipeline.md)
-- [`analysis/current-development-status.md`](analysis/current-development-status.md)
-- [`HISTORY.md`](HISTORY.md)
-
-## Immediate next work
-
-1. Merge the validated 48 kHz capture engine into the normal rate-aware transport.
-2. Replace capture's digital-silence playback keepalive with real ten-channel CoreAudio playback for full duplex.
-3. Validate simultaneous playback and recording under sustained load.
-4. Add native 44.1 capture while preserving the FW410 startup reassertion.
-5. Add automatic boot/startup, bus-reset and reconnect recovery.
-6. Return to mixer, routing, headphone and MIDI integration.
+- [`analysis/current-integration-status.md`](analysis/current-integration-status.md) — current handoff and immediate next work.
+- [`analysis/capture-pipeline.md`](analysis/capture-pipeline.md) — validated capture architecture and controlled quality evidence.
+- [`analysis/stream-topology.md`](analysis/stream-topology.md) — raw and CoreAudio channel mapping.
+- [`analysis/isochronous-transport.md`](analysis/isochronous-transport.md) — FireWire/CIP/AMDTP transport findings.
+- [`HISTORY.md`](HISTORY.md) — visible hardware/software milestones.
 
 ## Release policy
 
-Release/version/package policy is documented in [`../RELEASES.md`](../RELEASES.md). The planned packages are `lite`, `full` and `source` from the same version tag.
+The project release contract is documented in [`../RELEASES.md`](../RELEASES.md). The agreed version format is `x.yy.zzz`; future tag-driven packages are planned as `lite`, `full`, and exact-source variants.
 
 ## Disclaimer
 
-This is an independent reverse-engineering and compatibility project. It is not affiliated with or supported by M-Audio, Avid, Apple or any hardware manufacturer. Vendor drivers, firmware and proprietary material remain subject to their respective licenses and copyrights.
+This repository is an independent reverse-engineering and compatibility project. It is not affiliated with, endorsed by, or supported by M-Audio, Avid, Apple, or any hardware manufacturer. Vendor drivers, firmware and other proprietary material remain subject to their respective licenses and copyrights.
