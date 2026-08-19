@@ -87,8 +87,30 @@ OSStatus STDMETHODCALLTYPE InstrumentedDoIOOperation(AudioServerPlugInDriverRef 
         if (operationID == kAudioServerPlugInIOOperationWriteMix)
             gRing->writeMixCalls.fetch_add(1, std::memory_order_relaxed);
     }
-    return DoIOOperation(driver, device, stream, clientID, operationID, frames,
-                         cycleInfo, mainBuffer, secondaryBuffer);
+
+    const bool captureCall =
+        stream == kInputStreamID && operationID == kAudioServerPlugInIOOperationReadInput;
+    std::uint64_t captureReadBefore = 0;
+    if (captureCall && gCaptureRing && macfw::hal::capture::valid(*gCaptureRing)) {
+        gCaptureRing->halReadCalls.fetch_add(1, std::memory_order_relaxed);
+        gCaptureRing->halRequestedFrames.fetch_add(frames, std::memory_order_relaxed);
+        captureReadBefore = gCaptureRing->readFrame.load(std::memory_order_acquire);
+    }
+
+    const OSStatus status = DoIOOperation(driver, device, stream, clientID, operationID, frames,
+                                          cycleInfo, mainBuffer, secondaryBuffer);
+
+    if (captureCall && gCaptureRing && macfw::hal::capture::valid(*gCaptureRing)) {
+        const std::uint64_t captureReadAfter =
+            gCaptureRing->readFrame.load(std::memory_order_acquire);
+        const std::uint64_t consumed = captureReadAfter >= captureReadBefore
+            ? captureReadAfter - captureReadBefore : 0;
+        const std::uint64_t bounded = consumed > frames ? frames : consumed;
+        gCaptureRing->halFramesFromRing.fetch_add(bounded, std::memory_order_relaxed);
+        gCaptureRing->halZeroFilledFrames.fetch_add(frames - bounded, std::memory_order_relaxed);
+    }
+
+    return status;
 }
 
 OSStatus STDMETHODCALLTYPE InstrumentedEndIOOperation(AudioServerPlugInDriverRef driver,
