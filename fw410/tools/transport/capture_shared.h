@@ -65,12 +65,14 @@ public:
                 close(fd_); fd_ = -1;
                 return false;
             }
-            if (static_cast<std::size_t>(st.st_size) !=
-                sizeof(macfw::hal::capture::SharedCaptureRing)) {
+            const std::size_t required = sizeof(macfw::hal::capture::SharedCaptureRing);
+            // Darwin may report a POSIX SHM object's backing size rounded up to
+            // the VM page size. A larger object is safe because we only mmap
+            // the current ABI struct length; reject only a truncated object.
+            if (st.st_size < 0 || static_cast<std::size_t>(st.st_size) < required) {
                 std::fprintf(stderr,
-                             "capture shared ring size mismatch: got %lld, expected %zu\n",
-                             static_cast<long long>(st.st_size),
-                             sizeof(macfw::hal::capture::SharedCaptureRing));
+                             "capture shared ring too small: got %lld, need at least %zu\n",
+                             static_cast<long long>(st.st_size), required);
                 close(fd_); fd_ = -1;
                 return false;
             }
