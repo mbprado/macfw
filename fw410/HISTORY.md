@@ -14,9 +14,9 @@ At this milestone:
 - 44.1 kHz and 48 kHz are selectable;
 - the HAL device is still synthetic at this exact checkpoint, so `WriteMix` accepts but discards PCM and no physical FW410 audio is produced yet.
 
-Screenshot: [`pictures/screenshot1.png`](pictures/screenshot1.jpg)
+Screenshot: [`pictures/Screenshot1.jpg`](pictures/Screenshot1.jpg)
 
-![First macfw FW410 CoreAudio device milestone](pictures/screenshot1.jpg)
+![First macfw FW410 CoreAudio device milestone](pictures/Screenshot1.jpg)
 
 This milestone proves the user-space HAL approach can expose the legacy FireWire 410 as a normal selectable macOS audio interface without requiring DriverKit provisioning. The next milestone is routing the HAL `WriteMix` PCM stream through shared memory into the already-proven native 44.1 kHz FireWire/AMDTP transport.
 
@@ -80,7 +80,7 @@ This milestone establishes the full FW410 playback side as functionally usable f
 
 The first real FW410 input signal was successfully recorded through the complete user-space capture path at 48 kHz:
 
-Screenshot: [`pictures/screenshot2.png`](pictures/screenshot2.jpg)
+Screenshot: [`pictures/Ccreenshot2.jpg`](pictures/screenshot2.jpg)
 
 ![First macfw FW410 CoreAudio capture milestone](pictures/screenshotr2.jpg)  
 
