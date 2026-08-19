@@ -125,6 +125,11 @@ private:
 
 class CaptureReceivePump {
 public:
+    struct Stats {
+        std::uint64_t dbcDiscontinuities = 0;
+        std::uint64_t timestampRegressions = 0;
+    };
+
     explicit CaptureReceivePump(std::uint8_t expectedFdf) : expectedFdf_(expectedFdf) {}
 
     std::size_t service(const macfw::AmdtpReceiveRing& rx,
@@ -144,13 +149,16 @@ public:
                 continue;
 
             lastSignature_[index] = signature;
-            totalFrames += decodePacket(slot.packet(), out);
+            totalFrames += decodePacket(slot.packet(), slot.timestamp, out);
         }
         return totalFrames;
     }
 
+    const Stats& stats() const { return stats_; }
+
 private:
     std::size_t decodePacket(const macfw::amdtp::PacketView& packet,
+                             std::uint32_t timestamp,
                              macfw::hal::capture::SharedCaptureRing& out) {
         if (!packet.hasCip() || packet.length <= 8) return 0;
         const auto h = packet.cip();
@@ -166,10 +174,29 @@ private:
         constexpr std::size_t kMaxEvents = 8;
         std::array<float, kMaxEvents * macfw::hal::capture::kChannels> decoded{};
         const std::size_t events = packet.dataLength() / 20;
-        if (events > kMaxEvents) {
+        if (events > kMaxEvents || events == 0) {
             out.malformedPackets.fetch_add(1, std::memory_order_relaxed);
             return 0;
         }
+
+        // DBC is the AMDTP data-block counter. At 48 kHz each accepted packet
+        // advances it by the number of decoded data blocks in that packet. A
+        // mismatch means userspace observed a gap, duplicate or reordering.
+        if (haveExpectedDbc_ && h.dbc != expectedDbc_)
+            ++stats_.dbcDiscontinuities;
+        expectedDbc_ = static_cast<std::uint8_t>(h.dbc + events);
+        haveExpectedDbc_ = true;
+
+        // NuDCL timestamps are 32-bit FireWire cycle-time values. Unsigned
+        // subtraction followed by a signed interpretation preserves forward
+        // ordering across the natural wrap as long as adjacent observations
+        // are much less than half the counter range apart (true here).
+        if (haveTimestamp_) {
+            const auto delta = static_cast<std::int32_t>(timestamp - lastTimestamp_);
+            if (delta <= 0) ++stats_.timestampRegressions;
+        }
+        lastTimestamp_ = timestamp;
+        haveTimestamp_ = true;
 
         const std::uint8_t* p = packet.data();
         std::uint64_t invalid = 0;
@@ -198,6 +225,11 @@ private:
     std::uint8_t expectedFdf_ = 0;
     std::size_t cursor_ = 0;
     std::array<std::uint64_t, 256> lastSignature_{};
+    Stats stats_{};
+    bool haveExpectedDbc_ = false;
+    std::uint8_t expectedDbc_ = 0;
+    bool haveTimestamp_ = false;
+    std::uint32_t lastTimestamp_ = 0;
 };
 
 } // namespace macfw::transport
