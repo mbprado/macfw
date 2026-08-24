@@ -26,6 +26,7 @@
 
 namespace {
 using namespace macfw::transport::duplex;
+constexpr UInt32 kCycleLead = 256;
 
 
 volatile std::sig_atomic_t gStopRequested = 0;
