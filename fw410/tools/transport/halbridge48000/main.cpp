@@ -188,17 +188,25 @@ bool run() {
         while (!gStopRequested) {
             CFRunLoopRunInMode(kCFRunLoopDefaultMode,0.00025,false);
 
-            // Playback: drain CoreAudio's ten-channel shared ring into the
-            // proven 48 kHz scheduler and service the transmit ring.
+            // Capture is serviced first. Unlike playback, RX DMA continuously
+            // reuses a finite receive ring, so completed chunks have a shorter
+            // safe observation window. Copy them out before doing Float32
+            // playback mapping/refill work.
+            capturePump.service(rx, *captureShared.ring());
+
+            // Playback has ~40 ms of scheduler margin (640/320 geometry), so it
+            // can safely run after the latency-sensitive RX snapshot.
             drainShared(*input.ring(),pcm,audio,mapped);
             UInt32 nowCt=0;
             if ((*native)->GetCycleTime(native,&nowCt)==kIOReturnSuccess)
                 streamer.service(cycleCount(nowCt));
 
-            // Capture: consume only terminal-slot-confirmed completed receive
-            // chunks, decode/permutate the FW410 AM824 stream, and publish it
-            // to the HAL's four-channel capture ring.
+            // Service RX again after playback work. The pump's terminal-slot
+            // signatures make this idempotent when no new chunk completed,
+            // while minimizing the chance that a just-published chunk survives
+            // until another loop iteration and is partially reused by DMA.
             capturePump.service(rx, *captureShared.ring());
+
             if (!captureReady && captureShared.activateForConsumer(kCapturePrefillFrames)) {
                 captureReady=true;
                 std::cout << "capture prefill ready: CoreAudio consumer detected; live capture enabled\n";
