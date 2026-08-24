@@ -3,7 +3,7 @@
 #include "macfw/amdtp_receive_ring.h"
 #include "macfw/firewire_device.h"
 #include "macfw/pcm_ring_buffer.h"
-#include "../capture_shared.h"
+#include "capture_shared.h"
 #include "full_duplex_shared.h"
 
 #include <IOKit/firewire/IOFireWireLib.h>
