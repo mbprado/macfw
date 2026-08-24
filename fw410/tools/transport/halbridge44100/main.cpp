@@ -1,11 +1,11 @@
 #include "macfw/amdtp_pcm_stream.h"
 #include "macfw/amdtp_receive_ring.h"
 #include "macfw/amdtp_transmit_ring.h"
-#include "macfw/firewire_device.h"
 #include "macfw/pcm_ring_buffer.h"
 #include "macfw_hal_shm.h"
 #include "../capture_shared.h"
 #include "../full_duplex_shared.h"
+#include "../full_duplex_engine_setup.h"
 #include "../full_duplex_lifecycle.h"
 #include "../full_duplex_runtime.h"
 
@@ -14,7 +14,6 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <csignal>
 #include <cstdint>
 #include <cstring>
@@ -104,53 +103,34 @@ private:
 };
 
 bool run() {
-    SharedPlaybackReader input;
-    if (!input.open()) {
-        std::cerr << "shared HAL ring not available; install/restart the HAL plug-in first\n";
+    FullDuplexEngineSetup setup;
+    if (!setup.prepare(44100, kCycleLead,
+                       "shared HAL ring not available; install/restart the HAL plug-in first",
+                       "HAL device must be set to 44100 Hz for this milestone"))
         return false;
-    }
-    if (input.ring()->sampleRate.load(std::memory_order_acquire) != 44100) {
-        std::cerr << "HAL device must be set to 44100 Hz for this milestone\n";
-        return false;
-    }
-    input.discardBacklog();
 
-    macfw::transport::CaptureSharedWriter captureShared;
-    if (!captureShared.open(44100)) {
-        std::cerr << "capture shared ring setup failed\n";
-        return false;
-    }
     macfw::transport::CaptureReceivePump capturePump(0x01, true);
-
-    auto device = macfw::FireWireDevice::findByProductName("FW 410");
-    if (!device) { std::cerr << "No operational FW 410 unit found.\n"; return false; }
-    if (device.open()!=kIOReturnSuccess) return false;
-
-    auto native=device.nativeHandle(); UInt32 ct=0;
-    if ((*native)->GetCycleTime(native,&ct)!=kIOReturnSuccess) return false;
-    const UInt32 initialCycle=cycleCount(ct), firstCycle=(initialCycle+kCycleLead)%kCyclesPerSecond;
-
     macfw::PcmRingBuffer pcm(kPcmCapacityFrames,kPcmChannels);
-    auto rx=macfw::AmdtpReceiveRing::create(device,kCaptureSlots,kCaptureMaxPacket);
-    auto tx=macfw::AmdtpTransmitRing::createSilence44100(device,firstCycle,kPlaybackSlots);
+    auto rx=macfw::AmdtpReceiveRing::create(setup.device,kCaptureSlots,kCaptureMaxPacket);
+    auto tx=macfw::AmdtpTransmitRing::createSilence44100(setup.device,setup.firstCycle,kPlaybackSlots);
     if (!pcm.valid() || !rx || !tx) return false;
 
-    macfw::AmdtpPcmStream44100 streamer(tx,pcm,initialCycle,firstCycle,kHalfPackets);
+    macfw::AmdtpPcmStream44100 streamer(tx,pcm,setup.initialCycle,setup.firstCycle,kHalfPackets);
     if (!streamer.valid() || !streamer.prime()) return false;
 
     FireWireDuplexLifecycle lifecycle;
-    if (!lifecycle.prepare(device, rx, tx.nativeLocalPort(),
+    if (!lifecycle.prepare(setup.device, rx, tx.nativeLocalPort(),
                            kCaptureMaxPacket, kPlaybackMaxPacket))
         return false;
 
     FcpRateReassertion fcp;
     bool ok=false;
-    if (!lifecycle.addCallbackDispatcher() || !fcp.arm(device)) goto cleanup;
+    if (!lifecycle.addCallbackDispatcher() || !fcp.arm(setup.device)) goto cleanup;
     if (!lifecycle.startIsoch()) goto cleanup;
 
     {
-        UInt32 nowCt=0; if ((*native)->GetCycleTime(native,&nowCt)!=kIOReturnSuccess) goto cleanup;
-        const UInt32 now=cycleCount(nowCt), forward=(firstCycle+kCyclesPerSecond-now)%kCyclesPerSecond;
+        UInt32 nowCt=0; if ((*setup.native)->GetCycleTime(setup.native,&nowCt)!=kIOReturnSuccess) goto cleanup;
+        const UInt32 now=cycleCount(nowCt), forward=(setup.firstCycle+kCyclesPerSecond-now)%kCyclesPerSecond;
         if (forward>4096u) goto cleanup;
         const double wait=static_cast<double>(forward)/kCyclesPerSecond+0.020;
         std::cout << "duplex ISO started; waiting " << std::fixed << std::setprecision(3) << wait
@@ -166,10 +146,10 @@ bool run() {
         runtimeConfig.runLoopSliceSeconds = 0.001;
 
         runFullDuplexServiceLoop(
-            gStopRequested, native, input, pcm, rx, captureShared, capturePump,
+            gStopRequested, setup.native, setup.input, pcm, rx, setup.captureShared, capturePump,
             streamer, runtimeConfig,
             [&](std::vector<float>& audio, std::vector<std::int32_t>& mapped) {
-                pumpPlayback(*input.ring(), pcm, audio, mapped);
+                pumpPlayback(*setup.input.ring(), pcm, audio, mapped);
             });
 
         std::cout << "stop requested; restoring ISO/CMP resources\n";
@@ -177,8 +157,6 @@ bool run() {
     ok=true;
 
 cleanup:
-    // Keep the proven 44.1 cleanup order: stop ISO/restore CMP/release
-    // allocations, then remove the FCP response space, then dispatchers.
     lifecycle.stopIsochAndRestoreCmp();
     fcp.reset();
     lifecycle.removeDispatchers();
