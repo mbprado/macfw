@@ -144,8 +144,9 @@ bool run() {
         runtimeConfig.rateLabel = "44.1";
         runtimeConfig.prefillMilliseconds = 93;
         runtimeConfig.runLoopSliceSeconds = 0.001;
+        runtimeConfig.expectedGeneration = setup.device.generation();
 
-        runFullDuplexServiceLoop(
+        ok = runFullDuplexServiceLoop(
             gStopRequested, setup.native, setup.input, pcm, rx, setup.captureShared, capturePump,
             streamer, runtimeConfig,
             [&](std::vector<float>& audio, std::vector<std::int32_t>& mapped) {
@@ -154,7 +155,6 @@ bool run() {
 
         std::cout << "stop requested; restoring ISO/CMP resources\n";
     }
-    ok=true;
 
 cleanup:
     lifecycle.stopIsochAndRestoreCmp();
