@@ -1,6 +1,7 @@
 #include "macfw_hal_shm.h"
 
 #include <cerrno>
+#include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -15,6 +16,27 @@
 namespace {
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
+
+constexpr int kFwbootNoBootloader = 10;
+constexpr int kFwbootGuardRefused = 11;
+constexpr int kFwbootCandidateUnavailable = 12;
+
+using Clock = std::chrono::steady_clock;
+
+enum class SupervisorState {
+    Idle,
+    Running,
+    WaitingForReenumeration,
+    Backoff,
+};
+
+enum class BootResult {
+    CueIssued,
+    NoBootloader,
+    GuardRefused,
+    CandidateUnavailable,
+    Failed,
+};
 
 std::string executableDirectory(const char* argv0) {
     char resolved[PATH_MAX] = {};
@@ -73,7 +95,8 @@ pid_t startBridge(const std::string& path, unsigned rate) {
         execl(path.c_str(), path.c_str(), static_cast<char*>(nullptr));
         _exit(127);
     }
-    std::printf("transport: started native %u Hz engine (pid %d)\n", rate, static_cast<int>(pid));
+    std::printf("transport: started native %u Hz engine (pid %d)\n",
+                rate, static_cast<int>(pid));
     return pid;
 }
 
@@ -98,15 +121,15 @@ bool childExited(pid_t pid, int& status) {
     return r == pid;
 }
 
-bool tryGuardedBoot(const std::string& path) {
+BootResult tryGuardedBoot(const std::string& path) {
     if (access(path.c_str(), X_OK) != 0) {
         std::fprintf(stderr, "transport: fwboot helper not built: %s\n", path.c_str());
-        return false;
+        return BootResult::Failed;
     }
 
-    std::printf("transport: native engine unavailable; checking FW410 bootloader mode\n");
+    std::printf("transport: checking FW410 bootloader mode\n");
     const pid_t pid = fork();
-    if (pid < 0) return false;
+    if (pid < 0) return BootResult::Failed;
     if (pid == 0) {
         execl(path.c_str(), path.c_str(), "--execute", static_cast<char*>(nullptr));
         _exit(127);
@@ -115,20 +138,29 @@ bool tryGuardedBoot(const std::string& path) {
     int status = 0;
     while (waitpid(pid, &status, 0) < 0) {
         if (errno == EINTR) continue;
-        return false;
+        return BootResult::Failed;
     }
 
-    if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-        std::printf("transport: fwboot completed; allowing FireWire re-enumeration before retry\n");
-        usleep(800000);
-        return true;
+    if (!WIFEXITED(status)) return BootResult::Failed;
+    switch (WEXITSTATUS(status)) {
+        case 0: return BootResult::CueIssued;
+        case kFwbootNoBootloader: return BootResult::NoBootloader;
+        case kFwbootGuardRefused: return BootResult::GuardRefused;
+        case kFwbootCandidateUnavailable: return BootResult::CandidateUnavailable;
+        default: return BootResult::Failed;
     }
-
-    // No matching bootloader is the normal result when the FW410 is already
-    // operational. The next native-engine retry remains harmless and lets the
-    // supervisor recover from transient generation/re-enumeration windows.
-    return false;
 }
+
+const char* stateName(SupervisorState state) {
+    switch (state) {
+        case SupervisorState::Idle: return "IDLE";
+        case SupervisorState::Running: return "RUNNING";
+        case SupervisorState::WaitingForReenumeration: return "WAIT_REENUMERATION";
+        case SupervisorState::Backoff: return "BACKOFF";
+    }
+    return "UNKNOWN";
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -143,51 +175,125 @@ int main(int argc, char** argv) {
 
     const std::string here = executableDirectory(argc > 0 ? argv[0] : nullptr);
     const std::string bootHelper = fwbootPath(here);
+
     unsigned activeRate = 0;
     pid_t child = -1;
+    SupervisorState state = SupervisorState::Idle;
+    Clock::time_point nextAction = Clock::now();
+    Clock::time_point childStarted = Clock::time_point::min();
+    std::chrono::milliseconds retryDelay(250);
+    constexpr std::chrono::milliseconds kMaxRetryDelay(4000);
+    constexpr std::chrono::milliseconds kReenumerationDelay(800);
+    constexpr std::chrono::seconds kStableRun(5);
 
     std::printf("macfw haltransport — rate-aware CoreAudio HAL to FW410 transport supervisor\n");
     std::printf("supported native rates: 44100, 48000 Hz\n");
     std::printf("automatic guarded FW410 bootloader recovery: enabled\n");
+    std::printf("disconnect/re-enumeration retry backoff: enabled\n");
     std::printf("change the device format in Audio MIDI Setup to switch engines\n");
 
     while (!gStopRequested) {
+        const auto now = Clock::now();
         const unsigned requestedRate = shared.rate();
-        if (requestedRate != activeRate) {
-            if (child > 0) {
-                std::printf("transport: HAL rate changed %u -> %u Hz; stopping old engine\n",
-                            activeRate, requestedRate);
-                stopBridge(child);
-                activeRate = 0;
-            }
 
-            const std::string path = bridgePath(here, requestedRate);
-            if (!path.empty()) {
-                if (access(path.c_str(), X_OK) != 0) {
-                    std::fprintf(stderr, "transport: native %u Hz engine not built: %s\n",
-                                 requestedRate, path.c_str());
-                } else {
-                    child = startBridge(path, requestedRate);
-                    if (child > 0) activeRate = requestedRate;
-                }
-            } else if (requestedRate != 0) {
-                std::fprintf(stderr, "transport: HAL selected unsupported rate %u Hz\n", requestedRate);
-            }
+        if (child > 0 && requestedRate != activeRate) {
+            std::printf("transport: HAL rate changed %u -> %u Hz; stopping old engine\n",
+                        activeRate, requestedRate);
+            stopBridge(child);
+            activeRate = 0;
+            state = SupervisorState::Idle;
+            retryDelay = std::chrono::milliseconds(250);
+            nextAction = now;
         }
 
         int childStatus = 0;
         if (childExited(child, childStatus)) {
             const unsigned failedRate = activeRate;
+            const auto runTime = childStarted == Clock::time_point::min()
+                ? Clock::duration::zero()
+                : now - childStarted;
+
             std::fprintf(stderr, "transport: native %u Hz engine exited", failedRate);
-            if (WIFEXITED(childStatus)) std::fprintf(stderr, " with status %d", WEXITSTATUS(childStatus));
-            else if (WIFSIGNALED(childStatus)) std::fprintf(stderr, " on signal %d", WTERMSIG(childStatus));
+            if (WIFEXITED(childStatus))
+                std::fprintf(stderr, " with status %d", WEXITSTATUS(childStatus));
+            else if (WIFSIGNALED(childStatus))
+                std::fprintf(stderr, " on signal %d", WTERMSIG(childStatus));
             std::fprintf(stderr, "\n");
+
             child = -1;
             activeRate = 0;
+            childStarted = Clock::time_point::min();
+
+            if (runTime >= kStableRun) retryDelay = std::chrono::milliseconds(250);
 
             if (!gStopRequested && failedRate != 0 && shared.rate() == failedRate) {
-                tryGuardedBoot(bootHelper);
+                const BootResult boot = tryGuardedBoot(bootHelper);
+                switch (boot) {
+                    case BootResult::CueIssued:
+                        state = SupervisorState::WaitingForReenumeration;
+                        nextAction = now + kReenumerationDelay;
+                        retryDelay = std::chrono::milliseconds(250);
+                        std::printf("transport: guarded boot cue issued; state=%s\n",
+                                    stateName(state));
+                        break;
+                    case BootResult::NoBootloader:
+                        state = SupervisorState::Backoff;
+                        nextAction = now + retryDelay;
+                        std::printf("transport: no FW410 bootloader present; state=%s retry=%lld ms\n",
+                                    stateName(state), static_cast<long long>(retryDelay.count()));
+                        retryDelay = std::min(retryDelay * 2, kMaxRetryDelay);
+                        break;
+                    case BootResult::GuardRefused:
+                        state = SupervisorState::Backoff;
+                        nextAction = now + std::chrono::seconds(2);
+                        std::fprintf(stderr,
+                                     "transport: FW410 bootloader candidate failed guard preflight; "
+                                     "retrying conservatively\n");
+                        break;
+                    case BootResult::CandidateUnavailable:
+                    case BootResult::Failed:
+                        state = SupervisorState::Backoff;
+                        nextAction = now + retryDelay;
+                        std::fprintf(stderr,
+                                     "transport: bootloader check unavailable/failed; retry=%lld ms\n",
+                                     static_cast<long long>(retryDelay.count()));
+                        retryDelay = std::min(retryDelay * 2, kMaxRetryDelay);
+                        break;
+                }
+            } else {
+                state = SupervisorState::Idle;
             }
+        }
+
+        if (child <= 0 && requestedRate != 0 && now >= nextAction) {
+            const std::string path = bridgePath(here, requestedRate);
+            if (path.empty()) {
+                std::fprintf(stderr, "transport: HAL selected unsupported rate %u Hz\n",
+                             requestedRate);
+                state = SupervisorState::Backoff;
+                nextAction = now + std::chrono::seconds(1);
+            } else if (access(path.c_str(), X_OK) != 0) {
+                std::fprintf(stderr, "transport: native %u Hz engine not built: %s\n",
+                             requestedRate, path.c_str());
+                state = SupervisorState::Backoff;
+                nextAction = now + std::chrono::seconds(1);
+            } else {
+                child = startBridge(path, requestedRate);
+                if (child > 0) {
+                    activeRate = requestedRate;
+                    state = SupervisorState::Running;
+                    childStarted = now;
+                } else {
+                    state = SupervisorState::Backoff;
+                    nextAction = now + retryDelay;
+                    retryDelay = std::min(retryDelay * 2, kMaxRetryDelay);
+                }
+            }
+        }
+
+        if (child > 0 && childStarted != Clock::time_point::min() &&
+            now - childStarted >= kStableRun) {
+            retryDelay = std::chrono::milliseconds(250);
         }
 
         usleep(100000);
