@@ -222,3 +222,46 @@ This milestone establishes:
 - completed-chunk receive handling at both native rates.
 
 With transport correctness now validated at both supported native rates, the next integration target is extracting the duplicated 44.1/48 device, CMP, ISO and full-duplex lifecycle into a reusable transport core before tackling automatic boot/recovery and latency tuning.
+
+## 2026-08-24 — Physical disconnect/reconnect and guarded boot recovery validated
+
+The long-running `haltransport` supervisor was tested with active 48 kHz full-duplex playback/capture while the FW410 FireWire cable was physically disconnected and later reconnected. The recovery completed automatically without manually restarting the supervisor, changing sample rate or invoking `fwboot` by hand.
+
+Observed recovery sequence:
+
+```text
+physical disconnect
+ -> running native engine detects FireWire generation change
+ -> controlled native-engine shutdown
+ -> haltransport enters recovery/backoff
+ -> unstable generation/node attempts fail harmlessly
+ -> FW410 reappears in bootloader personality
+ -> guarded fwboot preflight passes
+ -> one-shot boot cue is issued
+ -> supervisor waits for re-enumeration
+ -> transitional loader state is refused by the guard
+ -> operational FW410 reappears
+ -> native 48 kHz full-duplex engine is relaunched
+ -> playback and capture resume normally
+```
+
+The test specifically exercised the recovery mechanisms added after the transport refactor:
+
+- streaming-time FireWire generation monitoring;
+- child-engine failure propagation to `haltransport`;
+- explicit guarded `fwboot` result codes;
+- retry backoff instead of a tight restart loop;
+- bootloader-to-operational re-enumeration;
+- fresh generation/node acquisition and full CMP/ISO reconstruction.
+
+After recovery, hardware validation confirmed both playback and capture returned to normal operation. Representative capture status returned to approximately 96,000 frames per two-second interval at 48 kHz with a ~4k-frame capture cushion and no capture drops or malformed packets.
+
+One transitional retry occurred after the boot cue before the operational personality was fully ready. This failed harmlessly; a subsequent guard correctly refused another boot write once the loader's `bootloader active` field had already cleared, and the next native-engine launch succeeded. This is acceptable for the validated recovery milestone, although future recovery work may replace fixed re-enumeration waits with explicit operational-unit readiness detection.
+
+### CoreAudio availability policy
+
+During the physical disconnect, the logical **M-Audio FireWire 410** CoreAudio device remained visible to macOS and Logic even though the FireWire transport was temporarily unavailable. This separation between the logical CoreAudio endpoint and the physical transport is now the intended architectural direction rather than something to remove.
+
+Future HAL/transport-state integration should keep the CoreAudio device registered while the FW410 is disconnected, expose an explicit offline/unavailable transport state, safely provide silence / empty capture while offline, and recover transparently when FireWire transport returns. Avoiding device removal/recreation should reduce disruption to Logic and other applications that have already selected the interface.
+
+This milestone establishes **automatic physical disconnect/reconnect recovery with guarded bootloader handling as hardware-validated at 48 kHz**.
