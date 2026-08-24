@@ -16,7 +16,8 @@ Hardware-confirmed today:
 - all eight analog outputs and both S/PDIF outputs were independently validated in Logic Pro;
 - CoreAudio exposes four input channels: Analog In 1/2 and S/PDIF In L/R;
 - native 48 kHz CoreAudio recording works in Logic Pro;
-- the final 48 kHz capture receive path is steady-state clean under a controlled 1 kHz test.
+- the final 48 kHz capture receive path is steady-state clean under a controlled 1 kHz test;
+- native 48 kHz full-duplex playback + capture is validated both directly and through `haltransport`.
 
 The current architecture is:
 
@@ -72,9 +73,9 @@ The 48 kHz engine is hardware-confirmed and clear. The decisive fix for early co
 
 Some client/load-sensitive playback glitches have historically been easier to trigger with browser/YouTube playback than Logic Pro. They are not currently associated with scheduler-inserted silence and should be investigated separately from the now-solved capture path.
 
-## Rate-aware playback supervisor
+## Rate-aware full-duplex supervisor
 
-`tools/transport/haltransport` is the current unified playback runtime. It reads the HAL-selected sample rate, starts the matching native engine and restarts it when the rate changes.
+`tools/transport/haltransport` is the current rate-aware runtime supervisor. At 48 kHz it now launches the validated full-duplex engine; at 44.1 kHz it still launches the playback-only engine pending native 44.1 capture integration. It reads the HAL-selected sample rate, starts the matching native engine and restarts it when the rate changes.
 
 Rate changes can cause FireWire generation/node transitions. A persistent runtime must explicitly reacquire a stable operational unit rather than assume old generation/node state remains valid.
 
@@ -128,7 +129,7 @@ The producer keeps the ring inactive until CoreAudio has started issuing `ReadIn
 
 The FW410 only remains in sample-bearing capture state while valid host-to-device AMDTP also flows. The standalone `capturebridge48000` therefore runs the normal 48 kHz playback scheduler with an empty 10-channel FIFO, producing correctly timed digital silence as a keepalive.
 
-The production full-duplex runtime should replace this silence with real CoreAudio playback while keeping the same duplex scheduling behavior.
+That silence keepalive remains useful only in the standalone capture test. The production 48 kHz engine now replaces it with real ten-channel CoreAudio playback while preserving the same duplex scheduling behavior.
 
 ### Receive-publication breakthrough
 
@@ -191,17 +192,36 @@ The repository already proves the guarded bootloader -> operational transition. 
 
 Do not put this lifecycle work in a HAL real-time callback.
 
+## Validated 48 kHz full duplex
+
+The real 10-channel playback engine and the completed-chunk four-channel capture engine now run together in `halbridge48000`.
+
+The first combined version regressed capture quality even though DBC/order/drop diagnostics stayed clean. The cause was service ordering: playback SHM draining/mapping ran before receive consumption. TX has substantial prebuilt scheduling margin, while RX slots are continuously reused by DMA.
+
+The validated loop therefore prioritizes capture:
+
+```text
+capture service
+ -> playback SHM/PCM work
+ -> TX scheduler service
+ -> capture service again
+```
+
+After this change, simultaneous playback, live monitoring and recording were reported clean. Representative full-duplex runs held exact 48 kHz cadence with zero capture drops, malformed packets, invalid labels, DBC gaps, reorders and stale packets. The same behavior was confirmed when the engine was started through `haltransport`.
+
+Live-monitor latency remains intentionally high because the current capture prefill is 4,096 frames (~85 ms). Latency reduction is deferred until transport correctness across both rates is complete.
+
 ## Immediate sequence
 
-1. Merge the validated 48 kHz capture engine into the real `haltransport` playback runtime so one process provides true full-duplex operation.
-2. Verify sustained simultaneous 10-channel playback and four-channel recording under Logic Pro.
-3. Add native 44.1 capture and preserve the existing post-start 44.1 AV/C reassertion behavior in full-duplex operation.
-4. Extract common 44.1/48 device/CMP/ISO lifecycle into a reusable transport core.
-5. Add automatic startup/bootloader handling and robust bus-reset, generation-change, disconnect/reconnect and rate-change recovery.
-6. Add a runtime HAL build identifier to eliminate stale-load ambiguity during development.
+1. Add native 44.1 capture/full duplex while preserving the post-start 44.1 AV/C reassertion behavior.
+2. Verify sustained simultaneous 10-channel playback and four-channel recording at 44.1 kHz.
+3. Extract common 44.1/48 device/CMP/ISO lifecycle into a reusable transport core.
+4. Add automatic startup/bootloader handling and robust bus-reset, generation-change, disconnect/reconnect and rate-change recovery.
+5. Add a runtime HAL build identifier to eliminate stale-load ambiguity during development.
+6. Tune capture prefill / monitoring latency after transport correctness is stable at both native rates.
 7. Return to mixer/routing/headphone, S/PDIF and MIDI integration.
 8. Finish packaging/release automation when the runtime is reproducibly installable.
 
 ## Quick handoff
 
-> Native playback is proven at 44.1 and 48 kHz, all 10 playback channels are validated, and native 48 kHz four-channel CoreAudio capture is now clean after switching NuDCL receive consumption to terminal-slot-confirmed 32-cycle groups. The next task is not another capture-format experiment: merge the proven capture engine and proven real playback engine into one full-duplex rate-aware transport, then extend the same model to native 44.1 capture.
+> Native 48 kHz full duplex is now validated through the normal `haltransport` path: 10-channel playback and four-channel capture run simultaneously, with clean completed-chunk RX after prioritizing capture service ahead of playback mapping/TX work. Native 44.1 playback is already proven; the next task is to add the same capture/full-duplex model at 44.1 while preserving the FW410 post-start AV/C rate reassertion.
