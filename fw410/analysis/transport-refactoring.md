@@ -31,7 +31,7 @@ These differences are treated as strategy/configuration, not accidental duplicat
 
 ## Checkpoint 1 — shared HAL/PCM plumbing: validated
 
-`tools/transport/full_duplex_shared.h` now owns rate-independent host-side plumbing:
+`tools/transport/full_duplex_shared.h` owns rate-independent host-side plumbing:
 
 - playback shared-memory mapping/lifetime;
 - backlog discard on engine start;
@@ -45,7 +45,7 @@ Both native engines were rebuilt after this extraction and hardware-tested throu
 
 ## Checkpoint 2 — shared CMP/ISO lifecycle: validated
 
-`tools/transport/full_duplex_lifecycle.h` now owns the common FireWire connection lifecycle:
+`tools/transport/full_duplex_lifecycle.h` owns the common FireWire connection lifecycle:
 
 1. read and validate oPCR0/iPCR0 readiness;
 2. create device-to-host and host-to-device isoch allocations;
@@ -67,37 +67,88 @@ stop ISO / restore CMP / release allocations
 
 This preserves the known-good 44.1 AV/C/FCP lifecycle rather than hiding it inside the common helper.
 
-After this extraction, both native engines again compiled and were hardware-tested through `haltransport`. Capture, monitoring and playback remained clean at both rates and survived rate changes in both directions. Commit `d7b2d25` is the validated checkpoint immediately after wiring the shared lifecycle into the 44.1 engine.
+After this extraction, both native engines compiled and were hardware-tested through `haltransport`. Capture, monitoring and playback remained clean at both rates and survived rate changes in both directions. Commit `d7b2d25` is the validated checkpoint immediately after wiring the shared lifecycle into the 44.1 engine.
 
-## Checkpoint 3 — shared full-duplex service loop: next
+## Checkpoint 3 — shared full-duplex service loop: validated
 
-The remaining large duplication is the steady-state runtime loop. Both engines use the same ordering:
+`tools/transport/full_duplex_runtime.h` now owns the common steady-state service loop. The exact validated ordering is preserved:
 
 ```text
 run-loop service
  -> capture receive service
- -> CoreAudio playback SHM -> PCM service
+ -> rate-specific CoreAudio playback SHM -> PCM service
  -> native TX scheduler service
  -> capture receive service again
  -> capture prefill activation
  -> periodic combined playback/capture diagnostics
 ```
 
-The ordering is not cosmetic. Servicing RX before and after playback work is required to minimize the receive-DMA reuse window; changing that order previously made capture audibly broken in full duplex.
+The ordering is functional, not cosmetic. RX is serviced before and after playback/TX work to minimize the receive-DMA reuse window; changing that order previously made full-duplex capture audibly broken.
 
-The common service-loop helper must therefore preserve that exact order while taking the known rate-specific differences as parameters/callbacks: run-loop slice, playback pump/drain policy, native streamer object and rate-specific banner values.
+The helper deliberately takes rate-specific behavior as strategy/configuration instead of attempting to merge it:
 
-This checkpoint is **not hardware-validated yet**. After it is wired into both bridges, the required regression test is:
+- 44.1 kHz keeps one `pumpPlayback()` per iteration and a 1 ms CoreFoundation run-loop slice;
+- 48 kHz keeps backlog-draining playback service and a 0.25 ms run-loop slice;
+- each bridge keeps its native AMDTP streamer/scheduler;
+- the capture pump keeps its rate-specific completion-token semantics;
+- the 44.1 post-start AV/C reassert remains outside and before the shared steady-state runtime;
+- the existing 48 kHz QoS request remains rate-specific startup behavior.
 
-1. compile `halbridge44100` and `halbridge48000`;
-2. start via `haltransport`;
-3. verify simultaneous playback + capture/monitoring at 44.1 kHz;
-4. switch to 48 kHz and repeat;
-5. switch back to 44.1 kHz once;
-6. confirm no audible regression and healthy capture counters.
+Implementation commits:
 
-## After the service-loop checkpoint
+```text
+bb5a891  Extract common full-duplex service loop
+2bf5227  Use shared full-duplex runtime at 48 kHz
+6633205  Use shared full-duplex runtime at 44.1 kHz
+```
 
-Once the common steady-state loop is hardware-validated, the two bridge binaries should contain mostly rate strategy and the 44.1-specific AV/C hook. Only then should the project consider collapsing the two native engines further or moving boot/recovery responsibilities into the long-running supervisor.
+Hardware validation after these commits confirmed no regression. Both native rates compiled and were exercised through `haltransport`; playback, capture and monitoring remained clean, and switching 44.1 -> 48 -> 44.1 continued to work as before.
 
-The next non-refactoring priorities remain automatic bootloader handling, bus-reset/generation recovery, runtime HAL build identification, and later capture-prefill/monitoring-latency tuning.
+This is checkpoint 3's known-good hardware baseline.
+
+## Refactoring state after checkpoint 3
+
+The two native bridge binaries now mostly describe rate strategy and startup behavior rather than duplicating the host plumbing, FireWire lifecycle and steady-state service loop.
+
+Common layers:
+
+```text
+full_duplex_shared.h
+    host SHM / PCM plumbing
+
+full_duplex_lifecycle.h
+    CMP / ISO setup and teardown
+
+full_duplex_runtime.h
+    steady-state RX -> playback -> TX -> RX service loop
+```
+
+Still intentionally rate-specific:
+
+```text
+44.1 kHz
+    native TX ring/scheduler
+    2048-cycle lead
+    timestamp-only capture completion
+    one-pass playback pump
+    1 ms runtime slice
+    post-start AV/C rate reassert
+
+48 kHz
+    native TX ring/scheduler
+    256-cycle lead
+    timestamp + isoHeader capture completion
+    playback backlog drain
+    0.25 ms runtime slice
+    user-interactive QoS request
+```
+
+Further consolidation should only remove duplication that is genuinely policy-neutral. The validated rate-specific timing and packet behavior should not be abstracted away merely to make the bridge files look symmetrical.
+
+## Next structural step
+
+The next useful consolidation target is the duplicated engine setup surrounding the already-shared layers: opening/validating the HAL rings, discovering/opening the operational FW410, reading initial cycle time, constructing the PCM/RX/TX objects, and entering the shared lifecycle/runtime.
+
+That extraction should be designed as an engine shell with explicit rate strategy hooks. It must not absorb the 44.1 FCP reassertion or merge the two native AMDTP schedulers.
+
+After that structural work is validated, the project should move from refactoring toward runtime robustness: automatic bootloader handling, bus-reset/generation recovery, disconnect/reconnect recovery and a runtime HAL build identifier. Capture-prefill/monitoring-latency tuning remains deliberately later work.
