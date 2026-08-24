@@ -28,6 +28,7 @@
 
 namespace {
 using namespace macfw::transport::duplex;
+constexpr UInt32 kCycleLead = 2048;
 
 constexpr UInt16 kFcpAddressHi = 0xffff;
 constexpr UInt32 kFcpCommandLo = 0xf0000b00;
