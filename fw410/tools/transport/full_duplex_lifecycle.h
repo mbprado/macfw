@@ -107,10 +107,9 @@ public:
         return true;
     }
 
-    void stop() {
+    void stopIsochAndRestoreCmp() {
         if (!device_) return;
 
-        // Preserve the proven stop/restore order from both bridge engines.
         if (playbackStarted_)
             (*playback_.nativeChannel())->Stop(playback_.nativeChannel());
         if (captureStarted_)
@@ -124,19 +123,30 @@ public:
         playback_.release();
         capture_.release();
 
+        captureStarted_ = false;
+        playbackStarted_ = false;
+        ipConnected_ = false;
+        opConnected_ = false;
+    }
+
+    void removeDispatchers() {
+        if (!native_) return;
+
         if (notifications_) (*native_)->TurnOffNotification(native_);
         if (isochDispatcher_)
             (*native_)->RemoveIsochCallbackDispatcherFromRunLoop(native_);
         if (callbackDispatcher_)
             (*native_)->RemoveCallbackDispatcherFromRunLoop(native_);
 
-        captureStarted_ = false;
-        playbackStarted_ = false;
-        ipConnected_ = false;
-        opConnected_ = false;
         notifications_ = false;
         isochDispatcher_ = false;
         callbackDispatcher_ = false;
+    }
+
+    void stop() {
+        if (!device_) return;
+        stopIsochAndRestoreCmp();
+        removeDispatchers();
         native_ = nullptr;
         device_ = nullptr;
     }
