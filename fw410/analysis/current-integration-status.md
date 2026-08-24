@@ -18,7 +18,8 @@ Hardware-confirmed:
 - live software monitoring works at both native rates;
 - `haltransport` switches native engines when the CoreAudio rate changes;
 - repeated 44.1 <-> 48 kHz switching preserves playback, capture and monitoring;
-- three transport refactoring checkpoints have been hardware-validated without regression: shared HAL/PCM plumbing, shared CMP/ISO lifecycle, and the shared steady-state full-duplex service loop.
+- four transport refactoring checkpoints have been hardware-validated without regression: shared HAL/PCM plumbing, shared engine setup, shared CMP/ISO lifecycle, and the shared steady-state full-duplex service loop;
+- physical FireWire disconnect/reconnect recovery has been hardware-validated at 48 kHz, including bootloader re-entry, guarded boot cue, re-enumeration and automatic full-duplex recovery.
 
 The current architecture is:
 
@@ -30,6 +31,7 @@ macOS application
        <- capture shared ring
     -> companion user-space transport
        -> common HAL/PCM plumbing
+       -> common engine setup
        -> common CMP/ISO lifecycle
        -> common full-duplex service loop
        -> rate-specific AMDTP/timing strategy
@@ -55,17 +57,70 @@ The 44.1 engine is hardware-confirmed and clean. The tested FW410 requires this 
 
 This startup quirk remains explicitly rate-specific.
 
+One intermittent first-start condition is still tracked separately: on some runs the first direct 44.1 start is audibly broken, while switching to 48 kHz and back to 44.1 restores correct operation. This is currently treated as a startup/state issue, not a steady-state transport regression.
+
 ### Native 48 kHz
 
 The 48 kHz engine is hardware-confirmed and clear. The decisive fix for early playback corruption was increasing transmit scheduling margin to a 640-cycle ring / 320-cycle refill half. The committed path also uses a 16,384-frame PCM FIFO, user-interactive transport QoS and late/silence diagnostics.
 
-## Rate-aware full-duplex supervisor
+## Rate-aware full-duplex supervisor and recovery
 
 `tools/transport/haltransport` is the current rate-aware full-duplex runtime supervisor. Both native engines provide ten-channel playback and four-channel capture. The supervisor reads the HAL-selected sample rate, starts the matching native engine and restarts it when the rate changes.
 
 Repeated 44.1 <-> 48 kHz switching has been hardware-tested after the current transport refactors with playback, capture and monitoring remaining functional after each transition.
 
-Rate changes can cause FireWire generation/node transitions. A persistent runtime must explicitly reacquire a stable operational unit rather than assume old generation/node state remains valid.
+The supervisor now also owns explicit transport-recovery states. A native engine monitors the FireWire bus generation while streaming. If the generation changes or can no longer be read, the engine exits through its normal cleanup path so the supervisor can reacquire the device rather than continuing against stale generation/node/DMA state.
+
+Recovery behavior includes:
+
+```text
+RUNNING
+ -> generation change / engine failure
+ -> guarded bootloader check
+ -> WAIT_REENUMERATION if a guarded boot cue was actually issued
+ -> BACKOFF on absent/unstable device
+ -> fresh native-engine launch
+ -> fresh FW410 generation/node acquisition
+ -> new CMP/ISO/DMA lifecycle
+ -> RUNNING
+```
+
+`fwboot --execute` reports distinct guarded outcomes so `haltransport` no longer treats every helper exit as a successful boot. Retry backoff prevents a tight child-process loop while the interface is absent or the FireWire bus is unstable.
+
+### Physical disconnect/reconnect validation
+
+A live 48 kHz full-duplex test was performed by physically disconnecting and reconnecting the FW410 while `haltransport` remained running.
+
+The running engine detected a FireWire generation change and exited. During reconnection, several attempts saw unstable generation/node state and failed harmlessly under backoff. The FW410 then appeared as the known bootloader personality, passed the guarded preflight and received exactly one boot-from-flash cue. The supervisor waited for re-enumeration, refused a subsequent transitional loader state whose guard no longer matched, then successfully launched the operational 48 kHz engine.
+
+Playback and capture both returned to normal operation automatically after the reconnect. This validates the current generation-change detection, guarded boot, backoff, re-enumeration and operational-unit reacquisition path at 48 kHz.
+
+A future refinement may replace the fixed post-boot wait with explicit detection of a stable operational FW410 before launching the native engine. The current behavior is safe and functionally validated, but one harmless transitional engine attempt can still occur before the operational personality is fully ready.
+
+## CoreAudio transport-offline policy
+
+The logical CoreAudio device currently remains visible in macOS/Logic even when the physical FW410 is disconnected. This separation is considered desirable and should be preserved.
+
+The intended future policy is:
+
+```text
+CoreAudio device remains registered
+        ↓
+transport disconnects
+        ↓
+HAL exposes transport offline/unavailable state
+        ↓
+playback is safely discarded / rendered as silence
+capture returns silence / empty input safely
+        ↓
+transport supervisor recovers FireWire device
+        ↓
+HAL transport state returns online
+        ↓
+existing CoreAudio clients continue without device removal/recreation
+```
+
+The goal is transparent recovery without forcing Logic or other applications to lose and reselect the interface. This policy still needs a transport-status ABI between the supervisor/transport and the HAL; it is an architectural decision, not yet a completed HAL feature.
 
 ## Capture topology and validated receive model
 
@@ -133,7 +188,7 @@ Rate-specific policies remain explicit: 44.1 uses one playback pump per loop wit
 
 ## Transport refactoring checkpoints
 
-Three incremental structural checkpoints are now hardware-validated.
+Four incremental structural checkpoints are now hardware-validated.
 
 ### Checkpoint 1 — host HAL/PCM plumbing
 
@@ -147,15 +202,11 @@ Three incremental structural checkpoints are now hardware-validated.
 
 `tools/transport/full_duplex_runtime.h` owns the common RX -> playback -> TX -> RX runtime structure, prefill activation and combined diagnostics while accepting rate-specific playback and timing policy.
 
-The checkpoint-3 implementation commits are:
+### Checkpoint 4 — common engine setup
 
-```text
-bb5a891  Extract common full-duplex service loop
-2bf5227  Use shared full-duplex runtime at 48 kHz
-6633205  Use shared full-duplex runtime at 44.1 kHz
-```
+`tools/transport/full_duplex_engine_setup.h` owns the policy-neutral pre-stream setup: HAL playback/capture SHM validation, operational FW410 discovery/opening, initial cycle acquisition and rate-specific first-cycle derivation. Native scheduler construction, capture-token behavior, QoS and the 44.1 FCP reassert remain outside it.
 
-After these changes both engines were compiled and tested through `haltransport`. Playback, capture and monitoring remained clean at 44.1 and 48 kHz, including 44.1 -> 48 -> 44.1 switching. No regression was observed.
+After these changes both engines were compiled and tested through `haltransport`. Playback, capture and monitoring remained clean at 44.1 and 48 kHz, including rate switching. No refactor regression was observed.
 
 See `analysis/transport-refactoring.md` for the detailed boundary between shared mechanisms and rate-specific strategy.
 
@@ -167,14 +218,14 @@ This remains a separate lifecycle/debugging issue. Future instrumentation should
 
 ## Bootloader / interface boot mode
 
-Production startup must support both personalities:
+Production startup supports the two observed personalities at the supervisor level:
 
 ```text
 FW Bootloader  model 0x00010058
 FW 410         model 0x00010046
 ```
 
-The repository already proves the guarded bootloader -> operational transition. A persistent service must discover the current personality, boot if needed, wait for re-enumeration, reacquire generation/node state, set the requested clock domain and then establish CMP/ISO.
+The guarded bootloader -> operational transition is now integrated with `haltransport`. The supervisor can recover from a reconnect into bootloader mode, wait/retry through re-enumeration and launch a fresh native engine after the operational unit becomes available.
 
 Do not put this lifecycle work in a HAL real-time callback.
 
@@ -188,17 +239,21 @@ Do not put this lifecycle work in a HAL real-time callback.
 | software monitoring | validated | validated |
 | `haltransport` launch | validated | validated |
 | runtime rate switching | validated | validated |
-| shared runtime refactor | validated | validated |
+| shared transport refactor | validated | validated |
+| generation-change detection | implemented | implemented |
+| physical disconnect/reconnect recovery | not yet explicitly tested | validated |
+| guarded bootloader recovery | implemented | validated during reconnect |
 
 ## Immediate sequence
 
-1. Extract the remaining policy-neutral duplicated engine setup into a reusable engine shell while keeping native schedulers, capture-token behavior and the 44.1 FCP reassert explicit.
-2. Add automatic startup/bootloader handling and robust bus-reset, generation-change, disconnect/reconnect and rate-change recovery.
+1. Validate physical disconnect/reconnect recovery at 44.1 kHz as well, including its post-start AV/C reassertion after recovery.
+2. Add a small transport-status ABI shared with the HAL so the CoreAudio endpoint can explicitly report online/offline state while remaining registered.
 3. Add a runtime HAL build identifier to eliminate stale-load ambiguity during development.
-4. Tune capture prefill / monitoring latency after runtime recovery is reliable.
-5. Return to mixer/routing/headphone, S/PDIF and MIDI integration.
-6. Finish packaging/release automation when the runtime is reproducibly installable.
+4. Improve post-boot operational readiness detection so `haltransport` waits for a stable operational unit instead of relying primarily on a fixed re-enumeration delay.
+5. Tune capture prefill / monitoring latency after runtime recovery is reliable.
+6. Return to mixer/routing/headphone, S/PDIF and MIDI integration.
+7. Finish packaging/release automation when the runtime is reproducibly installable.
 
 ## Quick handoff
 
-> Native 44.1 and 48 kHz full duplex are hardware-validated through `haltransport`: ten-channel playback, four-channel capture and software monitoring work at both rates, and repeated native rate switching works. Three common transport layers are now validated without regression: host HAL/PCM plumbing, CMP/ISO lifecycle, and the steady-state RX -> playback -> TX -> RX service loop. Rate-specific AMDTP scheduling, capture completion semantics and the 44.1 post-start AV/C reassert remain intentionally explicit. The next structural task is the remaining duplicated engine-setup shell; after that, priority shifts to boot/re-enumeration and bus-reset/disconnect recovery.
+> Native 44.1 and 48 kHz full duplex are hardware-validated through `haltransport`: ten-channel playback, four-channel capture and software monitoring work at both rates, and repeated native rate switching works. The transport refactor is complete enough that shared HAL/PCM plumbing, engine setup, CMP/ISO lifecycle and the steady-state service loop are common while rate-specific AMDTP behavior remains explicit. Physical disconnect/reconnect recovery has now been hardware-validated at 48 kHz: the running engine detected a generation change, the supervisor backed off through unstable FireWire state, issued one guarded boot cue when the known loader appeared, reacquired the operational FW410 and restored playback/capture automatically. The CoreAudio device should remain logically registered across transport outages; future HAL work should expose transport offline/online state and provide silence safely while disconnected rather than removing/recreating the device.
