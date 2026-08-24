@@ -62,6 +62,10 @@ std::string bridgePath(const std::string& here, unsigned rate) {
     return {};
 }
 
+std::string fwbootPath(const std::string& here) {
+    return here + "/../../device/fwboot/fwboot";
+}
+
 pid_t startBridge(const std::string& path, unsigned rate) {
     const pid_t pid = fork();
     if (pid < 0) return -1;
@@ -93,6 +97,38 @@ bool childExited(pid_t pid, int& status) {
     const pid_t r = waitpid(pid, &status, WNOHANG);
     return r == pid;
 }
+
+bool tryGuardedBoot(const std::string& path) {
+    if (access(path.c_str(), X_OK) != 0) {
+        std::fprintf(stderr, "transport: fwboot helper not built: %s\n", path.c_str());
+        return false;
+    }
+
+    std::printf("transport: native engine unavailable; checking FW410 bootloader mode\n");
+    const pid_t pid = fork();
+    if (pid < 0) return false;
+    if (pid == 0) {
+        execl(path.c_str(), path.c_str(), "--execute", static_cast<char*>(nullptr));
+        _exit(127);
+    }
+
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno == EINTR) continue;
+        return false;
+    }
+
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+        std::printf("transport: fwboot completed; allowing FireWire re-enumeration before retry\n");
+        usleep(800000);
+        return true;
+    }
+
+    // No matching bootloader is the normal result when the FW410 is already
+    // operational. The next native-engine retry remains harmless and lets the
+    // supervisor recover from transient generation/re-enumeration windows.
+    return false;
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -106,11 +142,13 @@ int main(int argc, char** argv) {
     }
 
     const std::string here = executableDirectory(argc > 0 ? argv[0] : nullptr);
+    const std::string bootHelper = fwbootPath(here);
     unsigned activeRate = 0;
     pid_t child = -1;
 
     std::printf("macfw haltransport — rate-aware CoreAudio HAL to FW410 transport supervisor\n");
     std::printf("supported native rates: 44100, 48000 Hz\n");
+    std::printf("automatic guarded FW410 bootloader recovery: enabled\n");
     std::printf("change the device format in Audio MIDI Setup to switch engines\n");
 
     while (!gStopRequested) {
@@ -139,12 +177,17 @@ int main(int argc, char** argv) {
 
         int childStatus = 0;
         if (childExited(child, childStatus)) {
-            std::fprintf(stderr, "transport: native %u Hz engine exited", activeRate);
+            const unsigned failedRate = activeRate;
+            std::fprintf(stderr, "transport: native %u Hz engine exited", failedRate);
             if (WIFEXITED(childStatus)) std::fprintf(stderr, " with status %d", WEXITSTATUS(childStatus));
             else if (WIFSIGNALED(childStatus)) std::fprintf(stderr, " on signal %d", WTERMSIG(childStatus));
             std::fprintf(stderr, "\n");
             child = -1;
             activeRate = 0;
+
+            if (!gStopRequested && failedRate != 0 && shared.rate() == failedRate) {
+                tryGuardedBoot(bootHelper);
+            }
         }
 
         usleep(100000);
