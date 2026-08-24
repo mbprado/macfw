@@ -196,3 +196,29 @@ This milestone establishes **native 48 kHz full-duplex CoreAudio operation as va
 Live software monitoring still has noticeable latency because capture intentionally uses a 4,096-frame prefill (~85 ms at 48 kHz). That is a later latency-tuning task, not a current transport-correctness blocker.
 
 The next major integration target is native 44.1 kHz capture/full duplex while preserving the FW410's required post-start AV/C 44.1 kHz reassertion.
+
+## 2026-08-24 — Native 44.1 kHz full duplex and rate switching validated
+
+Native 44.1 kHz capture was integrated into the full-duplex CoreAudio transport while preserving the FW410-specific post-start AV/C rate reassertion already required by playback.
+
+The first 44.1 kHz full-duplex capture attempt was audibly broken and produced capture faster than CoreAudio consumed it: the queue climbed steadily from roughly 5k frames toward the 32,768-frame limit and eventually began dropping frames. DBC-gap and timestamp diagnostics also accumulated. This was not a HAL-rate problem; the receive completion signature used for 48 kHz was not stable for the 44.1 kHz alternating blocking/NODATA packet pattern.
+
+The receive completion token was therefore made rate-aware:
+
+```text
+48 kHz completed-chunk token: timestamp + isoHeader
+44.1 kHz completed-chunk token: timestamp only
+```
+
+Using the stable timestamp-only token at 44.1 kHz restored the same terminal-slot-confirmed 32-cycle chunk model that had already proven clean at 48 kHz. Hardware validation then showed clear recording and live monitoring with a stable ~4k-frame capture cushion and no capture drops, malformed packets, invalid labels, DBC gaps, reorders or stale groups. Representative steady-state capture deltas were approximately 88,200 frames per two-second interval, matching native 44.1 kHz.
+
+The normal `haltransport` supervisor was then tested while alternating the CoreAudio device format between 44.1 and 48 kHz. Playback and capture remained functional in both directions across the rate changes, including the 44.1 kHz post-start AV/C reassertion and the normal FireWire generation/node reacquisition path.
+
+This milestone establishes:
+
+- native 44.1 kHz 10-output / 4-input full-duplex CoreAudio operation;
+- native 48 kHz 10-output / 4-input full-duplex CoreAudio operation;
+- runtime 44.1 <-> 48 kHz switching through `haltransport`;
+- completed-chunk receive handling at both native rates.
+
+With transport correctness now validated at both supported native rates, the next integration target is extracting the duplicated 44.1/48 device, CMP, ISO and full-duplex lifecycle into a reusable transport core before tackling automatic boot/recovery and latency tuning.
