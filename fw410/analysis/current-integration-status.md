@@ -1,6 +1,6 @@
 # FW410 current integration status
 
-Last updated: 2026-08-19
+Last updated: 2026-08-24
 
 This document is the current handoff for the CoreAudio/HAL/runtime phase. Older reverse-engineering documents remain useful historical evidence, but this file defines the present integration state and immediate next work.
 
@@ -17,7 +17,9 @@ Hardware-confirmed today:
 - CoreAudio exposes four input channels: Analog In 1/2 and S/PDIF In L/R;
 - native 48 kHz CoreAudio recording works in Logic Pro;
 - the final 48 kHz capture receive path is steady-state clean under a controlled 1 kHz test;
-- native 48 kHz full-duplex playback + capture is validated both directly and through `haltransport`.
+- native 48 kHz full-duplex playback + capture is validated both directly and through `haltransport`;
+- native 44.1 kHz full-duplex playback + capture is validated with the required post-start AV/C reassertion;
+- `haltransport` has been hardware-validated switching repeatedly between 44.1 and 48 kHz while preserving playback and capture.
 
 The current architecture is:
 
@@ -75,7 +77,7 @@ Some client/load-sensitive playback glitches have historically been easier to tr
 
 ## Rate-aware full-duplex supervisor
 
-`tools/transport/haltransport` is the current rate-aware runtime supervisor. At 48 kHz it now launches the validated full-duplex engine; at 44.1 kHz it still launches the playback-only engine pending native 44.1 capture integration. It reads the HAL-selected sample rate, starts the matching native engine and restarts it when the rate changes.
+`tools/transport/haltransport` is the current rate-aware full-duplex runtime supervisor. Both native engines are now validated: 44.1 kHz and 48 kHz each provide ten-channel playback and four-channel capture. The supervisor reads the HAL-selected sample rate, starts the matching native engine and restarts it when the rate changes. Repeated 44.1 <-> 48 kHz switching has been hardware-tested with playback and capture remaining functional after each transition.
 
 Rate changes can cause FireWire generation/node transitions. A persistent runtime must explicitly reacquire a stable operational unit rather than assume old generation/node state remains valid.
 
@@ -141,7 +143,7 @@ The final validated rule is stricter:
 
 - every group contains 32 receive DCL slots;
 - the terminal receive DCL publishes the group's metadata update list;
-- userspace treats a changed terminal-slot `(timestamp, isoHeader)` signature as the proof that the group completed;
+- userspace treats a changed terminal-slot completion token as proof that the group completed: `(timestamp, isoHeader)` at 48 kHz and timestamp-only at 44.1 kHz;
 - userspace snapshots only those 32 slots;
 - DBC continuity is validated/ordered only inside that completed group.
 
@@ -211,17 +213,46 @@ After this change, simultaneous playback, live monitoring and recording were rep
 
 Live-monitor latency remains intentionally high because the current capture prefill is 4,096 frames (~85 ms). Latency reduction is deferred until transport correctness across both rates is complete.
 
+## Validated 44.1 kHz full duplex
+
+The four-channel completed-chunk capture model is now integrated into `halbridge44100` alongside the already-proven ten-channel playback engine.
+
+The first full-duplex 44.1 kHz receive implementation reused the 48 kHz terminal-slot `(timestamp, isoHeader)` completion signature. It produced capture too quickly, the shared capture queue grew continuously and eventually dropped frames, and recording/monitoring were audibly broken. At 44.1 kHz the alternating blocking/NODATA AMDTP pattern makes the ISO header unsuitable as part of the completed-chunk generation token.
+
+The validated rate-specific completion rule is:
+
+```text
+48 kHz: terminal-slot timestamp + isoHeader
+44.1 kHz: terminal-slot timestamp only
+```
+
+With timestamp-only completion at 44.1 kHz, the receive path returned to correct native cadence. Representative hardware runs showed capture deltas around 88,200 frames per two-second report, a stable ~4,000-frame queue, and zero `in-drops`, malformed packets, invalid labels, DBC gaps, reorders and stale groups. Recording and live monitoring were reported clear.
+
+The existing 44.1 startup sequence remains mandatory: select 44.1 by AV/C, establish duplex ISO, start native traffic, then reassert 44.1 on OUTPUT and INPUT plug 0 while streaming is live.
+
+## Both native rates validated under haltransport
+
+The production supervisor has now been exercised while alternating the CoreAudio format between 44.1 and 48 kHz. Both playback and capture survive the transitions and resume at the correct native cadence. This validates the current stop/restart, rate-control, re-enumeration/reacquisition and 44.1 post-start reassert path as an end-to-end runtime sequence.
+
+Current functional matrix:
+
+| Capability | 44.1 kHz | 48 kHz |
+|---|---|---|
+| 10-channel playback | validated | validated |
+| 4-channel capture | validated | validated |
+| simultaneous full duplex | validated | validated |
+| `haltransport` launch | validated | validated |
+| runtime rate switching | validated | validated |
+
 ## Immediate sequence
 
-1. Add native 44.1 capture/full duplex while preserving the post-start 44.1 AV/C reassertion behavior.
-2. Verify sustained simultaneous 10-channel playback and four-channel recording at 44.1 kHz.
-3. Extract common 44.1/48 device/CMP/ISO lifecycle into a reusable transport core.
-4. Add automatic startup/bootloader handling and robust bus-reset, generation-change, disconnect/reconnect and rate-change recovery.
-5. Add a runtime HAL build identifier to eliminate stale-load ambiguity during development.
-6. Tune capture prefill / monitoring latency after transport correctness is stable at both native rates.
-7. Return to mixer/routing/headphone, S/PDIF and MIDI integration.
-8. Finish packaging/release automation when the runtime is reproducibly installable.
+1. Extract common 44.1/48 device, CMP, ISO and full-duplex lifecycle into a reusable transport core without changing the now-validated packet paths.
+2. Add automatic startup/bootloader handling and robust bus-reset, generation-change, disconnect/reconnect and rate-change recovery.
+3. Add a runtime HAL build identifier to eliminate stale-load ambiguity during development.
+4. Tune capture prefill / monitoring latency now that transport correctness is stable at both native rates.
+5. Return to mixer/routing/headphone, S/PDIF and MIDI integration.
+6. Finish packaging/release automation when the runtime is reproducibly installable.
 
 ## Quick handoff
 
-> Native 48 kHz full duplex is now validated through the normal `haltransport` path: 10-channel playback and four-channel capture run simultaneously, with clean completed-chunk RX after prioritizing capture service ahead of playback mapping/TX work. Native 44.1 playback is already proven; the next task is to add the same capture/full-duplex model at 44.1 while preserving the FW410 post-start AV/C rate reassertion.
+> Native 44.1 and 48 kHz full duplex are now both hardware-validated through the normal `haltransport` path: ten-channel playback and four-channel capture run simultaneously at either native rate, and repeated 44.1 <-> 48 kHz switching works. The 44.1 receive path requires a timestamp-only terminal-slot completion token, while 48 kHz uses `(timestamp, isoHeader)`. The next task is to extract the duplicated rate-specific device/CMP/ISO/full-duplex lifecycle into a reusable transport core without disturbing these validated packet paths.
