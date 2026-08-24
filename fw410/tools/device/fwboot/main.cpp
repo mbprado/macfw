@@ -9,6 +9,15 @@
 #include <iostream>
 #include <string>
 
+namespace {
+constexpr int kExitSuccess = 0;
+constexpr int kExitGeneralFailure = 1;
+constexpr int kExitUsage = 2;
+constexpr int kExitNoBootloader = 10;
+constexpr int kExitGuardRefused = 11;
+constexpr int kExitCandidateUnavailable = 12;
+}
+
 static UInt32 le32(const UInt8 *p) {
     return static_cast<UInt32>(p[0]) |
            (static_cast<UInt32>(p[1]) << 8) |
@@ -143,11 +152,11 @@ int main(int argc, char **argv) {
         if (arg == "--execute") execute = true;
         else if (arg == "--help" || arg == "-h") {
             printUsage(argv[0]);
-            return 0;
+            return kExitSuccess;
         } else {
             std::cerr << "Unknown argument: " << arg << '\n';
             printUsage(argv[0]);
-            return 2;
+            return kExitUsage;
         }
     }
 
@@ -156,7 +165,7 @@ int main(int argc, char **argv) {
     CFMutableDictionaryRef matching = IOServiceMatching("IOFireWireUnit");
     if (!matching) {
         std::cerr << "Unable to create IOFireWireUnit matching dictionary\n";
-        return 1;
+        return kExitGeneralFailure;
     }
 
     io_iterator_t iterator = IO_OBJECT_NULL;
@@ -165,10 +174,15 @@ int main(int argc, char **argv) {
     if (kr != KERN_SUCCESS) {
         std::cerr << "IOServiceGetMatchingServices failed: 0x"
                   << std::hex << kr << std::dec << '\n';
-        return 1;
+        return kExitGeneralFailure;
     }
 
     int matched = 0;
+    int refused = 0;
+    int unavailable = 0;
+    bool preflightPassed = false;
+    bool cueIssued = false;
+
     io_registry_entry_t service = IO_OBJECT_NULL;
     while ((service = IOIteratorNext(iterator)) != IO_OBJECT_NULL) {
         UInt64 specifier = 0, swVersion = 0;
@@ -192,6 +206,7 @@ int main(int argc, char **argv) {
                                                kIOCFPlugInInterfaceID,
                                                &plugin, &score);
         if (kr != KERN_SUCCESS || !plugin) {
+            ++unavailable;
             std::cerr << "IOFireWireLib interface unavailable: 0x"
                       << std::hex << kr << std::dec << '\n';
             IOObjectRelease(service);
@@ -204,6 +219,7 @@ int main(int argc, char **argv) {
             CFUUIDGetUUIDBytes(kIOFireWireDeviceInterfaceID),
             reinterpret_cast<LPVOID *>(&device));
         if (hr != 0 || !device) {
+            ++unavailable;
             std::cerr << "IOFireWireDeviceInterface unavailable: 0x"
                       << std::hex << static_cast<unsigned long>(hr)
                       << std::dec << '\n';
@@ -219,6 +235,7 @@ int main(int argc, char **argv) {
             ? (*device)->GetRemoteNodeID(device, generation, &nodeID)
             : genKr;
         if (genKr != kIOReturnSuccess || nodeKr != kIOReturnSuccess) {
+            ++unavailable;
             std::cerr << "Unable to obtain stable generation/node ID\n";
             (*device)->Release(device);
             IODestroyPlugInInterface(plugin);
@@ -232,6 +249,7 @@ int main(int argc, char **argv) {
 
         const IOReturn openKr = (*device)->Open(device);
         if (openKr != kIOReturnSuccess) {
+            ++unavailable;
             std::cerr << "Open failed: 0x" << std::hex << openKr
                       << std::dec << '\n';
             (*device)->Release(device);
@@ -242,6 +260,7 @@ int main(int argc, char **argv) {
 
         const bool ok = preflight(device, generation, nodeID);
         if (!ok) {
+            ++refused;
             std::cout << "status: REFUSED - preflight did not match the known FW410 loader\n";
             (*device)->Close(device);
             (*device)->Release(device);
@@ -250,6 +269,7 @@ int main(int argc, char **argv) {
             continue;
         }
 
+        preflightPassed = true;
         if (!execute) {
             std::cout << "status: PASS - no write performed\n"
                       << "to execute: ./fwboot --execute\n";
@@ -276,6 +296,7 @@ int main(int argc, char **argv) {
         const IOReturn writeKr = writeAbsolute(device, generation, nodeID,
                                                 0xffff, 0xc8021000,
                                                 cue, cueSize);
+        cueIssued = true;
 
         // A successful cue is expected to trigger a FireWire bus reset, so the
         // device/generation represented by this interface may become stale now.
@@ -285,19 +306,25 @@ int main(int argc, char **argv) {
             std::cout << "write result: success (" << cueSize << " bytes)\n";
         } else {
             std::cout << "write result: 0x" << std::hex << writeKr << std::dec
-                      << " (a bus-reset-related result may occur if the device reset immediately)\n";
+                      << " (the boot cue was issued; an immediate reset can invalidate the transaction result)\n";
         }
         std::cout << "next: wait for FireWire re-enumeration, then run ../fwprobe/fwprobe --rom\n";
 
         (*device)->Release(device);
         IODestroyPlugInInterface(plugin);
         IOObjectRelease(service);
+        break;
     }
 
     IOObjectRelease(iterator);
+
+    if (cueIssued) return kExitSuccess;
+    if (!execute && preflightPassed) return kExitSuccess;
     if (matched == 0) {
         std::cout << "No FW410 bootloader unit (specifier 0xa02d / SW 0x14001) found.\n";
-        return 1;
+        return kExitNoBootloader;
     }
-    return 0;
+    if (refused != 0) return kExitGuardRefused;
+    if (unavailable != 0) return kExitCandidateUnavailable;
+    return kExitGeneralFailure;
 }
