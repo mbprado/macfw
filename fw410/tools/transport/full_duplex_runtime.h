@@ -22,10 +22,12 @@ struct FullDuplexRuntimeConfig {
     double runLoopSliceSeconds = 0.001;
     bool printIsoStarted = false;
     bool printTransportGeometry = false;
+    UInt32 expectedGeneration = 0;
+    double generationCheckIntervalSeconds = 0.25;
 };
 
 template <typename Streamer, typename PlaybackService>
-void runFullDuplexServiceLoop(
+bool runFullDuplexServiceLoop(
     volatile std::sig_atomic_t& stopRequested,
     IOFireWireLibDeviceRef native,
     SharedPlaybackReader& input,
@@ -42,6 +44,7 @@ void runFullDuplexServiceLoop(
     std::uint64_t lastWrite = input.ring()->writeFrame.load(std::memory_order_acquire);
     std::uint64_t lastCaptureFrames = 0;
     CFAbsoluteTime lastStatus = CFAbsoluteTimeGetCurrent();
+    CFAbsoluteTime lastGenerationCheck = lastStatus;
     bool captureReady = false;
 
     if (config.printIsoStarted) std::cout << "duplex ISO started\n";
@@ -59,6 +62,27 @@ void runFullDuplexServiceLoop(
     while (!stopRequested) {
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, config.runLoopSliceSeconds, false);
 
+        const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+        if (config.expectedGeneration != 0 &&
+            now - lastGenerationCheck >= config.generationCheckIntervalSeconds) {
+            UInt32 currentGeneration = 0;
+            const IOReturn generationResult =
+                (*native)->GetBusGeneration(native, &currentGeneration);
+            if (generationResult != kIOReturnSuccess) {
+                std::cerr << "FireWire generation read failed during streaming: 0x"
+                          << std::hex << generationResult << std::dec
+                          << "; requesting transport restart\n";
+                return false;
+            }
+            if (currentGeneration != config.expectedGeneration) {
+                std::cerr << "FireWire generation changed "
+                          << config.expectedGeneration << " -> " << currentGeneration
+                          << "; requesting transport restart\n";
+                return false;
+            }
+            lastGenerationCheck = now;
+        }
+
         capturePump.service(rx, *captureShared.ring());
         playbackService(audio, mapped);
 
@@ -73,7 +97,6 @@ void runFullDuplexServiceLoop(
             std::cout << "capture prefill ready: CoreAudio consumer detected; live capture enabled\n";
         }
 
-        const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
         if (now - lastStatus < 2.0) continue;
 
         const auto w = input.ring()->writeFrame.load(std::memory_order_acquire);
@@ -105,6 +128,7 @@ void runFullDuplexServiceLoop(
         lastCaptureFrames = captureFrames;
         lastStatus = now;
     }
+    return true;
 }
 
 } // namespace macfw::transport::duplex
