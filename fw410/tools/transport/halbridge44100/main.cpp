@@ -189,7 +189,7 @@ bool run() {
         return false;
     }
     // IEC 61883-6 AM824 SFC/FDF: 0x01 = 44.1 kHz.
-    macfw::transport::CaptureReceivePump capturePump(0x01);
+    macfw::transport::CaptureReceivePump capturePump(0x01, true);
 
     auto device = macfw::FireWireDevice::findByProductName("FW 410");
     if (!device) { std::cerr << "No operational FW 410 unit found.\n"; return false; }
