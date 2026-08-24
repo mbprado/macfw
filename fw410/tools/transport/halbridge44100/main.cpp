@@ -7,6 +7,7 @@
 #include "../capture_shared.h"
 #include "../full_duplex_shared.h"
 #include "../full_duplex_lifecycle.h"
+#include "../full_duplex_runtime.h"
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/firewire/IOFireWireLib.h>
@@ -19,7 +20,6 @@
 #include <cstring>
 #include <iomanip>
 #include <iostream>
-#include <vector>
 
 namespace {
 using namespace macfw::transport::duplex;
@@ -160,66 +160,18 @@ bool run() {
     if (!fcp.reassert44100()) goto cleanup;
 
     {
-        std::vector<float> audio(4096*macfw::hal::kChannels,0.0f);
-        std::vector<std::int32_t> mapped(4096*kPcmChannels,0);
-        std::uint64_t lastWrite=input.ring()->writeFrame.load(std::memory_order_acquire);
-        std::uint64_t lastCaptureFrames=0;
-        CFAbsoluteTime lastStatus=CFAbsoluteTimeGetCurrent();
-        bool captureReady=false;
+        FullDuplexRuntimeConfig runtimeConfig;
+        runtimeConfig.rateLabel = "44.1";
+        runtimeConfig.prefillMilliseconds = 93;
+        runtimeConfig.runLoopSliceSeconds = 0.001;
 
-        std::cout << "CoreAudio outputs: Analog 1-8, S/PDIF L/R (10 channels)\n"
-                  << "CoreAudio inputs: Analog In 1-2, S/PDIF In L/R (4 channels)\n"
-                  << "capture prefill: " << kCapturePrefillFrames << " frames (~93 ms)\n"
-                  << "capture receive: terminal-slot completed 32-cycle chunks\n"
-                  << "HAL bridge active: full-duplex 44.1 kHz playback + capture; Ctrl-C to stop\n";
+        runFullDuplexServiceLoop(
+            gStopRequested, native, input, pcm, rx, captureShared, capturePump,
+            streamer, runtimeConfig,
+            [&](std::vector<float>& audio, std::vector<std::int32_t>& mapped) {
+                pumpPlayback(*input.ring(), pcm, audio, mapped);
+            });
 
-        while (!gStopRequested) {
-            CFRunLoopRunInMode(kCFRunLoopDefaultMode,0.001,false);
-
-            capturePump.service(rx,*captureShared.ring());
-
-            pumpPlayback(*input.ring(),pcm,audio,mapped);
-            UInt32 nowCt=0;
-            if ((*native)->GetCycleTime(native,&nowCt)==kIOReturnSuccess)
-                streamer.service(cycleCount(nowCt));
-
-            capturePump.service(rx,*captureShared.ring());
-
-            if (!captureReady && captureShared.activateForConsumer(kCapturePrefillFrames)) {
-                captureReady=true;
-                std::cout << "capture prefill ready: CoreAudio consumer detected; live capture enabled\n";
-            }
-
-            const CFAbsoluteTime now=CFAbsoluteTimeGetCurrent();
-            if (now-lastStatus>=2.0) {
-                const auto w=input.ring()->writeFrame.load(std::memory_order_acquire);
-                const auto captureFrames=captureShared.ring()->decodedFrames.load(std::memory_order_acquire);
-                const auto& txStats=streamer.stats();
-                const auto& rxStats=capturePump.stats();
-                std::cout << "HAL out=" << w << " (delta " << (w-lastWrite) << ")"
-                          << " shared=" << macfw::hal::availableFrames(*input.ring())
-                          << " pcm=" << pcm.availableFrames()
-                          << " out-drops=" << input.ring()->droppedFrames.load()
-                          << " tx-late=" << txStats.lateCyclePolls
-                          << " tx-silence=" << txStats.framesSilenced
-                          << " | capture=" << captureFrames << " (delta " << (captureFrames-lastCaptureFrames) << ")"
-                          << " active=" << captureShared.ring()->active.load(std::memory_order_acquire)
-                          << " queued=" << macfw::hal::capture::availableFrames(*captureShared.ring())
-                          << " in-drops=" << captureShared.ring()->droppedFrames.load(std::memory_order_acquire)
-                          << " malformed=" << captureShared.ring()->malformedPackets.load(std::memory_order_acquire)
-                          << " invalid=" << captureShared.ring()->invalidLabels.load(std::memory_order_acquire)
-                          << " chunks=" << rxStats.completedChunks
-                          << " dbc-gap=" << rxStats.dbcDiscontinuities
-                          << " ts-back=" << rxStats.timestampRegressions
-                          << " reorder=" << rxStats.reorderedPackets
-                          << " stale=" << rxStats.stalePackets
-                          << " hal-read=" << captureShared.ring()->halReadCalls.load(std::memory_order_acquire)
-                          << '\n';
-                lastWrite=w;
-                lastCaptureFrames=captureFrames;
-                lastStatus=now;
-            }
-        }
         std::cout << "stop requested; restoring ISO/CMP resources\n";
     }
     ok=true;
