@@ -1,13 +1,12 @@
 #include "macfw/amdtp_pcm_stream.h"
 #include "macfw/amdtp_receive_ring.h"
 #include "macfw/amdtp_transmit_ring.h"
-#include "macfw/cmp.h"
 #include "macfw/firewire_device.h"
-#include "macfw/isoch_allocation.h"
 #include "macfw/pcm_ring_buffer.h"
 #include "macfw_hal_shm.h"
 #include "../capture_shared.h"
 #include "../full_duplex_shared.h"
+#include "../full_duplex_lifecycle.h"
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/firewire/IOFireWireLib.h>
@@ -18,12 +17,8 @@
 #include <csignal>
 #include <cstdint>
 #include <cstring>
-#include <fcntl.h>
 #include <iomanip>
 #include <iostream>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <vector>
 
 namespace {
@@ -125,17 +120,11 @@ bool run() {
         std::cerr << "capture shared ring setup failed\n";
         return false;
     }
-    // IEC 61883-6 AM824 SFC/FDF: 0x01 = 44.1 kHz.
     macfw::transport::CaptureReceivePump capturePump(0x01, true);
 
     auto device = macfw::FireWireDevice::findByProductName("FW 410");
     if (!device) { std::cerr << "No operational FW 410 unit found.\n"; return false; }
     if (device.open()!=kIOReturnSuccess) return false;
-    std::uint32_t opcr0=0,ipcr0=0;
-    if (macfw::cmp::readOpcr0(device,opcr0)!=kIOReturnSuccess || macfw::cmp::readIpcr0(device,ipcr0)!=kIOReturnSuccess) return false;
-    if (!macfw::cmp::ready(macfw::cmp::decodePcr(opcr0)) || !macfw::cmp::ready(macfw::cmp::decodePcr(ipcr0))) {
-        std::cerr << "PCR0 offline or already connected\n"; return false;
-    }
 
     auto native=device.nativeHandle(); UInt32 ct=0;
     if ((*native)->GetCycleTime(native,&ct)!=kIOReturnSuccess) return false;
@@ -144,27 +133,20 @@ bool run() {
     macfw::PcmRingBuffer pcm(kPcmCapacityFrames,kPcmChannels);
     auto rx=macfw::AmdtpReceiveRing::create(device,kCaptureSlots,kCaptureMaxPacket);
     auto tx=macfw::AmdtpTransmitRing::createSilence44100(device,firstCycle,kPlaybackSlots);
-    auto capture=macfw::IsochAllocation::create(device,macfw::IsochAllocation::Direction::DeviceToHost,kCaptureMaxPacket);
-    auto playback=macfw::IsochAllocation::create(device,macfw::IsochAllocation::Direction::HostToDevice,kPlaybackMaxPacket);
-    if (!pcm.valid() || !rx || !tx || !capture || !playback) return false;
+    if (!pcm.valid() || !rx || !tx) return false;
+
     macfw::AmdtpPcmStream44100 streamer(tx,pcm,initialCycle,firstCycle,kHalfPackets);
     if (!streamer.valid() || !streamer.prime()) return false;
 
-    (*capture.nativeChannel())->AddListener(capture.nativeChannel(),reinterpret_cast<IOFireWireLibIsochPortRef>(rx.nativeLocalPort()));
-    if (playback.bindHostToDeviceTalkerFirst(tx.nativeLocalPort())!=kIOReturnSuccess) return false;
+    FireWireDuplexLifecycle lifecycle;
+    if (!lifecycle.prepare(device, rx, tx.nativeLocalPort(),
+                           kCaptureMaxPacket, kPlaybackMaxPacket))
+        return false;
 
     FcpRateReassertion fcp;
-    bool cb=false,iso=false,notif=false,capStart=false,playStart=false,opConn=false,ipConn=false;
-    bool captureReady=false,ok=false;
-    if ((*native)->AddCallbackDispatcherToRunLoop(native,CFRunLoopGetCurrent())==kIOReturnSuccess) cb=true;
-    if (!cb || !fcp.arm(device)) goto cleanup;
-    if ((*native)->AddIsochCallbackDispatcherToRunLoop(native,CFRunLoopGetCurrent())==kIOReturnSuccess) iso=true;
-    if ((*native)->TurnOnNotification(native)) notif=true;
-    if (capture.allocate()!=kIOReturnSuccess || playback.allocate()!=kIOReturnSuccess) goto cleanup;
-    if (macfw::cmp::connectOpcr0(device,opcr0,capture.channel(),capture.speed())!=kIOReturnSuccess) goto cleanup; opConn=true;
-    if (macfw::cmp::connectIpcr0(device,ipcr0,playback.channel())!=kIOReturnSuccess) goto cleanup; ipConn=true;
-    if ((*playback.nativeChannel())->Start(playback.nativeChannel())!=kIOReturnSuccess) goto cleanup; playStart=true;
-    if ((*capture.nativeChannel())->Start(capture.nativeChannel())!=kIOReturnSuccess) goto cleanup; capStart=true;
+    bool ok=false;
+    if (!lifecycle.addCallbackDispatcher() || !fcp.arm(device)) goto cleanup;
+    if (!lifecycle.startIsoch()) goto cleanup;
 
     {
         UInt32 nowCt=0; if ((*native)->GetCycleTime(native,&nowCt)!=kIOReturnSuccess) goto cleanup;
@@ -183,26 +165,24 @@ bool run() {
         std::uint64_t lastWrite=input.ring()->writeFrame.load(std::memory_order_acquire);
         std::uint64_t lastCaptureFrames=0;
         CFAbsoluteTime lastStatus=CFAbsoluteTimeGetCurrent();
+        bool captureReady=false;
+
         std::cout << "CoreAudio outputs: Analog 1-8, S/PDIF L/R (10 channels)\n"
                   << "CoreAudio inputs: Analog In 1-2, S/PDIF In L/R (4 channels)\n"
                   << "capture prefill: " << kCapturePrefillFrames << " frames (~93 ms)\n"
                   << "capture receive: terminal-slot completed 32-cycle chunks\n"
                   << "HAL bridge active: full-duplex 44.1 kHz playback + capture; Ctrl-C to stop\n";
+
         while (!gStopRequested) {
             CFRunLoopRunInMode(kCFRunLoopDefaultMode,0.001,false);
 
-            // RX first: copy completed receive groups before doing playback
-            // conversion/refill work, matching the proven 48 kHz full-duplex
-            // servicing order.
             capturePump.service(rx,*captureShared.ring());
 
-            // Preserve the known-good 44.1 playback path and scheduler.
             pumpPlayback(*input.ring(),pcm,audio,mapped);
             UInt32 nowCt=0;
             if ((*native)->GetCycleTime(native,&nowCt)==kIOReturnSuccess)
                 streamer.service(cycleCount(nowCt));
 
-            // A second idempotent RX pass minimizes the DMA reuse window.
             capturePump.service(rx,*captureShared.ring());
 
             if (!captureReady && captureShared.activateForConsumer(kCapturePrefillFrames)) {
@@ -243,15 +223,14 @@ bool run() {
         std::cout << "stop requested; restoring ISO/CMP resources\n";
     }
     ok=true;
+
 cleanup:
-    if (playStart) (*playback.nativeChannel())->Stop(playback.nativeChannel());
-    if (capStart) (*capture.nativeChannel())->Stop(capture.nativeChannel());
-    if (ipConn) macfw::cmp::restore(device,macfw::cmp::kIpcr0AddressLo,ipcr0);
-    if (opConn) macfw::cmp::restore(device,macfw::cmp::kOpcr0AddressLo,opcr0);
-    playback.release(); capture.release(); fcp.reset();
-    if (notif) (*native)->TurnOffNotification(native);
-    if (iso) (*native)->RemoveIsochCallbackDispatcherFromRunLoop(native);
-    if (cb) (*native)->RemoveCallbackDispatcherFromRunLoop(native);
+    // Keep the proven 44.1 cleanup order: stop ISO/restore CMP/release
+    // allocations, then remove the FCP response space, then dispatchers.
+    lifecycle.stopIsochAndRestoreCmp();
+    fcp.reset();
+    lifecycle.removeDispatchers();
+    lifecycle.stop();
     return ok;
 }
 } // namespace
