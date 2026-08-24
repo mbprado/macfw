@@ -114,7 +114,10 @@ public:
         std::uint64_t completedChunks = 0;
     };
 
-    explicit CaptureReceivePump(std::uint8_t expectedFdf) : expectedFdf_(expectedFdf) {}
+    explicit CaptureReceivePump(std::uint8_t expectedFdf,
+                                bool timestampOnlyChunkToken = false)
+        : expectedFdf_(expectedFdf),
+          timestampOnlyChunkToken_(timestampOnlyChunkToken) {}
 
     std::size_t service(const macfw::AmdtpReceiveRing& rx,
                         macfw::hal::capture::SharedCaptureRing& out) {
@@ -136,10 +139,17 @@ public:
             // completion token. This avoids mixing slots from different DMA
             // generations while preserving the proven receive program.
             const auto& terminal = rx.slot(terminalIndex);
-            const std::uint64_t terminalSignature =
-                (static_cast<std::uint64_t>(terminal.timestamp) << 32) |
-                static_cast<std::uint64_t>(terminal.isoHeader);
-            if (!terminal.touched() || terminalSignature == 0 ||
+            // At native 44.1 kHz the terminal slot can alternate between
+            // 8-event and NODATA packets. isoHeader and timestamp are separate
+            // DMA-updated words, so combining both can transiently create two
+            // distinct signatures for one completion if userspace observes the
+            // fields between updates. For that mode, the DCL completion
+            // timestamp alone is the stable generation token.
+            const std::uint64_t terminalSignature = timestampOnlyChunkToken_
+                ? static_cast<std::uint64_t>(terminal.timestamp)
+                : ((static_cast<std::uint64_t>(terminal.timestamp) << 32) |
+                   static_cast<std::uint64_t>(terminal.isoHeader));
+            if (!terminal.touched() || terminal.timestamp == 0 ||
                 terminalSignature == lastChunkSignature_[chunk])
                 continue;
 
@@ -319,6 +329,7 @@ private:
     }
 
     std::uint8_t expectedFdf_ = 0;
+    bool timestampOnlyChunkToken_ = false;
     std::array<std::uint64_t, 8> lastChunkSignature_{};
     Stats stats_{};
     bool haveExpectedDbc_ = false;
