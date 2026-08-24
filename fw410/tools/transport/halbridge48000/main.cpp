@@ -63,8 +63,9 @@ bool run() {
     runtimeConfig.runLoopSliceSeconds = 0.00025;
     runtimeConfig.printIsoStarted = true;
     runtimeConfig.printTransportGeometry = true;
+    runtimeConfig.expectedGeneration = setup.device.generation();
 
-    runFullDuplexServiceLoop(
+    const bool runtimeOk = runFullDuplexServiceLoop(
         gStopRequested, setup.native, setup.input, pcm, rx, setup.captureShared, capturePump,
         streamer, runtimeConfig,
         [&](std::vector<float>& audio, std::vector<std::int32_t>& mapped) {
@@ -73,7 +74,7 @@ bool run() {
 
     std::cout << "stop requested; restoring ISO/CMP resources\n";
     lifecycle.stop();
-    return true;
+    return runtimeOk;
 }
 } // namespace
 
