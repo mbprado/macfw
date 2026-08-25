@@ -253,6 +253,7 @@ Validated service lifecycle:
 - changing 44.1 <-> 48 kHz works under launchd ownership;
 - physical disconnect/reconnect keeps the CoreAudio endpoint alive, produces silence while offline, and resumes audio after recovery;
 - reboot with the FW410 connected automatically restores transport/audio without manually launching `haltransport`;
+- reboot with the FW410 physically absent also works: launchd starts the supervisor/runtime without hardware present, and connecting the interface only after macOS is fully booted is handled automatically until transport reaches normal operation;
 - forcibly killing the launchd-owned supervisor causes launchd to restart it automatically.
 
 Observed forced-restart evidence:
@@ -267,7 +268,7 @@ runs = 4, pid = 703
 
 In each case launchd returned the service to `state = running` with a new supervisor PID. This validates process supervision independently from the supervisor's own FireWire recovery state machine.
 
-The remaining major launchd lifecycle test before packaging is booting with the FW410 physically absent and connecting it later.
+With delayed post-boot hardware attachment now validated, the launchd service-runtime lifecycle is considered complete for the first alpha packaging pass.
 
 ## Validated recovery matrix
 
@@ -293,6 +294,7 @@ The remaining major launchd lifecycle test before packaging is booting with the 
 | `haltransport` restart without reboot | validated | validated |
 | launchd automatic supervisor restart | validated | validated |
 | reboot with interface connected | validated | validated service architecture |
+| reboot without interface + delayed attach | validated | validated service architecture |
 | launchd rate switching | validated | validated |
 | launchd physical reconnect recovery | validated | validated |
 | 44.1 post-start AV/C reassert after reconnect | validated | n/a |
