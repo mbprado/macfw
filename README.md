@@ -1,230 +1,180 @@
 # macfw
 
-Modern FireWire support for macOS.
+Modern FireWire audio support for macOS.
 
-`macfw` is an open-source research and development project focused on bringing legacy IEEE 1394 / FireWire audio interfaces back to life on modern macOS systems.
+`macfw` is an open-source reverse-engineering and compatibility project focused on bringing legacy IEEE 1394 / FireWire audio interfaces back to life on modern macOS systems.
 
-The project starts with the **M-Audio FireWire 410**, but the repository is designed from the beginning to support additional FireWire audio interfaces and device families.
+The first supported target is the **M-Audio FireWire 410**. The repository is structured so reusable FireWire/audio components can eventually support additional devices and families.
 
-## Goals
+## Current status
 
-- Develop a **user-space macOS FireWire audio driver / development kit**.
+The FW410 implementation has reached its **first installable alpha candidate** on Intel macOS.
+
+Hardware-validated functionality includes:
+
+- normal CoreAudio device integration;
+- native 44.1 kHz and 48 kHz full-duplex audio;
+- 10 playback channels: Analog Out 1-8 and S/PDIF L/R;
+- 4 capture channels: Analog In 1-2 and S/PDIF L/R;
+- simultaneous playback, recording and monitoring in Logic Pro;
+- runtime 44.1 <-> 48 kHz switching;
+- automatic FW410 bootloader handling;
+- physical disconnect/reconnect recovery;
+- persistent CoreAudio endpoint with capture silence while transport is offline;
+- automatic launchd-managed transport startup/restart;
+- reboot recovery and delayed hardware attachment after macOS has already booted;
+- native `.pkg` installation, validated to become operational immediately without reboot on the development system.
+
+The current target is **Intel Macs running macOS Sonoma or newer**. Apple Silicon is not currently supported.
+
+This is alpha software and the cross-machine compatibility matrix is still small. See [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md).
+
+## Install
+
+For binary releases, use the provided macOS `.pkg` with the M-Audio FireWire 410 connected and powered on.
+
+For a source checkout:
+
+```bash
+make
+sudo make install
+```
+
+Full instructions, status checks, troubleshooting and uninstall information are in [`INSTALL.md`](INSTALL.md).
+
+## Build a package
+
+From the repository root:
+
+```bash
+make package
+```
+
+The resulting package is written to:
+
+```text
+package/dist/
+```
+
+## Architecture
+
+The project does not port the original M-Audio kernel extension. The current architecture separates the persistent CoreAudio-facing endpoint from a recoverable user-space FireWire transport:
+
+```text
+CoreAudio application
+        |
+macfw AudioServerPlugIn
+        |
+versioned shared-memory audio/status ABI
+        |
+macfw transport supervisor
+        |
+AV/C / CMP / CIP / AMDTP / NuDCL / IOFireWireLib
+        |
+M-Audio FireWire 410
+```
+
+The logical CoreAudio device can remain registered while the physical transport is absent. During recovery, playback is discarded and capture supplies silence; when the FW410 returns `ONLINE`, existing CoreAudio clients continue using the same endpoint.
+
+## Project goals
+
 - Support legacy FireWire audio interfaces on modern macOS.
-- Initially target **Intel Macs** and **macOS Sonoma and newer**.
-- Reverse engineer existing vendor drivers and hardware protocols where necessary.
-- Separate common FireWire functionality from device-specific implementations.
-- Prefer user-space and modern macOS APIs, minimizing or avoiding kernel extensions.
-- Build reusable protocol and transport components that can benefit multiple FireWire devices.
-
-The primary architectural goal is **not to port legacy kernel extensions**. The goal is to build a modern, reusable user-space FireWire audio stack / SDK for macOS.
-
-Apple Silicon is not currently a project target.
+- Prefer user-space and modern macOS integration over obsolete kernel extensions.
+- Separate reusable IEEE 1394/audio functionality from device-specific behavior.
+- Reverse engineer vendor protocols where necessary for hardware compatibility.
+- Preserve evidence and clearly distinguish confirmed, observed, inferred and unknown behavior.
+- Build reusable transport/audio components that can support additional interfaces in the future.
 
 ## Repository structure
-
-Each supported interface gets its own device directory:
 
 ```text
 macfw/
 ├── README.md
-│
-├── fw410/
-│   ├── README.md
-│   ├── original/
-│   ├── analysis/
-│   ├── hardware/
-│   ├── protocol/
-│   ├── reference/
-│   ├── captures/
-│   ├── experiments/
-│   ├── driver/
-│   ├── tools/
-│   └── tests/
-│
-└── <future-device>/
+├── INSTALL.md
+├── CHANGELOG.md
+├── KNOWN-LIMITATIONS.md
+├── RELEASE-NOTES.md
+├── RELEASES.md
+├── Makefile
+├── package/                 # root macOS package builder/output
+│   ├── build-pkg.sh
+│   └── scripts/
+└── fw410/
+    ├── README.md
+    ├── Makefile
+    ├── hal/                 # CoreAudio AudioServerPlugIn
+    ├── lib/                 # reusable FW410/FireWire implementation
+    ├── service/             # launchd runtime installation
+    ├── tools/               # control/device/transport tools
+    ├── analysis/            # validated engineering documentation
+    ├── hardware/
+    ├── protocol/
+    ├── reference/
+    ├── captures/
+    ├── experiments/
+    └── tests/
 ```
 
-As reusable components emerge, common functionality may be promoted into shared project-level modules.
-
-This organization intentionally keeps device-specific reverse engineering separate while leaving room for a common FireWire transport and audio SDK to emerge as the project develops.
-
-## Current target: M-Audio FireWire 410
-
-The first device under investigation is the **M-Audio FireWire 410 (FW410)**, a BeBoB-based FireWire audio interface.
-
-See [`fw410/README.md`](fw410/README.md) for the device-specific project and [`fw410/analysis/`](fw410/analysis/) for reverse-engineering work.
-
-## Development approach
-
-The project is deliberately divided into stages:
-
-```text
-Vendor driver / hardware
-          │
-          ▼
-   Reverse engineering
-          │
-          ▼
-   Protocol analysis
-          │
-          ├──────────────┐
-          ▼              ▼
-      Linux           FFADO
-      BeBoB          reference
-          │              │
-          └──────┬───────┘
-                 ▼
-        Protocol specification
-                 │
-                 ▼
-      User-space FireWire layer
-                 │
-                 ▼
-       User-space audio driver
-                 │
-                 ▼
-             CoreAudio
-```
-
-The objective is **hardware compatibility**, not a line-by-line port of obsolete vendor source code.
-
-## User-space driver / development kit
-
-The intended end state is a reusable user-space development kit for FireWire audio interfaces.
-
-Conceptually:
-
-```text
-                    macOS
-                      │
-                  CoreAudio
-                      │
-          ┌───────────▼───────────┐
-          │ User-space Audio API  │
-          └───────────┬───────────┘
-                      │
-          ┌───────────▼───────────┐
-          │    macfw audio SDK    │
-          ├───────────────────────┤
-          │ Device abstraction    │
-          │ Stream management     │
-          │ Clock/sample rates    │
-          │ Mixer/controls        │
-          │ MIDI                  │
-          └───────────┬───────────┘
-                      │
-          ┌───────────▼───────────┐
-          │ macfw FireWire layer  │
-          ├───────────────────────┤
-          │ IEEE 1394 transport   │
-          │ Async transactions    │
-          │ Isochronous streaming │
-          │ CIP                   │
-          │ AVC                   │
-          │ Bus reset/recovery    │
-          └───────────┬───────────┘
-                      │
-                   FireWire
-                      │
-          ┌───────────▼───────────┐
-          │ Legacy audio device   │
-          └───────────────────────┘
-```
-
-The exact CoreAudio integration mechanism is still under investigation. The architecture should be chosen based on what can be implemented reliably on Sonoma and newer macOS versions while keeping the FireWire and device logic reusable.
-
-## Common vs. device-specific functionality
-
-A major architectural goal is to identify which functionality can eventually be shared between devices:
-
-- IEEE 1394 transport
-- asynchronous transactions
-- isochronous streaming
-- CIP handling
-- AVC commands
-- bus-reset handling
-- common BeBoB functionality
-- audio stream management
-- clock and sample-rate management
-- CoreAudio integration
-
-Device-specific code will remain under the corresponding device directory, for example:
-
-```text
-fw410/protocol/
-```
-
-until there is enough evidence that a component belongs in a shared layer.
-
-## Current status
-
-**Research / reverse engineering**
-
-No functional modern macOS driver is available yet.
-
-The immediate priority is to understand the FW410's original driver, firmware behavior, FireWire transport, and device protocol. We will then implement the smallest viable user-space FireWire/audio prototype before expanding it into a reusable development kit.
+As reusable components mature, common functionality can be promoted into shared project-level modules.
 
 ## Development principles
 
 ### User space first
 
-The project should avoid kernel extensions whenever technically possible. Kernel-level components are not the primary architecture or goal.
+Avoid kernel extensions whenever technically possible. Kernel-level components are not the primary architecture or goal.
 
 ### Preserve evidence
 
-Original vendor binaries and other research material should be kept immutable and clearly separated from new implementation code.
+Original vendor binaries and other research material should remain immutable and clearly separated from new implementation code.
 
 ### Document discoveries
 
-Important reverse-engineering results should be recorded in the repository as they are established.
+Important reverse-engineering results are recorded as they are established and hardware-tested.
 
 ### Separate facts from assumptions
 
-Protocol documentation should distinguish between:
+Protocol documentation distinguishes between:
 
 - **Confirmed** — verified by code analysis or hardware testing.
-- **Observed** — seen in captures or runtime behavior but not fully explained.
+- **Observed** — seen in captures/runtime behavior but not fully explained.
 - **Inferred** — strongly indicated by multiple sources.
 - **Unknown** — still requiring investigation.
 
-### Prefer protocols over implementations
+### Prefer protocols over legacy implementation details
 
-The goal is to understand what the hardware requires, not to reproduce the architecture of an obsolete vendor kext.
+The objective is hardware compatibility, not reproducing the architecture of an obsolete vendor driver.
 
-### Reusable components
+## Current roadmap
 
-Device-specific implementations should expose reusable abstractions where practical so that additional FireWire interfaces can be added without duplicating the transport and audio infrastructure.
+Completed for the first FW410 alpha candidate:
 
-## Project roadmap
+1. Device/firmware identification and boot recovery.
+2. User-space FireWire async/FCP/AV/C access.
+3. CMP/IRM and NuDCL isochronous transport.
+4. CIP/AM824 playback and capture.
+5. Native 44.1/48 kHz full-duplex transport.
+6. CoreAudio integration.
+7. Persistent transport-status/offline model.
+8. Automatic disconnect/reconnect recovery.
+9. launchd service lifecycle.
+10. Source and `.pkg` installation paths.
 
-1. Repository and evidence collection
-2. Device and firmware identification
-3. Original driver analysis
-4. FireWire and BeBoB protocol reconstruction
-5. Comparison with Linux and FFADO
-6. Hardware traffic capture and validation
-7. User-space FireWire transport prototype
-8. Minimal user-space CoreAudio integration
-9. FW410 playback and capture
-10. Device-specific controls and MIDI
-11. Generalize reusable FireWire/audio SDK components
-12. Add additional FireWire interfaces
+Next areas include broader hardware/macOS validation, latency tuning, mixer/controls, MIDI, release automation, signing/notarization, and eventually additional FireWire devices.
 
-## Contributing
+## Release documentation
 
-Useful contributions include:
+- [`INSTALL.md`](INSTALL.md) — install, build, status, troubleshooting and uninstall.
+- [`CHANGELOG.md`](CHANGELOG.md) — user-visible changes.
+- [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) — unsupported/open behavior.
+- [`RELEASE-NOTES.md`](RELEASE-NOTES.md) — current alpha release notes.
+- [`RELEASES.md`](RELEASES.md) — versioning, tagging and release contract.
+- [`fw410/README.md`](fw410/README.md) — detailed FW410 engineering status.
 
-- Hardware testing
-- FireWire traffic captures
-- Firmware analysis
-- Protocol documentation
-- Reverse engineering
-- Linux / FFADO research
-- macOS user-space development
-- CoreAudio development
-- DriverKit / AudioDriverKit research where appropriate
-- Testing on different Intel Macs and macOS versions
-- Testing different hardware and firmware revisions
+## Contributing and testing
+
+Useful contributions include hardware testing, FireWire captures, protocol/firmware analysis, macOS/CoreAudio development, and testing across different Intel Macs, macOS versions, adapters and FW410 revisions.
+
+When reporting runtime problems, include the system/connection details and relevant transport logs described in [`INSTALL.md`](INSTALL.md).
 
 ## Disclaimer
 
