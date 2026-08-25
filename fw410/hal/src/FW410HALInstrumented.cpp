@@ -14,6 +14,18 @@ namespace {
 extern AudioServerPlugInDriverInterface gInstrumentedInterface;
 AudioServerPlugInDriverInterface* gInstrumentedInterfacePtr = &gInstrumentedInterface;
 
+bool TransportOnlineForAudio() {
+    // Real-time safe observation only: never shm_open/mmap from the I/O thread.
+    // If the status ABI was unavailable when the HAL initialized/started, keep
+    // the legacy fail-open behavior for this checkpoint rather than silently
+    // breaking an otherwise working audio path. A later lifecycle checkpoint
+    // will add non-RT remapping/retry so a missing publisher can be treated as
+    // explicitly offline.
+    if (!gTransportStatus || !macfw::hal::transport::valid(*gTransportStatus)) return true;
+    const auto raw = gTransportStatus->state.load(std::memory_order_acquire);
+    return raw == static_cast<std::uint32_t>(macfw::hal::transport::State::Online);
+}
+
 HRESULT STDMETHODCALLTYPE InstrumentedQueryInterface(void*, REFIID uuid, LPVOID* outInterface) {
     if (!outInterface) return E_POINTER;
     *outInterface = nullptr;
@@ -90,6 +102,27 @@ OSStatus STDMETHODCALLTYPE InstrumentedDoIOOperation(AudioServerPlugInDriverRef 
 
     const bool captureCall =
         stream == kInputStreamID && operationID == kAudioServerPlugInIOOperationReadInput;
+    const bool playbackCall =
+        stream == kOutputStreamID && operationID == kAudioServerPlugInIOOperationWriteMix;
+    const bool transportOnline = TransportOnlineForAudio();
+
+    // Keep the logical CoreAudio endpoint alive while physical transport is
+    // recovering. Do not enqueue playback that cannot reach hardware, and
+    // return deterministic silence for capture until the native engine signals
+    // READY and the supervisor publishes ONLINE again.
+    if (!transportOnline && playbackCall) return kAudioHardwareNoError;
+    if (!transportOnline && captureCall) {
+        if (!mainBuffer) return kAudioHardwareIllegalOperationError;
+        std::memset(mainBuffer, 0,
+                    static_cast<std::size_t>(frames) * kInputChannels * sizeof(Float32));
+        if (gCaptureRing && macfw::hal::capture::valid(*gCaptureRing)) {
+            gCaptureRing->halReadCalls.fetch_add(1, std::memory_order_relaxed);
+            gCaptureRing->halRequestedFrames.fetch_add(frames, std::memory_order_relaxed);
+            gCaptureRing->halZeroFilledFrames.fetch_add(frames, std::memory_order_relaxed);
+        }
+        return kAudioHardwareNoError;
+    }
+
     std::uint64_t captureReadBefore = 0;
     if (captureCall && gCaptureRing && macfw::hal::capture::valid(*gCaptureRing)) {
         gCaptureRing->halReadCalls.fetch_add(1, std::memory_order_relaxed);
