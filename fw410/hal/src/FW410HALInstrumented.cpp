@@ -5,6 +5,8 @@
 // what Monterey actually calls without logging or allocating on the audio
 // thread.
 
+#include <new>
+
 #define FW410HALFactory FW410HALFactory_Base
 #include "FW410HALBridge.cpp"
 #undef FW410HALFactory
@@ -14,13 +16,62 @@ namespace {
 extern AudioServerPlugInDriverInterface gInstrumentedInterface;
 AudioServerPlugInDriverInterface* gInstrumentedInterfacePtr = &gInstrumentedInterface;
 
+bool EnsureTransportStatusObject() {
+    if (gTransportStatus && macfw::hal::transport::valid(*gTransportStatus)) return true;
+
+    // A supervisor may already have created the persistent object between the
+    // base HAL initialization and this wrapper checkpoint. Reuse it if so.
+    if (MapTransportStatus()) return true;
+
+    // Startup-order independence: when coreaudiod/HAL starts before haltransport
+    // has ever run, establish the persistent v1 object identity here in a
+    // non-real-time lifecycle callback. haltransport remains the state publisher
+    // once it starts; the HAL only initializes the first placeholder as OFFLINE.
+    const int fd = shm_open(macfw::hal::transport::kShmName,
+                            O_CREAT | O_EXCL | O_RDWR, 0666);
+    if (fd < 0) {
+        if (errno == EEXIST) return MapTransportStatus();
+        return false;
+    }
+
+    if (ftruncate(fd, sizeof(macfw::hal::transport::SharedStatus)) != 0) {
+        close(fd);
+        shm_unlink(macfw::hal::transport::kShmName);
+        return false;
+    }
+
+    void* p = mmap(nullptr, sizeof(macfw::hal::transport::SharedStatus),
+                   PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (p == MAP_FAILED) {
+        close(fd);
+        shm_unlink(macfw::hal::transport::kShmName);
+        return false;
+    }
+
+    auto* status = static_cast<macfw::hal::transport::SharedStatus*>(p);
+    new (status) macfw::hal::transport::SharedStatus;
+    status->magic = macfw::hal::transport::kMagic;
+    status->version = macfw::hal::transport::kVersion;
+    status->structSize = sizeof(*status);
+    status->reserved0 = 0;
+    status->state.store(static_cast<std::uint32_t>(macfw::hal::transport::State::Offline),
+                        std::memory_order_release);
+    status->requestedRate.store(0, std::memory_order_release);
+    status->activeRate.store(0, std::memory_order_release);
+    status->enginePid.store(0, std::memory_order_release);
+    status->transitionSequence.store(0, std::memory_order_release);
+    status->heartbeatSequence.store(0, std::memory_order_release);
+
+    gTransportStatusShmFd = fd;
+    gTransportStatus = status;
+    return true;
+}
+
 bool TransportOnlineForAudio() {
     // Real-time safe observation only: never shm_open/mmap from the I/O thread.
-    // If the status ABI was unavailable when the HAL initialized/started, keep
-    // the legacy fail-open behavior for this checkpoint rather than silently
-    // breaking an otherwise working audio path. A later lifecycle checkpoint
-    // will add non-RT remapping/retry so a missing publisher can be treated as
-    // explicitly offline.
+    // The HAL now establishes the persistent status object during Initialize(),
+    // so a missing/invalid mapping here remains a conservative fail-open fallback
+    // for unexpected ABI/lifecycle failures rather than the normal startup path.
     if (!gTransportStatus || !macfw::hal::transport::valid(*gTransportStatus)) return true;
     const auto raw = gTransportStatus->state.load(std::memory_order_acquire);
     return raw == static_cast<std::uint32_t>(macfw::hal::transport::State::Online);
@@ -38,6 +89,17 @@ HRESULT STDMETHODCALLTYPE InstrumentedQueryInterface(void*, REFIID uuid, LPVOID*
     gRefCount.fetch_add(1, std::memory_order_relaxed);
     *outInterface = &gInstrumentedInterfacePtr;
     return S_OK;
+}
+
+OSStatus STDMETHODCALLTYPE InstrumentedInitialize(AudioServerPlugInDriverRef driver,
+                                                  AudioServerPlugInHostRef host) {
+    const OSStatus result = Initialize(driver, host);
+    if (result != kAudioHardwareNoError) return result;
+    // Do not fail CoreAudio enumeration if the placeholder cannot be created;
+    // the legacy fail-open behavior remains the fallback. Normal installations
+    // should leave Initialize() with a valid persistent OFFLINE mapping.
+    EnsureTransportStatusObject();
+    return result;
 }
 
 OSStatus STDMETHODCALLTYPE InstrumentedStartIO(AudioServerPlugInDriverRef driver,
@@ -164,7 +226,7 @@ AudioServerPlugInDriverInterface gInstrumentedInterface = {
     InstrumentedQueryInterface,
     AddRef,
     Release,
-    Initialize,
+    InstrumentedInitialize,
     CreateDevice,
     DestroyDevice,
     AddDeviceClient,
