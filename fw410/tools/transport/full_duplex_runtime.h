@@ -11,6 +11,7 @@
 #include <atomic>
 #include <csignal>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <vector>
 
@@ -46,6 +47,7 @@ bool runFullDuplexServiceLoop(
     CFAbsoluteTime lastStatus = CFAbsoluteTimeGetCurrent();
     CFAbsoluteTime lastGenerationCheck = lastStatus;
     bool captureReady = false;
+    const bool verboseDiagnostics = std::getenv("MACFW_VERBOSE") != nullptr;
 
     if (config.printIsoStarted) std::cout << "duplex ISO started\n";
     if (config.printTransportGeometry)
@@ -97,6 +99,7 @@ bool runFullDuplexServiceLoop(
             std::cout << "capture prefill ready: CoreAudio consumer detected; live capture enabled\n";
         }
 
+        if (!verboseDiagnostics) continue;
         if (now - lastStatus < 2.0) continue;
 
         const auto w = input.ring()->writeFrame.load(std::memory_order_acquire);
