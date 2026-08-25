@@ -48,7 +48,18 @@ int main(int argc, char** argv) {
 
     const int result = halbridge44100_inner_main();
 
-    std::printf("restoring FW410 rate: 48000 Hz\n");
+    // Experiment: a normal supervisor stop should not force a 44.1 -> 48 kHz
+    // transition immediately before the next 44.1 start. Leave the operational
+    // FW410 at 44.1 after a clean engine exit and observe whether repeated
+    // haltransport restarts become consistently clean. Preserve the historical
+    // best-effort 48 kHz restore on an actual engine/runtime failure so recovery
+    // behavior remains otherwise unchanged during this test.
+    if (result == 0) {
+        std::printf("clean 44.1 Hz stop: leaving FW410 at 44100 Hz (restore experiment)\n");
+        return 0;
+    }
+
+    std::printf("failed 44.1 Hz engine: restoring FW410 rate: 48000 Hz\n");
     const int restore = runRateProbe(rateProbe, "48000");
     if (restore != 0) std::fprintf(stderr, "warning: 48000 Hz restore failed\n");
 
