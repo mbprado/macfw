@@ -506,13 +506,13 @@ OSStatus STDMETHODCALLTYPE GetZeroTimeStamp(AudioServerPlugInDriverRef, AudioObj
     return kAudioHardwareNoError;
 }
 
-Boolean STDMETHODCALLTYPE WillDoIOOperation(AudioServerPlugInDriverRef, AudioObjectID d, UInt32,
-                                            UInt32 op, Boolean* willDo, Boolean* inPlace) {
-    if (d != kDeviceID || !willDo || !inPlace) return false;
+OSStatus STDMETHODCALLTYPE WillDoIOOperation(AudioServerPlugInDriverRef, AudioObjectID d, UInt32,
+                                             UInt32 op, Boolean* willDo, Boolean* inPlace) {
+    if (d != kDeviceID || !willDo || !inPlace) return kAudioHardwareIllegalOperationError;
     *willDo = (op == kAudioServerPlugInIOOperationWriteMix ||
                op == kAudioServerPlugInIOOperationReadInput);
     *inPlace = true;
-    return true;
+    return kAudioHardwareNoError;
 }
 OSStatus STDMETHODCALLTYPE BeginIOOperation(AudioServerPlugInDriverRef, AudioObjectID, UInt32,
                                             UInt32, UInt32, const AudioServerPlugInIOCycleInfo*) {
