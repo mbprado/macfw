@@ -1,0 +1,27 @@
+#!/bin/bash
+set -euo pipefail
+
+LABEL="com.mbprado.macfw.fw410.transport"
+PLIST="/Library/LaunchDaemons/${LABEL}.plist"
+LOG="/Library/Logs/macfw-fw410-transport.log"
+
+chown -R root:wheel "/Library/Application Support/macfw/fw410"
+chmod -R go-w "/Library/Application Support/macfw/fw410"
+chown -R root:wheel "/Library/Audio/Plug-Ins/HAL/macfw-fw410.driver"
+chmod -R go-w "/Library/Audio/Plug-Ins/HAL/macfw-fw410.driver"
+chown root:wheel "$PLIST"
+chmod 0644 "$PLIST"
+
+if [[ ! -e "$LOG" ]]; then
+    : > "$LOG"
+fi
+chown root:wheel "$LOG"
+chmod 0644 "$LOG"
+
+launchctl bootout "system/$LABEL" >/dev/null 2>&1 || true
+launchctl bootstrap system "$PLIST"
+launchctl enable "system/$LABEL"
+launchctl kickstart -k "system/$LABEL"
+killall coreaudiod >/dev/null 2>&1 || true
+rm -rf /tmp/macfw-fw410-package
+exit 0
