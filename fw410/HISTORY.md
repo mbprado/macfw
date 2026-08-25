@@ -2,6 +2,45 @@
 
 This file records visible project milestones rather than every diagnostic experiment. Detailed protocol and transport findings remain under `fw410/analysis/`.
 
+## 2026-08-25 — Transport status ABI and explicit engine readiness validated
+
+A versioned shared-memory transport-status ABI was added between the long-running `haltransport` supervisor and diagnostic consumers. This establishes the availability signal that the CoreAudio HAL will use to remain logically registered while the physical FireWire transport disconnects and recovers.
+
+The v1 status block reports:
+
+- `OFFLINE`, `RECOVERING`, or `ONLINE`;
+- requested native rate;
+- active native-engine rate;
+- native-engine PID;
+- transition sequence;
+- heartbeat sequence.
+
+The diagnostic `transportstatus` tool validated the state machine during both normal 44.1/48 kHz switching and physical disconnect/reconnect.
+
+A key refinement was an explicit native-engine READY handshake. `ONLINE` no longer means that a child process merely exists or survived a fixed grace period. The 48 kHz engine signals READY after successful duplex ISO startup; the 44.1 kHz engine signals READY only after duplex ISO startup and successful post-start AV/C 44.1 kHz reassertion.
+
+During a physical reconnect, multiple transient child PIDs appeared while the FireWire bus and FW410 personality were still changing. Each remained correctly classified as `RECOVERING` and disappeared when the attempt failed. Only the final stable child signaled READY and caused the supervisor to publish `ONLINE`.
+
+Representative end of the validated reconnect sequence:
+
+```text
+transport state: RECOVERING
+    requested rate: 48000 Hz
+    active rate:    48000 Hz
+    engine pid:     1101
+
+transport state: ONLINE
+    requested rate: 48000 Hz
+    active rate:    48000 Hz
+    engine pid:     1101
+```
+
+The status SHM also exposed two Darwin-specific lifecycle details during implementation. Its POSIX SHM name was shortened to `/macfw_fw410_status_v1`, and the single publisher now recreates the object on supervisor startup so stale objects from earlier ABI/build attempts cannot poison a new mapping.
+
+This milestone establishes **transport availability and real native-engine readiness as explicit, versioned state rather than inferred process state**.
+
+The next checkpoint is intentionally non-invasive: map/read the status ABI inside the AudioServerPlugIn and prove what `coreaudiod` observes during rate changes and reconnect recovery. Playback/capture behavior should remain unchanged until HAL-side observation is validated.
+
 ## 2026-08-17 — First native macOS audio device
 
 The macfw HAL AudioServerPlugIn was accepted by CoreAudio and appeared as **M-Audio FireWire 410** in both Audio MIDI Setup and the normal macOS audio output-device selector.
