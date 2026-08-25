@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-25
 
-This note records hardware validation of the `haltransport` recovery state machine, the versioned transport-status ABI, and the persistent CoreAudio endpoint behavior after the native 44.1/48 kHz full-duplex paths and common transport refactors were already stable.
+This note records hardware validation of the `haltransport` recovery state machine, the versioned transport-status ABI, the persistent CoreAudio endpoint behavior, and the launchd-managed transport runtime after the native 44.1/48 kHz full-duplex paths and common transport refactors were stable.
 
 ## Recovery architecture under test
 
@@ -62,15 +62,14 @@ stale = 0
 On physical disconnect:
 
 1. The running 44.1 engine detected the FireWire generation change.
-2. Its best-effort 48 kHz shutdown restore could not complete against the disconnected/stale generation; this did not block supervisor recovery.
-3. The supervisor backed off through absent and unstable operational-device states.
-4. The FW410 later appeared in bootloader mode and passed the guarded preflight.
-5. Exactly one boot cue was issued.
-6. Additional transient attempts were handled by guard refusal / candidate-unavailable outcomes rather than unsafe writes.
-7. The operational FW410 eventually reappeared at 48 kHz default device state.
-8. `halbridge44100` selected 44.1 kHz, started duplex ISO and performed the required post-start AV/C reassert.
-9. Both OUTPUT plug 0 and INPUT plug 0 accepted 44.1 kHz.
-10. Playback, recording and software monitoring resumed cleanly without manually switching through 48 kHz.
+2. The supervisor backed off through absent and unstable operational-device states.
+3. The FW410 later appeared in bootloader mode and passed the guarded preflight.
+4. Exactly one boot cue was issued.
+5. Additional transient attempts were handled by guard refusal / candidate-unavailable outcomes rather than unsafe writes.
+6. The operational FW410 eventually reappeared at its default device state.
+7. `halbridge44100` selected 44.1 kHz, started duplex ISO and performed the required post-start AV/C reassert.
+8. Both OUTPUT plug 0 and INPUT plug 0 accepted 44.1 kHz.
+9. Playback, recording and software monitoring resumed cleanly without manually switching through 48 kHz.
 
 Representative recovered steady-state capture again returned to:
 
@@ -87,15 +86,32 @@ stale = 0
 
 This proves that automatic reconnect recovery is not dependent on a manual 48 -> 44.1 rate transition. The supervisor can recover directly back into the requested native 44.1 kHz full-duplex state.
 
-## 48 -> 44.1 transition observation
+## 44.1 clean-stop rate policy — validated
 
-A separate test began with the interface physically connected and working at 48 kHz, then changed the CoreAudio rate to 44.1 kHz. The transition eventually succeeded and produced clean 44.1 playback/capture, but it passed through several unstable FireWire generations, failed rate-control/reassert attempts and bootloader cycles before settling.
+Earlier test code restored the FW410 to 48 kHz at the end of every clean 44.1 kHz engine run. Repeated hardware testing showed that this forced `44.1 -> 48 -> 44.1` lifecycle materially increased the frequency of broken or slow 44.1 startup states.
 
-This is consistent with the previously observed intermittent 44.1 first-start/state anomaly. It is not considered a steady-state transport regression because the final 44.1 state is clean and repeatable once established. Keep this transition log as evidence when the 44.1 startup anomaly is investigated later.
+The clean-stop policy was changed so a normal 44.1 kHz stop leaves the device at 44.1 kHz. Abnormal/error shutdown retains the historical best-effort 48 kHz recovery behavior.
 
-## 44.1 capture degradation observation
+Repeated stop/start testing then produced the intended sequence consistently:
 
-A later 44.1 kHz run showed a different but likely related intermittent state problem. Playback continued, but the recording became audibly broken while capture diagnostics drifted away from the validated steady state:
+```text
+ONLINE
+    -> clean stop
+    -> FW410 remains at 44100 Hz
+    -> supervisor restart
+    -> initial rate setup sees 44100/44100 already selected
+    -> no redundant initial AV/C rate CONTROL
+    -> duplex ISO starts
+    -> required post-start 44.1 AV/C reassert
+    -> READY
+    -> ONLINE
+```
+
+After this change, the previously intermittent broken-audio occurrence reduced significantly to practically zero in subsequent testing. This is now the standard 44.1 kHz lifecycle policy rather than an experiment.
+
+## Historical 44.1 capture degradation observation
+
+Before the clean-stop lifecycle was standardized, one 44.1 kHz run showed audibly broken recording while capture diagnostics drifted away from the validated steady state:
 
 ```text
 dbc-gap: 70 -> 144 -> 294 -> ... -> 1202
@@ -116,7 +132,7 @@ reorder = 0
 stale = 0
 ```
 
-This episode is recorded as another manifestation of the intermittent 44.1 initialization/state anomaly, not as a persistent-SHM or CoreAudio-offline regression. The fact that a transport-process restart alone clears it is useful evidence for later investigation.
+Keep this as historical evidence for the rate-lifecycle investigation. Subsequent testing after removing the unconditional clean-stop restore to 48 kHz reduced this failure mode to practically zero.
 
 ## Transport-status ABI — implemented and hardware-validated
 
@@ -135,17 +151,16 @@ The Darwin POSIX SHM object uses the deliberately short name `/macfw_fw410_statu
 
 ### Persistent object identity across supervisor restarts
 
-The status object is now intentionally persistent across `haltransport` process restarts. This is required because `coreaudiod` may keep its mapping for the lifetime of the loaded HAL plug-in. Unlinking and recreating the object would leave the HAL attached to an orphaned old object while a restarted supervisor wrote status into a new object with the same name.
+The status object is intentionally persistent across `haltransport` process restarts. This is required because `coreaudiod` may keep its mapping for the lifetime of the loaded HAL plug-in. Unlinking and recreating the object would leave the HAL attached to an orphaned old object while a restarted supervisor wrote status into a new object with the same name.
 
 Validated lifecycle:
 
 ```text
 haltransport ONLINE
-    -> Ctrl-C
+    -> stop/restart supervisor
     -> existing shared object published OFFLINE
     -> Logic/CoreAudio keeps running
-    -> restart same haltransport binary
-    -> same shared object reopened in place
+    -> restarted supervisor reopens same object
     -> RECOVERING
     -> native engine READY
     -> ONLINE
@@ -154,36 +169,35 @@ haltransport ONLINE
 
 On Darwin the backing object may report a page-sized `st_size` (for example 4096 bytes) even though the ABI structure is 48 bytes. Compatibility therefore requires the backing object to be **at least** `sizeof(SharedStatus)`; the mapped structure's `magic`, `version`, and `structSize` remain the actual ABI validation.
 
+### Startup-order independence — validated
+
+The HAL now establishes the persistent status object during non-real-time initialization if no supervisor has created it yet. The initial placeholder is `OFFLINE` with zero requested/active rate and zero engine PID. `haltransport` later reopens the same object and becomes the state publisher.
+
+Validated startup sequence:
+
+```text
+coreaudiod / HAL starts first
+    -> status object exists as OFFLINE
+    -> haltransport starts later
+    -> RECOVERING
+    -> native engine READY
+    -> ONLINE
+```
+
+This removes the previous startup-order dependency without putting `shm_open`, `mmap`, allocation, or retry work into a real-time audio callback.
+
 ### Explicit native-engine READY handshake
 
-`ONLINE` no longer means merely that a child process exists or survived an arbitrary grace period. Each native engine explicitly signals READY to its parent only after reaching its proven operational point:
+`ONLINE` does not mean merely that a child process exists. Each native engine explicitly signals READY to its parent only after reaching its proven operational point:
 
 - **48 kHz:** after successful duplex ISO startup;
 - **44.1 kHz:** after duplex ISO startup and successful post-start AV/C 44.1 kHz reassertion.
 
-Until READY arrives, a launched child remains `RECOVERING`. The older survival interval remains useful only for recovery-backoff stabilization; it is no longer the definition of transport readiness.
-
-Hardware validation showed the intended distinction clearly. During physical reconnect, several temporary child PIDs were launched while the FireWire bus/device was still transitioning. They appeared as `RECOVERING` and disappeared back to `active rate = 0 / pid = 0` when those attempts failed. Only the final stable child published READY and caused the supervisor to transition to `ONLINE`.
-
-Representative successful end of a reconnect sequence:
-
-```text
-transport state: RECOVERING
-    requested rate: 48000 Hz
-    active rate:    48000 Hz
-    engine pid:     1101
-
-transport state: ONLINE
-    requested rate: 48000 Hz
-    active rate:    48000 Hz
-    engine pid:     1101
-```
-
-A normal 44.1 -> 48 kHz rate switch also showed `RECOVERING -> ONLINE` with the same new child PID, confirming that readiness is tied to the engine handshake rather than a fixed delay.
+Until READY arrives, a launched child remains `RECOVERING`.
 
 ## Persistent CoreAudio endpoint and offline audio behavior — validated
 
-The HAL now consumes the transport-status ABI and keeps the logical FW410 device registered regardless of physical transport state.
+The HAL consumes the transport-status ABI and keeps the logical FW410 device registered regardless of physical transport state.
 
 Validated policy:
 
@@ -206,11 +220,54 @@ Hardware/application validation in Logic confirmed:
 - when the FW410 reconnects and recovery reaches `ONLINE`, playback resumes automatically;
 - the same recording continues with real input again after recovery;
 - no Logic restart or device reselection is required;
-- stopping `haltransport` causes the same safe offline behavior;
-- restarting `haltransport` now restores playback/capture without rebooting because the status SHM object identity remains stable;
-- physical disconnect/reconnect followed by later `haltransport` stop/restart also works without reboot.
+- stopping/restarting `haltransport` causes the same safe offline/recovery behavior without reboot;
+- physical disconnect/reconnect followed by later supervisor restart also works without reboot.
 
 This establishes the intended architectural separation: the logical CoreAudio device lifetime is independent of both the physical FW410 connection and the `haltransport` process lifetime.
+
+## launchd-managed runtime — validated
+
+`haltransport` is now deployable as the system launchd service:
+
+```text
+com.mbprado.macfw.fw410.transport
+```
+
+The development installer places a self-contained runtime under:
+
+```text
+/Library/Application Support/macfw/fw410
+```
+
+and installs the corresponding LaunchDaemon plist under `/Library/LaunchDaemons`.
+
+The runtime tree includes the supervisor, both native-rate bridges, `fwboot`, `rateprobe`, `transportstatus`, and `deviceprobe`. The initial service test exposed a missing packaged `rateprobe` dependency; after adding it to the runtime tree, the launchd path reached stable `ONLINE` operation.
+
+Validated service lifecycle:
+
+- service install/uninstall scripts work;
+- install is gated by `deviceprobe --require-supported`;
+- operational and bootloader FW410 personalities are accepted by the hardware gate;
+- launchd starts `haltransport` without a Terminal session;
+- 44.1 and 48 kHz playback/capture continue to work under launchd ownership;
+- changing 44.1 <-> 48 kHz works under launchd ownership;
+- physical disconnect/reconnect keeps the CoreAudio endpoint alive, produces silence while offline, and resumes audio after recovery;
+- reboot with the FW410 connected automatically restores transport/audio without manually launching `haltransport`;
+- forcibly killing the launchd-owned supervisor causes launchd to restart it automatically.
+
+Observed forced-restart evidence:
+
+```text
+runs = 2, pid = 285
+    -> kill 285
+runs = 3, pid = 688
+    -> kill 688
+runs = 4, pid = 703
+```
+
+In each case launchd returned the service to `state = running` with a new supervisor PID. This validates process supervision independently from the supervisor's own FireWire recovery state machine.
+
+The remaining major launchd lifecycle test before packaging is booting with the FW410 physically absent and connecting it later.
 
 ## Validated recovery matrix
 
@@ -229,15 +286,20 @@ This establishes the intended architectural separation: the logical CoreAudio de
 | status ABI rate-change reporting | validated | validated |
 | status ABI reconnect reporting | validated | validated |
 | persistent status object across supervisor restart | validated | validated |
-| HAL offline playback discard | validated | validated architecture |
-| HAL offline capture silence | validated | validated architecture |
-| active Logic recording survives outage | validated | validated architecture |
-| `haltransport` restart without reboot | validated | validated architecture |
+| HAL status object startup-order independence | validated | validated |
+| HAL offline playback discard | validated | validated |
+| HAL offline capture silence | validated | validated |
+| active Logic recording survives outage | validated | validated |
+| `haltransport` restart without reboot | validated | validated |
+| launchd automatic supervisor restart | validated | validated |
+| reboot with interface connected | validated | validated service architecture |
+| launchd rate switching | validated | validated |
+| launchd physical reconnect recovery | validated | validated |
 | 44.1 post-start AV/C reassert after reconnect | validated | n/a |
 
 ## CoreAudio availability policy
 
-Do **not** make physical FireWire disconnects or supervisor restarts remove/recreate the CoreAudio endpoint. The validated policy is:
+Do **not** make physical FireWire disconnects, supervisor restarts, or launchd restarts remove/recreate the CoreAudio endpoint. The validated policy is:
 
 ```text
 CoreAudio endpoint remains registered
@@ -246,11 +308,9 @@ transport state becomes RECOVERING / OFFLINE
         ↓
 HAL safely discards playback and supplies capture silence
         ↓
-FireWire supervisor recovers or restarts
+FireWire supervisor / launchd recovers runtime
         ↓
 transport state becomes ONLINE
         ↓
 existing CoreAudio clients continue using the same device instance
 ```
-
-The remaining startup-order problem is narrower: if `coreaudiod` loads the HAL before the transport-status object has ever been created, the HAL currently has no non-real-time mechanism to attach later. The next checkpoint is to make late attachment/re-attachment safe without putting `shm_open`, `mmap`, logging, or allocation in a real-time audio callback.
