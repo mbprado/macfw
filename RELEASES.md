@@ -1,10 +1,10 @@
 # macfw release and versioning policy
 
-This document defines the release contract for macfw before the first distributable driver build exists. The GitHub Actions implementation should follow this contract once the AudioDriverKit application/extension has a reproducible signed build.
+This document defines the release contract for macfw.
 
 ## Version format
 
-All public releases use:
+Public releases use:
 
 ```text
 x.yy.zzz
@@ -12,9 +12,9 @@ x.yy.zzz
 
 where:
 
-- `x` — major version. Increment for a major architectural generation, compatibility break, or other project-wide major release.
-- `yy` — feature/update version. Increment for larger updates and feature additions.
-- `zzz` — patch version. Increment for minor fixes, small corrections, packaging changes, and maintenance releases.
+- `x` — major architectural generation / compatibility break;
+- `yy` — larger feature/update release;
+- `zzz` — patch, packaging, maintenance, or small-fix release.
 
 Examples:
 
@@ -25,128 +25,129 @@ Examples:
 1.00.000   first major/stable generation
 ```
 
-The numeric fields are displayed zero-padded as shown. `yy` is two digits and `zzz` is three digits. A release tag uses the exact version string, without a mandatory `v` prefix:
+The numeric fields are zero-padded as shown. `yy` is two digits and `zzz` is three digits.
+
+Release tags use the exact version string:
 
 ```text
 0.01.000
 ```
 
-The release workflow must reject tags that do not match:
+A release workflow should reject tags that do not match:
 
 ```regex
 ^[0-9]+\.[0-9]{2}\.[0-9]{3}$
 ```
 
-## Tag-driven releases
+Pre-release status such as **alpha** or **beta** is represented by the GitHub Release state/title rather than changing the numeric version embedded in the binaries.
 
-A GitHub Actions release workflow will be activated when the project has its first reproducibly buildable piece of distributable software.
+## Tag-driven releases
 
 The intended release flow is:
 
-1. Finish and validate the release candidate on real FW410 hardware.
-2. Update release notes/changelog.
-3. Create and push a tag matching `x.yy.zzz`.
-4. GitHub Actions validates the tag.
-5. The workflow builds the signed/notarized software where required.
-6. The workflow assembles the three release packages below.
-7. The workflow calculates checksums.
-8. The workflow creates the GitHub Release for that tag and attaches all packages/checksums.
+1. Validate the candidate on real supported hardware.
+2. Update `CHANGELOG.md`, `KNOWN-LIMITATIONS.md`, and `RELEASE-NOTES.md`.
+3. Confirm the version embedded by the build matches the intended release.
+4. Create and push the `x.yy.zzz` tag.
+5. GitHub Actions validates the tag and builds on the supported macOS runner.
+6. The workflow runs the release build and package path.
+7. It calculates SHA-256 checksums.
+8. It creates the GitHub Release and attaches the package/checksum artifacts.
 
-A tag must identify the exact source revision used for all three packages.
+The tag identifies the exact source revision used for the package.
 
-## Release packages
+## Primary release artifact
 
-Every software release will contain three packages built from the same tag.
-
-### 1. Lite
-
-Filename convention:
+The first practical macfw binary distribution is the native macOS installer package:
 
 ```text
-macfw-x.yy.zzz-lite.tar.gz
+macfw-fw410-x.yy.zzz-<build>.pkg
 ```
 
-Purpose: normal users who only want to use the FW410.
+The build identifier is the Git commit identifier embedded by the existing build system. The package is produced from the repository root with:
 
-Contents will be the minimum runtime installation set required for the working driver. Based on the current architecture this is expected to include:
+```bash
+make package
+```
 
-- the host macOS application/system-extension container if required for installation;
-- the AudioDriverKit `.dext`;
-- the macfw/FW410 transport service or daemon if the final architecture requires it;
-- required runtime configuration/resources;
-- install/uninstall instructions or scripts where appropriate.
-
-Diagnostic and reverse-engineering tools are intentionally excluded.
-
-`lite` means **driver/runtime only**, not literally a single binary if macOS requires several cooperating components.
-
-### 2. Full
-
-Filename convention:
+and appears under:
 
 ```text
-macfw-x.yy.zzz-full.tar.gz
+package/dist/
 ```
 
-Purpose: developers, testers, diagnostics, hardware investigation, and advanced users.
+The package contains the FW410 CoreAudio HAL plug-in, self-contained transport runtime, launchd service definition, and installation scripts. Installation is gated by `deviceprobe --require-supported`, so a known supported interface must be connected in either operational or bootloader personality.
 
-Contents:
+## Source installation
 
-- everything from `lite`;
-- the compiled tools under `fw410/tools/device/`;
-- the compiled tools under `fw410/tools/control/`;
-- the compiled tools under `fw410/tools/transport/` that are safe/useful to distribute;
-- supporting command-line utilities and documentation needed to use those tools.
+A tagged release must also remain buildable directly from source:
 
-Experimental/destructive tools should remain clearly marked and should not silently become part of a normal end-user workflow.
-
-### 3. Source
-
-Filename convention:
-
-```text
-macfw-x.yy.zzz-source.tar.gz
+```bash
+make
+sudo make install
 ```
 
-Purpose: exact source snapshot for the release.
+Compilation must run as the normal user. `sudo make install` only installs already-built artifacts.
 
-This is a `.tar.gz` archive of the repository at the release tag. It must represent committed source only and must not contain local build products, credentials, signing certificates, provisioning profiles, or other machine-specific/private material.
+## Source archive
 
-The source archive should be generated from Git rather than by archiving a developer working tree, for example conceptually with `git archive`, so its contents correspond exactly to the tagged revision.
+GitHub automatically exposes source archives for tags/releases. If an explicit project source archive is added later, it must be generated from the tag/commit rather than from a developer working tree.
+
+## Optional future developer bundle
+
+A separate full developer/diagnostic bundle may be introduced later for compiled reverse-engineering and diagnostic tools. It is not required for the first alpha release and must not block the normal driver package.
+
+Experimental/destructive tools must remain clearly identified and must not silently become part of a normal end-user installation.
 
 ## Checksums
 
-The release should additionally publish SHA-256 checksums for the generated artifacts, preferably in:
+Release automation should publish SHA-256 checksums for distributable binary artifacts, preferably in:
 
 ```text
 SHA256SUMS
 ```
 
-At minimum the checksum file must cover the `lite`, `full`, and `source` archives.
+At minimum it must cover the published `.pkg`.
 
 ## Signing and notarization
 
-The release workflow must not embed Apple signing credentials in the repository.
+Apple signing credentials must never be committed to the repository.
 
-When the DriverKit build reaches distribution stage, required certificates, provisioning information, App Store Connect/notarization credentials, or equivalent secrets must be supplied through GitHub Actions secrets or another appropriate protected secret mechanism.
+The current first-alpha milestone separates **functional package validation** from Apple distribution signing/notarization. Until signing/notarization is implemented, the GitHub Release must explicitly state the artifact's status and must not imply that an unsigned/unnotarized build is signed.
 
-A release must fail rather than silently publish an unsigned/unnotarized package when signing/notarization is required for the target macOS installation path.
+When enabled, certificates and notarization credentials must be supplied through protected GitHub Actions secrets or another appropriate secret mechanism. The release workflow should then fail rather than silently publish an artifact that was expected to be signed/notarized but was not.
 
 ## Reproducibility and provenance
 
-All package names, embedded version metadata, and release notes must derive from the tag that triggered the workflow. The workflow must not independently invent a version number.
+Release package names, embedded version metadata, release notes, and checksums must correspond to the triggering tag and commit.
 
-The same tag must produce:
+The build should record the Git commit SHA in its logs and embedded metadata. The existing runtime and HAL build metadata provide the basis for this provenance.
 
-```text
-macfw-x.yy.zzz-lite.tar.gz
-macfw-x.yy.zzz-full.tar.gz
-macfw-x.yy.zzz-source.tar.gz
-SHA256SUMS
-```
+## Release documentation
 
-The workflow should record the Git commit SHA in its logs and, where practical, in a small build metadata file included with binary packages.
+Every release candidate should review/update:
 
-## When to implement the workflow
+- [`CHANGELOG.md`](CHANGELOG.md) — accumulated user-visible changes;
+- [`RELEASE-NOTES.md`](RELEASE-NOTES.md) — release-facing summary for the current candidate;
+- [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) — current limitations and unsupported behavior;
+- [`INSTALL.md`](INSTALL.md) — installation, status, troubleshooting, and source-build instructions.
 
-Do not freeze the GitHub Actions build commands before the Xcode AudioDriverKit project and runtime layout exist. The package contract and version policy in this document are stable now; the exact build/sign/notarize commands should be added as soon as the first working driver target can be built reproducibly from the repository.
+## Current first-alpha gate
+
+Before tagging `0.01.000`, verify at minimum:
+
+- clean source build with `make`;
+- source installation with `sudo make install`;
+- root `make package` produces the expected `.pkg`;
+- fresh `.pkg` installation succeeds with a supported FW410 attached;
+- launchd runtime reaches `ONLINE`;
+- 44.1 kHz playback/capture;
+- 48 kHz playback/capture;
+- runtime 44.1 <-> 48 kHz switching;
+- physical disconnect/reconnect recovery;
+- reboot recovery;
+- boot without interface followed by delayed attachment;
+- launchd process restart;
+- known limitations and signing status are accurately stated.
+
+The development machine has already hardware-validated these functional behaviors; the final release pass exists to ensure the exact tagged/package artifact preserves them.
