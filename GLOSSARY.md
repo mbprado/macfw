@@ -2,6 +2,38 @@
 
 This glossary collects the main terms and abbreviations used while reverse-engineering and bringing up the M-Audio FireWire 410 on modern macOS.
 
+## Transport status ABI
+
+The small versioned shared-memory interface used for communicating **transport availability**, not audio samples, between `haltransport` and other processes such as diagnostics and eventually the CoreAudio HAL.
+
+The v1 object is `/macfw_fw410_status_v1` and carries the current transport state, requested rate, active native-engine rate, engine PID, transition sequence and heartbeat sequence. It is separate from the playback and capture PCM shared rings.
+
+## OFFLINE / RECOVERING / ONLINE
+
+The three availability states in the transport-status ABI:
+
+- **OFFLINE** — no usable FireWire transport/native engine is available.
+- **RECOVERING** — the supervisor is starting, switching, reacquiring or recovering transport. A child process may exist during this state, but it has not yet proved that the native engine reached its operational ready point.
+- **ONLINE** — the current native engine explicitly signaled READY after its required startup sequence completed.
+
+The logical CoreAudio device is intended to remain registered across all three states. These states describe the physical/user-space transport behind that endpoint; they are not instructions to remove/recreate the CoreAudio device.
+
+## READY / engine-ready signal
+
+An explicit one-way startup handshake from a native `halbridge` child to the `haltransport` supervisor.
+
+READY is deliberately stronger than “child process exists.” At 48 kHz the engine signals READY after successful duplex ISO startup. At 44.1 kHz it signals READY only after duplex ISO startup **and** the FW410-specific post-start AV/C 44.1 kHz reassertion succeeds. Only then may the supervisor publish `ONLINE`.
+
+This prevents transient recovery children from being reported as usable transport while the FireWire bus/device is still re-enumerating.
+
+## Heartbeat sequence
+
+Monotonic counter in the transport-status ABI incremented as the supervisor republishes current status. It lets diagnostic readers see that the status publisher is alive even when no state transition occurs.
+
+## Transition sequence
+
+Monotonic counter in the transport-status ABI incremented when the published state, requested rate, active rate or engine PID changes. `transportstatus --watch` uses these changes to make supervisor transitions visible without treating every heartbeat as a new state.
+
 ## 1394 / IEEE 1394
 
 **IEEE 1394** is the serial bus standard commonly known as **FireWire** (Apple), **i.LINK** (Sony), or DV/1394. The FW410 communicates with the host over IEEE 1394.
@@ -235,9 +267,15 @@ M-Audio/BridgeCo boot command used by this project to tell the FW410 bootloader 
 
 ## CoreAudio
 
-Apple's audio subsystem/API. The eventual goal is to expose the FW410's FireWire streams to macOS as usable CoreAudio input and output channels.
+Apple's audio subsystem/API. The project exposes the FW410's FireWire streams to macOS as usable CoreAudio input and output channels through an AudioServerPlugIn.
 
 Be careful with direction terminology: CoreAudio describes direction relative to the **host**, whereas AV/C/BridgeCo commonly describes it relative to the **device**.
+
+## AudioServerPlugIn / HAL plug-in
+
+The user-space CoreAudio plug-in used by macfw to register the logical **M-Audio FireWire 410** device with macOS. It owns the CoreAudio-facing playback/capture shared rings but deliberately does not own FireWire lifecycle, AV/C, CMP or ISO streaming.
+
+The intended availability model keeps this logical device registered while the physical transport is `OFFLINE` or `RECOVERING`, allowing existing CoreAudio clients to survive transport recovery.
 
 ## IOFireWireFamily
 
