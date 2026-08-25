@@ -11,7 +11,7 @@ SRC := src/FW410HALInstrumented.cpp
 
 all: $(MACOS)/macfw-fw410
 
-$(MACOS)/macfw-fw410: $(SRC) src/FW410HALBridge.cpp include/macfw_hal_shm.h include/macfw_hal_capture_shm.h Info.plist
+$(MACOS)/macfw-fw410: $(SRC) src/FW410HALBridge.cpp include/macfw_hal_shm.h include/macfw_hal_capture_shm.h include/macfw_hal_transport_status.h Info.plist
 	mkdir -p $(MACOS)
 	cp Info.plist $(CONTENTS)/Info.plist
 	$(CXX) $(CXXFLAGS) $(SRC) $(LDFLAGS) -o $@
