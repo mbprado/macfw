@@ -1,6 +1,6 @@
 # FW410 current integration status
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
 
 This document is the current handoff for the CoreAudio/HAL/runtime phase. Older reverse-engineering documents remain useful historical evidence, but this file defines the present integration state and immediate next work.
 
@@ -19,7 +19,9 @@ Hardware-confirmed:
 - `haltransport` switches native engines when the CoreAudio rate changes;
 - repeated 44.1 <-> 48 kHz switching preserves playback, capture and monitoring;
 - four transport refactoring checkpoints have been hardware-validated without regression: shared HAL/PCM plumbing, shared engine setup, shared CMP/ISO lifecycle, and the shared steady-state full-duplex service loop;
-- physical FireWire disconnect/reconnect recovery has been hardware-validated at 48 kHz, including bootloader re-entry, guarded boot cue, re-enumeration and automatic full-duplex recovery.
+- physical FireWire disconnect/reconnect recovery is hardware-validated at both 44.1 and 48 kHz, including bootloader re-entry, guarded boot cue, re-enumeration and automatic full-duplex recovery;
+- a versioned transport-status ABI is implemented and hardware-validated for normal rate changes and physical reconnect recovery;
+- native engines now explicitly signal READY, so `ONLINE` means the engine reached its required operational startup point rather than merely surviving a timeout.
 
 The current architecture is:
 
@@ -29,7 +31,10 @@ macOS application
     -> macfw AudioServerPlugIn
        -> playback shared ring
        <- capture shared ring
-    -> companion user-space transport
+       <- next: observe transport-status ABI
+    -> haltransport supervisor
+       -> transport-status ABI: OFFLINE / RECOVERING / ONLINE
+       -> native-engine READY handshake
        -> common HAL/PCM plumbing
        -> common engine setup
        -> common CMP/ISO lifecycle
@@ -69,58 +74,80 @@ The 48 kHz engine is hardware-confirmed and clear. The decisive fix for early pl
 
 Repeated 44.1 <-> 48 kHz switching has been hardware-tested after the current transport refactors with playback, capture and monitoring remaining functional after each transition.
 
-The supervisor now also owns explicit transport-recovery states. A native engine monitors the FireWire bus generation while streaming. If the generation changes or can no longer be read, the engine exits through its normal cleanup path so the supervisor can reacquire the device rather than continuing against stale generation/node/DMA state.
+The supervisor owns explicit transport-recovery states. A native engine monitors the FireWire bus generation while streaming. If the generation changes or can no longer be read, the engine exits through its normal cleanup path so the supervisor can reacquire the device rather than continuing against stale generation/node/DMA state.
 
 Recovery behavior includes:
 
 ```text
-RUNNING
- -> generation change / engine failure
- -> guarded bootloader check
+ONLINE
+ -> generation change / engine failure / rate change
+ -> RECOVERING
+ -> guarded bootloader check as required
  -> WAIT_REENUMERATION if a guarded boot cue was actually issued
  -> BACKOFF on absent/unstable device
  -> fresh native-engine launch
  -> fresh FW410 generation/node acquisition
  -> new CMP/ISO/DMA lifecycle
- -> RUNNING
+ -> native engine READY
+ -> ONLINE
 ```
 
 `fwboot --execute` reports distinct guarded outcomes so `haltransport` no longer treats every helper exit as a successful boot. Retry backoff prevents a tight child-process loop while the interface is absent or the FireWire bus is unstable.
 
 ### Physical disconnect/reconnect validation
 
-A live 48 kHz full-duplex test was performed by physically disconnecting and reconnecting the FW410 while `haltransport` remained running.
+Live full-duplex disconnect/reconnect tests have now been completed at both native rates.
 
-The running engine detected a FireWire generation change and exited. During reconnection, several attempts saw unstable generation/node state and failed harmlessly under backoff. The FW410 then appeared as the known bootloader personality, passed the guarded preflight and received exactly one boot-from-flash cue. The supervisor waited for re-enumeration, refused a subsequent transitional loader state whose guard no longer matched, then successfully launched the operational 48 kHz engine.
+At 48 kHz the running engine detected a FireWire generation change and exited. During reconnection, several attempts saw unstable generation/node state and failed harmlessly under backoff. The FW410 then appeared as the known bootloader personality, passed the guarded preflight and received exactly one boot-from-flash cue. The supervisor waited for re-enumeration, refused a subsequent transitional loader state whose guard no longer matched, then successfully launched the operational 48 kHz engine. Playback and capture returned automatically.
 
-Playback and capture both returned to normal operation automatically after the reconnect. This validates the current generation-change detection, guarded boot, backoff, re-enumeration and operational-unit reacquisition path at 48 kHz.
+At 44.1 kHz the same physical recovery path returned directly to the requested 44.1 state. After the operational FW410 reappeared at its 48 kHz default state, the native 44.1 engine selected 44.1, started duplex ISO and successfully performed the required post-start AV/C reassert. Playback, capture and monitoring all resumed without a manual 48 -> 44.1 transition.
 
-A future refinement may replace the fixed post-boot wait with explicit detection of a stable operational FW410 before launching the native engine. The current behavior is safe and functionally validated, but one harmless transitional engine attempt can still occur before the operational personality is fully ready.
+Detailed evidence is in `analysis/recovery-validation.md`.
+
+## Transport-status ABI and explicit readiness
+
+`hal/include/macfw_hal_transport_status.h` defines the versioned v1 status ABI. `haltransport` is its single publisher and `tools/transport/transportstatus` is the current diagnostic reader.
+
+Published fields include:
+
+- state: `OFFLINE`, `RECOVERING`, `ONLINE`;
+- requested rate;
+- active native-engine rate;
+- engine PID;
+- transition sequence;
+- heartbeat sequence.
+
+The Darwin POSIX SHM name is `/macfw_fw410_status_v1`. The supervisor recreates this object on startup so stale mappings from earlier builds/ABI attempts do not survive into a new publisher instance.
+
+Native engines use an explicit READY handshake. At 48 kHz READY is emitted after successful duplex ISO startup. At 44.1 kHz READY is emitted only after duplex ISO startup and successful post-start 44.1 AV/C reassertion. Until READY, the supervisor keeps the child in `RECOVERING` even if the child process exists and has an active rate.
+
+Hardware validation during a physical reconnect showed multiple transient recovery PIDs correctly remaining `RECOVERING`; only the final stable child transitioned to `ONLINE`. A normal 44.1 -> 48 kHz switch also transitions promptly from `RECOVERING` to `ONLINE` when the new native engine signals READY.
+
+This status ABI is now ready to be consumed by the HAL.
 
 ## CoreAudio transport-offline policy
 
-The logical CoreAudio device currently remains visible in macOS/Logic even when the physical FW410 is disconnected. This separation is considered desirable and should be preserved.
+The logical CoreAudio device remains visible in macOS/Logic even when the physical FW410 is disconnected. This separation is intentional and should be preserved.
 
-The intended future policy is:
+The target policy is:
 
 ```text
 CoreAudio device remains registered
         ↓
 transport disconnects
         ↓
-HAL exposes transport offline/unavailable state
+status ABI becomes RECOVERING / OFFLINE
         ↓
-playback is safely discarded / rendered as silence
-capture returns silence / empty input safely
+HAL safely discards playback and supplies silence/empty capture
         ↓
 transport supervisor recovers FireWire device
         ↓
-HAL transport state returns online
+status ABI becomes ONLINE
         ↓
 existing CoreAudio clients continue without device removal/recreation
 ```
 
-The goal is transparent recovery without forcing Logic or other applications to lose and reselect the interface. This policy still needs a transport-status ABI between the supervisor/transport and the HAL; it is an architectural decision, not yet a completed HAL feature.
+The status ABI required for this policy is now implemented. The next checkpoint is intentionally observation-only: the HAL should map/read the status ABI and expose diagnostics proving that `coreaudiod` sees state transitions correctly, without yet changing `WriteMix`, `ReadInput`, device-alive reporting or stream behavior. Offline audio policy comes only after that observation checkpoint is hardware-validated.
 
 ## Capture topology and validated receive model
 
@@ -188,7 +215,7 @@ Rate-specific policies remain explicit: 44.1 uses one playback pump per loop wit
 
 ## Transport refactoring checkpoints
 
-Four incremental structural checkpoints are now hardware-validated.
+Four incremental structural checkpoints are hardware-validated.
 
 ### Checkpoint 1 — host HAL/PCM plumbing
 
@@ -225,7 +252,7 @@ FW Bootloader  model 0x00010058
 FW 410         model 0x00010046
 ```
 
-The guarded bootloader -> operational transition is now integrated with `haltransport`. The supervisor can recover from a reconnect into bootloader mode, wait/retry through re-enumeration and launch a fresh native engine after the operational unit becomes available.
+The guarded bootloader -> operational transition is integrated with `haltransport`. The supervisor can recover from a reconnect into bootloader mode, wait/retry through re-enumeration and launch a fresh native engine after the operational unit becomes available.
 
 Do not put this lifecycle work in a HAL real-time callback.
 
@@ -240,20 +267,24 @@ Do not put this lifecycle work in a HAL real-time callback.
 | `haltransport` launch | validated | validated |
 | runtime rate switching | validated | validated |
 | shared transport refactor | validated | validated |
-| generation-change detection | implemented | implemented |
-| physical disconnect/reconnect recovery | not yet explicitly tested | validated |
-| guarded bootloader recovery | implemented | validated during reconnect |
+| generation-change detection | validated | validated |
+| physical disconnect/reconnect recovery | validated | validated |
+| guarded bootloader recovery | validated | validated |
+| explicit native-engine READY | validated | validated |
+| transport-status ABI | validated | validated |
+| HAL consumption of transport status | next checkpoint | next checkpoint |
 
 ## Immediate sequence
 
-1. Validate physical disconnect/reconnect recovery at 44.1 kHz as well, including its post-start AV/C reassertion after recovery.
-2. Add a small transport-status ABI shared with the HAL so the CoreAudio endpoint can explicitly report online/offline state while remaining registered.
-3. Add a runtime HAL build identifier to eliminate stale-load ambiguity during development.
-4. Improve post-boot operational readiness detection so `haltransport` waits for a stable operational unit instead of relying primarily on a fixed re-enumeration delay.
-5. Tune capture prefill / monitoring latency after runtime recovery is reliable.
-6. Return to mixer/routing/headphone, S/PDIF and MIDI integration.
-7. Finish packaging/release automation when the runtime is reproducibly installable.
+1. Map/read the transport-status ABI inside the HAL and instrument what `coreaudiod` observes; do not alter audio callbacks yet.
+2. Hardware-validate HAL observation across 44.1 <-> 48 kHz switching and physical disconnect/reconnect.
+3. After observation is proven, implement safe offline playback discard and capture silence while keeping the CoreAudio device registered.
+4. Add a runtime HAL build identifier to eliminate stale-load ambiguity during development.
+5. Improve post-boot operational readiness detection if the remaining transitional launch attempts justify it.
+6. Tune capture prefill / monitoring latency after runtime recovery/offline behavior is reliable.
+7. Return to mixer/routing/headphone, S/PDIF and MIDI integration.
+8. Finish packaging/release automation when the runtime is reproducibly installable.
 
 ## Quick handoff
 
-> Native 44.1 and 48 kHz full duplex are hardware-validated through `haltransport`: ten-channel playback, four-channel capture and software monitoring work at both rates, and repeated native rate switching works. The transport refactor is complete enough that shared HAL/PCM plumbing, engine setup, CMP/ISO lifecycle and the steady-state service loop are common while rate-specific AMDTP behavior remains explicit. Physical disconnect/reconnect recovery has now been hardware-validated at 48 kHz: the running engine detected a generation change, the supervisor backed off through unstable FireWire state, issued one guarded boot cue when the known loader appeared, reacquired the operational FW410 and restored playback/capture automatically. The CoreAudio device should remain logically registered across transport outages; future HAL work should expose transport offline/online state and provide silence safely while disconnected rather than removing/recreating the device.
+> Native 44.1 and 48 kHz full duplex are hardware-validated through `haltransport`: ten-channel playback, four-channel capture, software monitoring, native rate switching and physical disconnect/reconnect recovery work at both rates. Recovery includes guarded bootloader handling and fresh CMP/ISO/DMA reconstruction. A versioned transport-status ABI now reports OFFLINE/RECOVERING/ONLINE, rates and engine PID, and native engines explicitly signal READY so only genuinely initialized engines become ONLINE. The logical CoreAudio device should remain registered across transport outages. The immediate next checkpoint is observation-only HAL consumption of the status ABI; do not change audio behavior until `coreaudiod` state observation is validated.
