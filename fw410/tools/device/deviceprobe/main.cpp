@@ -135,8 +135,7 @@ void printHex(std::uint64_t value, unsigned width = 0) {
 
 void printHuman(const std::vector<DetectedUnit>& units) {
     std::cout << "macfw deviceprobe " << macfw::build::kVersion
-              << " build " << macfw::build::kBuildNumber
-              << " (" << macfw::build::kGitSha << ")\n";
+              << " build " << macfw::build::kGitSha << "\n";
 
     unsigned supportedCount = 0;
     for (std::size_t i = 0; i < units.size(); ++i) {
@@ -167,8 +166,7 @@ void printHuman(const std::vector<DetectedUnit>& units) {
 
 void printJson(const std::vector<DetectedUnit>& units) {
     std::cout << "{\"version\":\"" << macfw::build::kVersion
-              << "\",\"build\":\"" << macfw::build::kBuildNumber
-              << "\",\"commit\":\"" << macfw::build::kGitSha << "\",\"devices\":[";
+              << "\",\"build\":\"" << macfw::build::kGitSha << "\",\"devices\":[";
     bool first = true;
     unsigned supportedCount = 0;
     for (const auto& unit : units) {
