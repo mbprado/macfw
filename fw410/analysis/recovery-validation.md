@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-25
 
-This note records hardware validation of the `haltransport` recovery state machine and the versioned transport-status ABI after the native 44.1/48 kHz full-duplex paths and common transport refactors were already stable.
+This note records hardware validation of the `haltransport` recovery state machine, the versioned transport-status ABI, and the persistent CoreAudio endpoint behavior after the native 44.1/48 kHz full-duplex paths and common transport refactors were already stable.
 
 ## Recovery architecture under test
 
@@ -93,9 +93,34 @@ A separate test began with the interface physically connected and working at 48 
 
 This is consistent with the previously observed intermittent 44.1 first-start/state anomaly. It is not considered a steady-state transport regression because the final 44.1 state is clean and repeatable once established. Keep this transition log as evidence when the 44.1 startup anomaly is investigated later.
 
+## 44.1 capture degradation observation
+
+A later 44.1 kHz run showed a different but likely related intermittent state problem. Playback continued, but the recording became audibly broken while capture diagnostics drifted away from the validated steady state:
+
+```text
+dbc-gap: 70 -> 144 -> 294 -> ... -> 1202
+queued:  ~3880 -> 3464 -> 2880 -> ... -> ~200
+capture delta: roughly 87896-88080 frames / ~2 s
+```
+
+CoreAudio continued requesting input at the expected cadence. Stopping `haltransport` and starting it again, without rebooting or restarting Logic, immediately restored clean 44.1 capture:
+
+```text
+capture delta ~= 88200 frames / ~2 s
+queued ~= 4k frames
+in-drops = 0
+malformed = 0
+invalid = 0
+dbc-gap = 0
+reorder = 0
+stale = 0
+```
+
+This episode is recorded as another manifestation of the intermittent 44.1 initialization/state anomaly, not as a persistent-SHM or CoreAudio-offline regression. The fact that a transport-process restart alone clears it is useful evidence for later investigation.
+
 ## Transport-status ABI — implemented and hardware-validated
 
-`haltransport` now publishes a small versioned POSIX shared-memory status block defined by `hal/include/macfw_hal_transport_status.h`. The current ABI exposes:
+`haltransport` publishes a small versioned POSIX shared-memory status block defined by `hal/include/macfw_hal_transport_status.h`. The current ABI exposes:
 
 - `OFFLINE`, `RECOVERING`, and `ONLINE` transport states;
 - requested native rate;
@@ -106,7 +131,28 @@ This is consistent with the previously observed intermittent 44.1 first-start/st
 
 `tools/transport/transportstatus` is the diagnostic reader and supports one-shot and `--watch` modes.
 
-The Darwin POSIX SHM object uses the deliberately short name `/macfw_fw410_status_v1`. The supervisor is the single publisher/owner and recreates the status object on startup so stale objects from an earlier ABI/build cannot leave an incompatible mapping behind.
+The Darwin POSIX SHM object uses the deliberately short name `/macfw_fw410_status_v1`.
+
+### Persistent object identity across supervisor restarts
+
+The status object is now intentionally persistent across `haltransport` process restarts. This is required because `coreaudiod` may keep its mapping for the lifetime of the loaded HAL plug-in. Unlinking and recreating the object would leave the HAL attached to an orphaned old object while a restarted supervisor wrote status into a new object with the same name.
+
+Validated lifecycle:
+
+```text
+haltransport ONLINE
+    -> Ctrl-C
+    -> existing shared object published OFFLINE
+    -> Logic/CoreAudio keeps running
+    -> restart same haltransport binary
+    -> same shared object reopened in place
+    -> RECOVERING
+    -> native engine READY
+    -> ONLINE
+    -> playback and real capture resume without reboot
+```
+
+On Darwin the backing object may report a page-sized `st_size` (for example 4096 bytes) even though the ABI structure is 48 bytes. Compatibility therefore requires the backing object to be **at least** `sizeof(SharedStatus)`; the mapped structure's `magic`, `version`, and `structSize` remain the actual ABI validation.
 
 ### Explicit native-engine READY handshake
 
@@ -135,6 +181,37 @@ transport state: ONLINE
 
 A normal 44.1 -> 48 kHz rate switch also showed `RECOVERING -> ONLINE` with the same new child PID, confirming that readiness is tied to the engine handshake rather than a fixed delay.
 
+## Persistent CoreAudio endpoint and offline audio behavior — validated
+
+The HAL now consumes the transport-status ABI and keeps the logical FW410 device registered regardless of physical transport state.
+
+Validated policy:
+
+```text
+ONLINE
+    playback -> normal shared PCM ring
+    capture  -> normal capture ring
+
+RECOVERING / OFFLINE
+    playback -> accepted by CoreAudio but discarded
+    capture  -> zero-filled silence
+    device   -> remains registered/alive in CoreAudio
+```
+
+Hardware/application validation in Logic confirmed:
+
+- physically disconnecting the FW410 does not make Logic lose the selected device;
+- Logic continues its playback timeline while the physical interface is absent;
+- active recording continues and records silence during the outage;
+- when the FW410 reconnects and recovery reaches `ONLINE`, playback resumes automatically;
+- the same recording continues with real input again after recovery;
+- no Logic restart or device reselection is required;
+- stopping `haltransport` causes the same safe offline behavior;
+- restarting `haltransport` now restores playback/capture without rebooting because the status SHM object identity remains stable;
+- physical disconnect/reconnect followed by later `haltransport` stop/restart also works without reboot.
+
+This establishes the intended architectural separation: the logical CoreAudio device lifetime is independent of both the physical FW410 connection and the `haltransport` process lifetime.
+
 ## Validated recovery matrix
 
 | Recovery behavior | 44.1 kHz | 48 kHz |
@@ -151,26 +228,29 @@ A normal 44.1 -> 48 kHz rate switch also showed `RECOVERING -> ONLINE` with the 
 | explicit engine READY | validated | validated |
 | status ABI rate-change reporting | validated | validated |
 | status ABI reconnect reporting | validated | validated |
+| persistent status object across supervisor restart | validated | validated |
+| HAL offline playback discard | validated | validated architecture |
+| HAL offline capture silence | validated | validated architecture |
+| active Logic recording survives outage | validated | validated architecture |
+| `haltransport` restart without reboot | validated | validated architecture |
 | 44.1 post-start AV/C reassert after reconnect | validated | n/a |
 
 ## CoreAudio availability policy
 
-During transport outages the logical CoreAudio device currently remains registered with macOS and remains visible to applications such as Logic. This is the intended architectural direction.
-
-Do **not** make physical FireWire disconnects remove/recreate the CoreAudio endpoint. The target policy is:
+Do **not** make physical FireWire disconnects or supervisor restarts remove/recreate the CoreAudio endpoint. The validated policy is:
 
 ```text
 CoreAudio endpoint remains registered
         ↓
 transport state becomes RECOVERING / OFFLINE
         ↓
-HAL safely discards playback and supplies silence/empty capture
+HAL safely discards playback and supplies capture silence
         ↓
-FireWire supervisor recovers the FW410
+FireWire supervisor recovers or restarts
         ↓
 transport state becomes ONLINE
         ↓
 existing CoreAudio clients continue using the same device instance
 ```
 
-The transport-status ABI now provides the state needed for this policy. The next implementation stage is deliberately non-invasive: map and observe this ABI inside the HAL first, without changing playback/capture callbacks. Once HAL-side observation is validated under `coreaudiod`, offline audio behavior can be introduced as a separate checkpoint.
+The remaining startup-order problem is narrower: if `coreaudiod` loads the HAL before the transport-status object has ever been created, the HAL currently has no non-real-time mechanism to attach later. The next checkpoint is to make late attachment/re-attachment safe without putting `shm_open`, `mmap`, logging, or allocation in a real-time audio callback.
