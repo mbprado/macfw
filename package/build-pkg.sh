@@ -100,7 +100,7 @@ pkgbuild \
 cat > "$STAGE/Distribution.xml" <<EOF
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="1">
-    <title>macfw FireWire 410 ${VERSION}</title>
+    <title>macfw FireWire Audio Driver ${VERSION}</title>
     <organization>${IDENTIFIER}</organization>
     <domains enable_localSystem="true" enable_currentUserHome="false" enable_anywhere="false"/>
     <options customize="never" require-scripts="true"/>
