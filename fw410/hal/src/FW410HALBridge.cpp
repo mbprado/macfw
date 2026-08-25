@@ -5,6 +5,7 @@
 
 #include "../include/macfw_hal_shm.h"
 #include "../include/macfw_hal_capture_shm.h"
+#include "../include/macfw_hal_transport_status.h"
 
 #include <atomic>
 #include <cerrno>
@@ -34,6 +35,8 @@ int gShmFd = -1;
 macfw::hal::SharedPcmRing* gRing = nullptr;
 int gCaptureShmFd = -1;
 macfw::hal::capture::SharedCaptureRing* gCaptureRing = nullptr;
+int gTransportStatusShmFd = -1;
+const macfw::hal::transport::SharedStatus* gTransportStatus = nullptr;
 
 extern AudioServerPlugInDriverInterface gInterface;
 static AudioServerPlugInDriverInterface* gInterfacePtr = &gInterface;
@@ -73,8 +76,8 @@ bool MapCaptureRing() {
 
     // The HAL owns creation of the persistent capture object so coreaudiod can
     // establish one stable mapping before the FireWire capture producer starts.
-    // capturebridge48000 later opens this same object and reinitializes it in
-    // place, avoiding both the stale-mapping split and the producer-start race.
+    // The transport later opens this same object and reinitializes it in place,
+    // avoiding both the stale-mapping split and the producer-start race.
     gCaptureShmFd = shm_open(macfw::hal::capture::kShmName, O_CREAT | O_RDWR, 0666);
     if (gCaptureShmFd < 0) return false;
     if (ftruncate(gCaptureShmFd, sizeof(macfw::hal::capture::SharedCaptureRing)) != 0) {
@@ -91,6 +94,37 @@ bool MapCaptureRing() {
             static_cast<std::uint32_t>(gSampleRate));
         gCaptureRing->active.store(0, std::memory_order_release);
     }
+    return true;
+}
+
+bool MapTransportStatus() {
+    if (gTransportStatus && macfw::hal::transport::valid(*gTransportStatus)) return true;
+    if (gTransportStatus) {
+        munmap(const_cast<macfw::hal::transport::SharedStatus*>(gTransportStatus),
+               sizeof(*gTransportStatus));
+        gTransportStatus = nullptr;
+    }
+    if (gTransportStatusShmFd >= 0) {
+        close(gTransportStatusShmFd);
+        gTransportStatusShmFd = -1;
+    }
+
+    // Observation-only checkpoint: the HAL is a read-only consumer and never
+    // creates, resizes, initializes or mutates the supervisor-owned status ABI.
+    gTransportStatusShmFd = shm_open(macfw::hal::transport::kShmName, O_RDONLY, 0);
+    if (gTransportStatusShmFd < 0) return false;
+    void* p = mmap(nullptr, sizeof(macfw::hal::transport::SharedStatus), PROT_READ,
+                   MAP_SHARED, gTransportStatusShmFd, 0);
+    if (p == MAP_FAILED) {
+        close(gTransportStatusShmFd); gTransportStatusShmFd = -1; return false;
+    }
+    const auto* status = static_cast<const macfw::hal::transport::SharedStatus*>(p);
+    if (!macfw::hal::transport::valid(*status)) {
+        munmap(p, sizeof(*status));
+        close(gTransportStatusShmFd); gTransportStatusShmFd = -1;
+        return false;
+    }
+    gTransportStatus = status;
     return true;
 }
 
@@ -163,6 +197,7 @@ OSStatus STDMETHODCALLTYPE Initialize(AudioServerPlugInDriverRef, AudioServerPlu
     gStartHostTime = mach_absolute_time();
     MapSharedRing();
     MapCaptureRing();
+    MapTransportStatus();
     return kAudioHardwareNoError;
 }
 OSStatus STDMETHODCALLTYPE CreateDevice(AudioServerPlugInDriverRef, CFDictionaryRef,
@@ -424,25 +459,30 @@ OSStatus STDMETHODCALLTYPE SetPropertyData(AudioServerPlugInDriverRef driver, Au
         if (inSize != sizeof(Float64)) return kAudioHardwareBadPropertySizeError;
         const Float64 rate = *static_cast<const Float64*>(inData);
         if (rate != kRate44100 && rate != kRate48000) return kAudioHardwareIllegalOperationError;
-        if (rate != gSampleRate && gHost)
-            gHost->RequestDeviceConfigurationChange(gHost, kDeviceID, static_cast<UInt64>(rate), nullptr);
+        if (rate == gSampleRate) return kAudioHardwareNoError;
+        if (!gHost) return kAudioHardwareIllegalOperationError;
+        gHost->RequestDeviceConfigurationChange(gHost, kDeviceID, static_cast<UInt64>(rate), nullptr);
         return kAudioHardwareNoError;
     }
     if ((object == kOutputStreamID || object == kInputStreamID) &&
-        a->mSelector == kAudioStreamPropertyIsActive)
-        return inSize == sizeof(UInt32) ? kAudioHardwareNoError : kAudioHardwareBadPropertySizeError;
+        a->mSelector == kAudioStreamPropertyIsActive) return kAudioHardwareNoError;
     return kAudioHardwareUnsupportedOperationError;
 }
 
 OSStatus STDMETHODCALLTYPE StartIO(AudioServerPlugInDriverRef, AudioObjectID d, UInt32) {
     if (d != kDeviceID) return kAudioHardwareBadObjectError;
-    MapCaptureRing();
-    if (gRunningClients.fetch_add(1) == 0) {
+    const UInt32 old = gRunningClients.fetch_add(1);
+    if (old == 0) {
         gStartHostTime = mach_absolute_time();
-        if (gRing) gRing->active.store(1, std::memory_order_release);
+        if (!MapSharedRing()) return kAudioHardwareUnspecifiedError;
+        if (!MapCaptureRing()) return kAudioHardwareUnspecifiedError;
+        MapTransportStatus();
+        gRing->sampleRate.store(static_cast<std::uint32_t>(gSampleRate), std::memory_order_release);
+        gRing->active.store(1, std::memory_order_release);
     }
     return kAudioHardwareNoError;
 }
+
 OSStatus STDMETHODCALLTYPE StopIO(AudioServerPlugInDriverRef, AudioObjectID d, UInt32) {
     if (d != kDeviceID) return kAudioHardwareBadObjectError;
     UInt32 old = gRunningClients.load();
@@ -450,60 +490,58 @@ OSStatus STDMETHODCALLTYPE StopIO(AudioServerPlugInDriverRef, AudioObjectID d, U
     if (old == 1 && gRing) gRing->active.store(0, std::memory_order_release);
     return kAudioHardwareNoError;
 }
+
 OSStatus STDMETHODCALLTYPE GetZeroTimeStamp(AudioServerPlugInDriverRef, AudioObjectID d, UInt32,
-                                            Float64* sample, UInt64* host, UInt64* seed) {
-    if (d != kDeviceID || !sample || !host || !seed) return kAudioHardwareIllegalOperationError;
+                                            Float64* sampleTime, UInt64* hostTime, UInt64* seed) {
+    if (d != kDeviceID || !sampleTime || !hostTime || !seed) return kAudioHardwareIllegalOperationError;
     const UInt64 now = mach_absolute_time();
     const long double ns = static_cast<long double>(now - gStartHostTime) * gTimebase.numer / gTimebase.denom;
     const long double frames = ns * gSampleRate / 1000000000.0L;
     const UInt64 period = 512;
     const UInt64 frame = static_cast<UInt64>(frames) / period * period;
     const long double frameNs = static_cast<long double>(frame) * 1000000000.0L / gSampleRate;
-    *sample = static_cast<Float64>(frame);
-    *host = gStartHostTime + static_cast<UInt64>(frameNs * gTimebase.denom / gTimebase.numer);
+    *sampleTime = static_cast<Float64>(frame);
+    *hostTime = gStartHostTime + static_cast<UInt64>(frameNs * gTimebase.denom / gTimebase.numer);
     *seed = 1;
     return kAudioHardwareNoError;
 }
-OSStatus STDMETHODCALLTYPE WillDoIOOperation(AudioServerPlugInDriverRef, AudioObjectID d, UInt32,
-                                             UInt32 op, Boolean* willDo, Boolean* inPlace) {
-    if (d != kDeviceID || !willDo || !inPlace) return kAudioHardwareIllegalOperationError;
-    *willDo = op == kAudioServerPlugInIOOperationWriteMix ||
-              op == kAudioServerPlugInIOOperationReadInput;
+
+Boolean STDMETHODCALLTYPE WillDoIOOperation(AudioServerPlugInDriverRef, AudioObjectID d, UInt32,
+                                            UInt32 op, Boolean* willDo, Boolean* inPlace) {
+    if (d != kDeviceID || !willDo || !inPlace) return false;
+    *willDo = (op == kAudioServerPlugInIOOperationWriteMix ||
+               op == kAudioServerPlugInIOOperationReadInput);
     *inPlace = true;
-    return kAudioHardwareNoError;
+    return true;
 }
 OSStatus STDMETHODCALLTYPE BeginIOOperation(AudioServerPlugInDriverRef, AudioObjectID, UInt32,
                                             UInt32, UInt32, const AudioServerPlugInIOCycleInfo*) {
     return kAudioHardwareNoError;
 }
-OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef, AudioObjectID d, AudioObjectID stream,
-                                         UInt32, UInt32 op, UInt32 frames,
+
+OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef, AudioObjectID d,
+                                         AudioObjectID stream, UInt32, UInt32 op, UInt32 frames,
                                          const AudioServerPlugInIOCycleInfo*, void* mainBuffer, void*) {
-    if (d != kDeviceID) return kAudioHardwareBadObjectError;
-
+    if (d != kDeviceID || !mainBuffer) return kAudioHardwareIllegalOperationError;
     if (stream == kOutputStreamID && op == kAudioServerPlugInIOOperationWriteMix) {
-        if (gRing && mainBuffer && macfw::hal::valid(*gRing))
-            macfw::hal::write(*gRing, static_cast<const float*>(mainBuffer), frames);
+        if (!gRing || !macfw::hal::valid(*gRing)) return kAudioHardwareUnspecifiedError;
+        macfw::hal::write(*gRing, static_cast<const Float32*>(mainBuffer), frames);
         return kAudioHardwareNoError;
     }
-
     if (stream == kInputStreamID && op == kAudioServerPlugInIOOperationReadInput) {
-        if (!mainBuffer) return kAudioHardwareIllegalOperationError;
-        float* dst = static_cast<float*>(mainBuffer);
-        std::size_t got = 0;
-        if (gCaptureRing && macfw::hal::capture::valid(*gCaptureRing) &&
-            gCaptureRing->active.load(std::memory_order_acquire) != 0 &&
-            gCaptureRing->sampleRate.load(std::memory_order_acquire) ==
-                static_cast<std::uint32_t>(gSampleRate)) {
-            got = macfw::hal::capture::read(*gCaptureRing, dst, frames);
+        auto* out = static_cast<Float32*>(mainBuffer);
+        if (!gCaptureRing || !macfw::hal::capture::valid(*gCaptureRing) ||
+            gCaptureRing->active.load(std::memory_order_acquire) == 0) {
+            std::memset(out, 0, static_cast<std::size_t>(frames) * kInputChannels * sizeof(Float32));
+            return kAudioHardwareNoError;
         }
+        const std::size_t got = macfw::hal::capture::read(*gCaptureRing, out, frames);
         if (got < frames) {
-            std::memset(dst + got * kInputChannels, 0,
-                        (frames - got) * kInputChannels * sizeof(float));
+            std::memset(out + got * kInputChannels, 0,
+                        (static_cast<std::size_t>(frames) - got) * kInputChannels * sizeof(Float32));
         }
         return kAudioHardwareNoError;
     }
-
     return kAudioHardwareUnsupportedOperationError;
 }
 OSStatus STDMETHODCALLTYPE EndIOOperation(AudioServerPlugInDriverRef, AudioObjectID, UInt32,
