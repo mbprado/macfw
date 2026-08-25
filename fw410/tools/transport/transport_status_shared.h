@@ -52,9 +52,13 @@ public:
                 fd_ = -1;
                 return false;
             }
-            if (st.st_size != static_cast<off_t>(sizeof(macfw::hal::transport::SharedStatus))) {
+            // Darwin may report the backing object's page-rounded size (for
+            // example 4096 bytes) even though this ABI only maps/uses the first
+            // sizeof(SharedStatus) bytes. Reject only objects that are too small;
+            // magic/version/structSize below remain the authoritative ABI check.
+            if (st.st_size < static_cast<off_t>(sizeof(macfw::hal::transport::SharedStatus))) {
                 std::fprintf(stderr,
-                             "transport status ABI size mismatch: got %lld, expected %zu; "
+                             "transport status ABI object too small: got %lld, need at least %zu; "
                              "refusing to replace a live persistent mapping\n",
                              static_cast<long long>(st.st_size),
                              sizeof(macfw::hal::transport::SharedStatus));
@@ -81,8 +85,8 @@ public:
 
         if (created || !macfw::hal::transport::valid(*status_)) {
             // A newly-created object has no readers yet. For an existing object,
-            // only accept in-place initialization when its byte size already
-            // matches this v1 ABI; incompatible sizes are rejected above.
+            // only accept in-place initialization when the backing object is large
+            // enough for this v1 ABI; incompatible layout is rejected by valid().
             new (status_) macfw::hal::transport::SharedStatus;
             status_->magic = macfw::hal::transport::kMagic;
             status_->version = macfw::hal::transport::kVersion;
