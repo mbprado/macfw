@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-25
 
-This note records hardware validation of the `haltransport` recovery state machine, the versioned transport-status ABI, the persistent CoreAudio endpoint behavior, and the launchd-managed transport runtime after the native 44.1/48 kHz full-duplex paths and common transport refactors were stable.
+This note records hardware validation of the `haltransport` recovery state machine, the versioned transport-status ABI, the persistent CoreAudio endpoint behavior, the launchd-managed transport runtime, and the first end-to-end macOS package installation after the native 44.1/48 kHz full-duplex paths and common transport refactors were stable.
 
 ## Recovery architecture under test
 
@@ -270,6 +270,35 @@ In each case launchd returned the service to `state = running` with a new superv
 
 With delayed post-boot hardware attachment now validated, the launchd service-runtime lifecycle is considered complete for the first alpha packaging pass.
 
+## macOS package installation — validated
+
+The first repository-level `.pkg` packaging flow is now hardware-validated. The package is built from the release runtime and HAL bundle and installs the same files and service layout already proven by the source-based `make install` path.
+
+Validated package behavior:
+
+- package creation succeeds from the repository root using the release package builder;
+- the package installs successfully through the standard macOS Installer path;
+- the HAL bundle is installed under `/Library/Audio/Plug-Ins/HAL`;
+- the validated FW410 runtime tree is installed under `/Library/Application Support/macfw/fw410`;
+- the LaunchDaemon is installed and activated;
+- `coreaudiod` discovers the HAL immediately after installation;
+- with the FW410 connected, the interface becomes operational immediately after package installation;
+- no reboot is required for first use after a successful install.
+
+This validates the desired first-release installation experience:
+
+```text
+install .pkg
+    -> hardware gate passes
+    -> HAL + runtime + LaunchDaemon installed
+    -> launchd starts transport supervisor
+    -> CoreAudio reloads HAL
+    -> FW410 reaches ONLINE
+    -> playback/capture available immediately
+```
+
+A reboot remains part of the broader recovery validation matrix, but is not required by the package installation path itself.
+
 ## Validated recovery matrix
 
 | Recovery behavior | 44.1 kHz | 48 kHz |
@@ -297,6 +326,7 @@ With delayed post-boot hardware attachment now validated, the launchd service-ru
 | reboot without interface + delayed attach | validated | validated service architecture |
 | launchd rate switching | validated | validated |
 | launchd physical reconnect recovery | validated | validated |
+| package install without reboot | validated | validated service architecture |
 | 44.1 post-start AV/C reassert after reconnect | validated | n/a |
 
 ## CoreAudio availability policy
