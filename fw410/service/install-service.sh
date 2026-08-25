@@ -15,11 +15,12 @@ LABEL="com.mbprado.macfw.fw410.transport"
 HALTRANSPORT="$FW410_DIR/tools/transport/haltransport/haltransport"
 BRIDGE44100="$FW410_DIR/tools/transport/halbridge44100/halbridge44100"
 BRIDGE48000="$FW410_DIR/tools/transport/halbridge48000/halbridge48000"
+RATEPROBE="$FW410_DIR/tools/control/rateprobe/rateprobe"
 FWBOOT="$FW410_DIR/tools/device/fwboot/fwboot"
 DEVICEPROBE="$FW410_DIR/tools/device/deviceprobe/deviceprobe"
 TRANSPORTSTATUS="$FW410_DIR/tools/transport/transportstatus/transportstatus"
 
-for file in "$HALTRANSPORT" "$BRIDGE44100" "$BRIDGE48000" "$FWBOOT" "$DEVICEPROBE" "$TRANSPORTSTATUS"; do
+for file in "$HALTRANSPORT" "$BRIDGE44100" "$BRIDGE48000" "$RATEPROBE" "$FWBOOT" "$DEVICEPROBE" "$TRANSPORTSTATUS"; do
     if [[ ! -x "$file" ]]; then
         echo "error: required runtime binary is missing or not executable: $file" >&2
         echo "build the FW410 tools before installing the service" >&2
@@ -49,6 +50,7 @@ install -d -o root -g wheel -m 0755 \
     "$INSTALL_ROOT/tools/transport/halbridge44100" \
     "$INSTALL_ROOT/tools/transport/halbridge48000" \
     "$INSTALL_ROOT/tools/transport/transportstatus" \
+    "$INSTALL_ROOT/tools/control/rateprobe" \
     "$INSTALL_ROOT/tools/device/fwboot" \
     "$INSTALL_ROOT/tools/device/deviceprobe"
 
@@ -60,6 +62,8 @@ install -o root -g wheel -m 0755 "$BRIDGE48000" \
     "$INSTALL_ROOT/tools/transport/halbridge48000/halbridge48000"
 install -o root -g wheel -m 0755 "$TRANSPORTSTATUS" \
     "$INSTALL_ROOT/tools/transport/transportstatus/transportstatus"
+install -o root -g wheel -m 0755 "$RATEPROBE" \
+    "$INSTALL_ROOT/tools/control/rateprobe/rateprobe"
 install -o root -g wheel -m 0755 "$FWBOOT" \
     "$INSTALL_ROOT/tools/device/fwboot/fwboot"
 install -o root -g wheel -m 0755 "$DEVICEPROBE" \
