@@ -48,14 +48,12 @@ int main(int argc, char** argv) {
 
     const int result = halbridge44100_inner_main();
 
-    // Experiment: a normal supervisor stop should not force a 44.1 -> 48 kHz
-    // transition immediately before the next 44.1 start. Leave the operational
-    // FW410 at 44.1 after a clean engine exit and observe whether repeated
-    // haltransport restarts become consistently clean. Preserve the historical
-    // best-effort 48 kHz restore on an actual engine/runtime failure so recovery
-    // behavior remains otherwise unchanged during this test.
+    // A clean supervisor stop leaves the operational FW410 at the selected
+    // native rate. This avoids an unnecessary 44.1 -> 48 -> 44.1 transition
+    // across normal 44.1 kHz restarts. Preserve the historical best-effort
+    // 48 kHz restore after an actual engine/runtime failure for recovery.
     if (result == 0) {
-        std::printf("clean 44.1 Hz stop: leaving FW410 at 44100 Hz (restore experiment)\n");
+        std::printf("clean 44.1 Hz stop: leaving FW410 at 44100 Hz\n");
         return 0;
     }
 
