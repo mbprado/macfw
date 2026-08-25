@@ -1,4 +1,5 @@
 #include "macfw_hal_shm.h"
+#include "../transport_status_shared.h"
 
 #include <cerrno>
 #include <chrono>
@@ -173,6 +174,12 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    macfw::transport::TransportStatusPublisher transportStatus;
+    if (!transportStatus.open()) {
+        std::fprintf(stderr, "transport status shared state unavailable\n");
+        return 1;
+    }
+
     const std::string here = executableDirectory(argc > 0 ? argv[0] : nullptr);
     const std::string bootHelper = fwbootPath(here);
 
@@ -190,6 +197,7 @@ int main(int argc, char** argv) {
     std::printf("supported native rates: 44100, 48000 Hz\n");
     std::printf("automatic guarded FW410 bootloader recovery: enabled\n");
     std::printf("disconnect/re-enumeration retry backoff: enabled\n");
+    std::printf("transport status ABI: enabled\n");
     std::printf("change the device format in Audio MIDI Setup to switch engines\n");
 
     while (!gStopRequested) {
@@ -296,6 +304,21 @@ int main(int argc, char** argv) {
             retryDelay = std::chrono::milliseconds(250);
         }
 
+        macfw::hal::transport::State publishedState = macfw::hal::transport::State::Offline;
+        if (requestedRate != 0) {
+            if (child > 0 && childStarted != Clock::time_point::min() &&
+                now - childStarted >= kStableRun) {
+                publishedState = macfw::hal::transport::State::Online;
+            } else {
+                publishedState = macfw::hal::transport::State::Recovering;
+            }
+        }
+        transportStatus.publish(
+            publishedState,
+            requestedRate,
+            activeRate,
+            child > 0 ? static_cast<std::uint32_t>(child) : 0u);
+
         usleep(100000);
     }
 
@@ -303,5 +326,6 @@ int main(int argc, char** argv) {
         std::printf("transport: stop requested; stopping native %u Hz engine\n", activeRate);
         stopBridge(child);
     }
+    transportStatus.publish(macfw::hal::transport::State::Offline, shared.rate(), 0, 0);
     return 0;
 }
