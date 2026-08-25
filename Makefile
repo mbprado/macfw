@@ -24,5 +24,6 @@ package: runtime
 clean:
 	$(MAKE) -C fw410 clean
 	rm -rf package/build package/dist
-	chmod 0755 package/build-pkg.sh package/scripts/preinstall package/scripts/postinstall \
-		fw410/service/install-service.sh fw410/service/uninstall-service.sh
+	chmod -x package/build-pkg.sh package/scripts/preinstall package/scripts/postinstall \
+		fw410/service/install-service.sh fw410/service/uninstall-service.sh fw410/tools/transport/amdtp44probe/run44.sh \
+		fw410/tools/transport/pcm44100playback/run44100.sh
