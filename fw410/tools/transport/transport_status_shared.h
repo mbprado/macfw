@@ -21,13 +21,25 @@ public:
     }
 
     bool open() {
-        fd_ = shm_open(macfw::hal::transport::kShmName, O_CREAT | O_RDWR, 0666);
+        // haltransport is the single publisher/owner of this status block.
+        // Always recreate it so stale objects from an older ABI or a crashed
+        // supervisor cannot leave Darwin with an incompatible SHM object.
+        if (shm_unlink(macfw::hal::transport::kShmName) != 0 && errno != ENOENT) {
+            std::perror("transport status shm_unlink");
+            return false;
+        }
+
+        fd_ = shm_open(macfw::hal::transport::kShmName,
+                       O_CREAT | O_EXCL | O_RDWR, 0666);
         if (fd_ < 0) {
             std::perror("transport status shm_open");
             return false;
         }
         if (ftruncate(fd_, sizeof(macfw::hal::transport::SharedStatus)) != 0) {
             std::perror("transport status ftruncate");
+            close(fd_);
+            fd_ = -1;
+            shm_unlink(macfw::hal::transport::kShmName);
             return false;
         }
 
@@ -35,6 +47,9 @@ public:
                        PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
         if (p == MAP_FAILED) {
             std::perror("transport status mmap");
+            close(fd_);
+            fd_ = -1;
+            shm_unlink(macfw::hal::transport::kShmName);
             return false;
         }
 
