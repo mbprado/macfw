@@ -21,25 +21,49 @@ public:
     }
 
     bool open() {
-        // haltransport is the single publisher/owner of this status block.
-        // Always recreate it so stale objects from an older ABI or a crashed
-        // supervisor cannot leave Darwin with an incompatible SHM object.
-        if (shm_unlink(macfw::hal::transport::kShmName) != 0 && errno != ENOENT) {
-            std::perror("transport status shm_unlink");
-            return false;
-        }
-
+        // The transport-status object is intentionally persistent. coreaudiod may
+        // keep this mapping for the lifetime of the HAL plug-in, so unlinking and
+        // recreating the POSIX SHM object on every haltransport restart would leave
+        // the HAL attached to an orphaned object forever. Reopen the existing v1
+        // object in place; create and size it only on the very first use.
+        bool created = false;
         fd_ = shm_open(macfw::hal::transport::kShmName,
                        O_CREAT | O_EXCL | O_RDWR, 0666);
-        if (fd_ < 0) {
+        if (fd_ >= 0) {
+            created = true;
+            if (ftruncate(fd_, sizeof(macfw::hal::transport::SharedStatus)) != 0) {
+                std::perror("transport status ftruncate");
+                close(fd_);
+                fd_ = -1;
+                shm_unlink(macfw::hal::transport::kShmName);
+                return false;
+            }
+        } else if (errno == EEXIST) {
+            fd_ = shm_open(macfw::hal::transport::kShmName, O_RDWR, 0);
+            if (fd_ < 0) {
+                std::perror("transport status shm_open existing");
+                return false;
+            }
+
+            struct stat st {};
+            if (fstat(fd_, &st) != 0) {
+                std::perror("transport status fstat");
+                close(fd_);
+                fd_ = -1;
+                return false;
+            }
+            if (st.st_size != static_cast<off_t>(sizeof(macfw::hal::transport::SharedStatus))) {
+                std::fprintf(stderr,
+                             "transport status ABI size mismatch: got %lld, expected %zu; "
+                             "refusing to replace a live persistent mapping\n",
+                             static_cast<long long>(st.st_size),
+                             sizeof(macfw::hal::transport::SharedStatus));
+                close(fd_);
+                fd_ = -1;
+                return false;
+            }
+        } else {
             std::perror("transport status shm_open");
-            return false;
-        }
-        if (ftruncate(fd_, sizeof(macfw::hal::transport::SharedStatus)) != 0) {
-            std::perror("transport status ftruncate");
-            close(fd_);
-            fd_ = -1;
-            shm_unlink(macfw::hal::transport::kShmName);
             return false;
         }
 
@@ -49,23 +73,37 @@ public:
             std::perror("transport status mmap");
             close(fd_);
             fd_ = -1;
-            shm_unlink(macfw::hal::transport::kShmName);
+            if (created) shm_unlink(macfw::hal::transport::kShmName);
             return false;
         }
 
         status_ = static_cast<macfw::hal::transport::SharedStatus*>(p);
-        new (status_) macfw::hal::transport::SharedStatus;
-        status_->magic = macfw::hal::transport::kMagic;
-        status_->version = macfw::hal::transport::kVersion;
-        status_->structSize = sizeof(*status_);
-        status_->reserved0 = 0;
-        status_->state.store(static_cast<std::uint32_t>(macfw::hal::transport::State::Offline),
-                             std::memory_order_release);
+
+        if (created || !macfw::hal::transport::valid(*status_)) {
+            // A newly-created object has no readers yet. For an existing object,
+            // only accept in-place initialization when its byte size already
+            // matches this v1 ABI; incompatible sizes are rejected above.
+            new (status_) macfw::hal::transport::SharedStatus;
+            status_->magic = macfw::hal::transport::kMagic;
+            status_->version = macfw::hal::transport::kVersion;
+            status_->structSize = sizeof(*status_);
+            status_->reserved0 = 0;
+            status_->transitionSequence.store(0, std::memory_order_release);
+            status_->heartbeatSequence.store(0, std::memory_order_release);
+        }
+
+        // Preserve the object identity, but start each supervisor instance from
+        // an explicit offline state. Existing HAL mappings observe these stores
+        // immediately and will see subsequent RECOVERING/ONLINE transitions from
+        // this same shared object.
         status_->requestedRate.store(0, std::memory_order_release);
         status_->activeRate.store(0, std::memory_order_release);
         status_->enginePid.store(0, std::memory_order_release);
-        status_->transitionSequence.store(0, std::memory_order_release);
-        status_->heartbeatSequence.store(0, std::memory_order_release);
+        status_->state.store(static_cast<std::uint32_t>(macfw::hal::transport::State::Offline),
+                             std::memory_order_release);
+        status_->transitionSequence.fetch_add(1, std::memory_order_acq_rel);
+        status_->heartbeatSequence.fetch_add(1, std::memory_order_acq_rel);
+
         lastState_ = macfw::hal::transport::State::Offline;
         lastRequestedRate_ = 0;
         lastActiveRate_ = 0;
