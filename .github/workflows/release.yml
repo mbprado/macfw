@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9][0-9].[0-9][0-9][0-9]'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: macos-15-intel
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate tag and source version
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+
+          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]{2}\.[0-9]{3}$ ]]; then
+            echo "error: release tag '$TAG' does not match x.yy.zzz" >&2
+            exit 1
+          fi
+
+          VERSION="$(sed -n 's/^#define MACFW_VERSION "\([^"]*\)"/\1/p' fw410/version.h | head -1)"
+          if [[ -z "$VERSION" ]]; then
+            echo "error: unable to read MACFW_VERSION from fw410/version.h" >&2
+            exit 1
+          fi
+
+          if [[ "$TAG" != "$VERSION" ]]; then
+            echo "error: tag '$TAG' does not match source version '$VERSION'" >&2
+            exit 1
+          fi
+
+          echo "release version: $VERSION"
+          echo "commit: $(git rev-parse HEAD)"
+
+      - name: Build release package
+        shell: bash
+        run: |
+          set -euo pipefail
+          make clean
+          make runtime
+          make package
+
+      - name: Validate package artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pkgs=(package/dist/macfw-fw410-${GITHUB_REF_NAME}-*.pkg)
+          if [[ ${#pkgs[@]} -ne 1 ]]; then
+            echo "error: expected exactly one package for ${GITHUB_REF_NAME}, found ${#pkgs[@]}" >&2
+            printf '  %s\n' "${pkgs[@]:-}"
+            exit 1
+          fi
+          echo "PKG_PATH=${pkgs[0]}" >> "$GITHUB_ENV"
+          echo "PKG_NAME=$(basename "${pkgs[0]}")" >> "$GITHUB_ENV"
+
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd package/dist
+          shasum -a 256 "$PKG_NAME" > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp RELEASE-NOTES.md package/dist/RELEASE-NOTES.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            "$PKG_PATH" \
+            package/dist/SHA256SUMS \
+            --title "macfw ${GITHUB_REF_NAME} Alpha" \
+            --notes-file RELEASE-NOTES.md \
+            --prerelease
