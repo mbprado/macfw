@@ -24,3 +24,5 @@ package: runtime
 clean:
 	$(MAKE) -C fw410 clean
 	rm -rf package/build package/dist
+	chmod 0755 package/build-pkg.sh package/scripts/preinstall package/scripts/postinstall \
+		fw410/service/install-service.sh fw410/service/uninstall-service.sh
