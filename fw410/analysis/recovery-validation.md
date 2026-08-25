@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-25
 
-This note records the hardware validation of the `haltransport` recovery state machine after the native 44.1/48 kHz full-duplex paths and common transport refactors were already stable.
+This note records hardware validation of the `haltransport` recovery state machine and the versioned transport-status ABI after the native 44.1/48 kHz full-duplex paths and common transport refactors were already stable.
 
 ## Recovery architecture under test
 
@@ -19,7 +19,9 @@ native full-duplex engine
     -> fresh generation/node acquisition
     -> rate setup
     -> fresh CMP / ISO / DMA lifecycle
-    -> full-duplex service resumes
+    -> native engine READY signal
+    -> supervisor publishes ONLINE
+    -> full-duplex service continues
 ```
 
 `fwboot --execute` uses explicit guarded result codes, so the supervisor can distinguish a boot cue that was actually issued from no-loader, guard-refused and unstable-candidate outcomes. Retry delay backs off instead of spinning when the device is absent or the FireWire bus is unstable.
@@ -91,6 +93,48 @@ A separate test began with the interface physically connected and working at 48 
 
 This is consistent with the previously observed intermittent 44.1 first-start/state anomaly. It is not considered a steady-state transport regression because the final 44.1 state is clean and repeatable once established. Keep this transition log as evidence when the 44.1 startup anomaly is investigated later.
 
+## Transport-status ABI — implemented and hardware-validated
+
+`haltransport` now publishes a small versioned POSIX shared-memory status block defined by `hal/include/macfw_hal_transport_status.h`. The current ABI exposes:
+
+- `OFFLINE`, `RECOVERING`, and `ONLINE` transport states;
+- requested native rate;
+- active native-engine rate;
+- current native-engine PID;
+- transition sequence;
+- heartbeat sequence.
+
+`tools/transport/transportstatus` is the diagnostic reader and supports one-shot and `--watch` modes.
+
+The Darwin POSIX SHM object uses the deliberately short name `/macfw_fw410_status_v1`. The supervisor is the single publisher/owner and recreates the status object on startup so stale objects from an earlier ABI/build cannot leave an incompatible mapping behind.
+
+### Explicit native-engine READY handshake
+
+`ONLINE` no longer means merely that a child process exists or survived an arbitrary grace period. Each native engine explicitly signals READY to its parent only after reaching its proven operational point:
+
+- **48 kHz:** after successful duplex ISO startup;
+- **44.1 kHz:** after duplex ISO startup and successful post-start AV/C 44.1 kHz reassertion.
+
+Until READY arrives, a launched child remains `RECOVERING`. The older survival interval remains useful only for recovery-backoff stabilization; it is no longer the definition of transport readiness.
+
+Hardware validation showed the intended distinction clearly. During physical reconnect, several temporary child PIDs were launched while the FireWire bus/device was still transitioning. They appeared as `RECOVERING` and disappeared back to `active rate = 0 / pid = 0` when those attempts failed. Only the final stable child published READY and caused the supervisor to transition to `ONLINE`.
+
+Representative successful end of a reconnect sequence:
+
+```text
+transport state: RECOVERING
+    requested rate: 48000 Hz
+    active rate:    48000 Hz
+    engine pid:     1101
+
+transport state: ONLINE
+    requested rate: 48000 Hz
+    active rate:    48000 Hz
+    engine pid:     1101
+```
+
+A normal 44.1 -> 48 kHz rate switch also showed `RECOVERING -> ONLINE` with the same new child PID, confirming that readiness is tied to the engine handshake rather than a fixed delay.
+
 ## Validated recovery matrix
 
 | Recovery behavior | 44.1 kHz | 48 kHz |
@@ -104,6 +148,9 @@ This is consistent with the previously observed intermittent 44.1 first-start/st
 | full-duplex playback recovery | validated | validated |
 | capture recovery | validated | validated |
 | software-monitoring recovery | validated | validated |
+| explicit engine READY | validated | validated |
+| status ABI rate-change reporting | validated | validated |
+| status ABI reconnect reporting | validated | validated |
 | 44.1 post-start AV/C reassert after reconnect | validated | n/a |
 
 ## CoreAudio availability policy
@@ -126,4 +173,4 @@ transport state becomes ONLINE
 existing CoreAudio clients continue using the same device instance
 ```
 
-The next implementation step is a small versioned transport-status shared-memory ABI between `haltransport` and the HAL. It should communicate transport availability without moving FireWire lifecycle work into CoreAudio real-time callbacks.
+The transport-status ABI now provides the state needed for this policy. The next implementation stage is deliberately non-invasive: map and observe this ABI inside the HAL first, without changing playback/capture callbacks. Once HAL-side observation is validated under `coreaudiod`, offline audio behavior can be introduced as a separate checkpoint.
