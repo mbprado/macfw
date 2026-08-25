@@ -1,24 +1,35 @@
 PREFIX ?= /Library/Application Support/macfw/fw410
 
-.PHONY: all clean install uninstall package hal tools runtime
+.PHONY: all clean install uninstall hal runtime all-tools
 
-all: hal tools
+all: hal runtime
 
 hal:
 	$(MAKE) -C hal
 
-tools:
-	$(MAKE) -C tools
-
-runtime:
+runtime: hal
 	$(MAKE) -C tools transport
 	$(MAKE) -C tools rateprobe
 	$(MAKE) -C tools fwboot
 	$(MAKE) -C tools deviceprobe
 
-install: all
+all-tools: hal
+	$(MAKE) -C tools
+
+install:
 	@if [ "$$(id -u)" -ne 0 ]; then \
 		echo "error: make install must be run as root (use sudo make install)" >&2; \
+		exit 1; \
+	fi
+	@if [ ! -x hal/build/macfw-fw410.driver/Contents/MacOS/macfw-fw410 ] || \
+	    [ ! -x tools/transport/haltransport/haltransport ] || \
+	    [ ! -x tools/transport/halbridge44100/halbridge44100 ] || \
+	    [ ! -x tools/transport/halbridge48000/halbridge48000 ] || \
+	    [ ! -x tools/transport/transportstatus/transportstatus ] || \
+	    [ ! -x tools/control/rateprobe/rateprobe ] || \
+	    [ ! -x tools/device/fwboot/fwboot ] || \
+	    [ ! -x tools/device/deviceprobe/deviceprobe ]; then \
+		echo "error: release runtime is not built; run 'make runtime' as a normal user first" >&2; \
 		exit 1; \
 	fi
 	$(MAKE) -C hal install
@@ -32,11 +43,6 @@ uninstall:
 	bash service/uninstall-service.sh
 	$(MAKE) -C hal uninstall
 
-package: all
-	chmod +x package/build-pkg.sh package/scripts/preinstall package/scripts/postinstall
-	./package/build-pkg.sh
-
 clean:
 	$(MAKE) -C hal clean
 	$(MAKE) -C tools clean
-	rm -rf package/build package/dist
