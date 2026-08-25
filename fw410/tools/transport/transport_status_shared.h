@@ -3,6 +3,7 @@
 #include "macfw_hal_transport_status.h"
 
 #include <cerrno>
+#include <cstdio>
 #include <cstdint>
 #include <fcntl.h>
 #include <new>
@@ -21,12 +22,21 @@ public:
 
     bool open() {
         fd_ = shm_open(macfw::hal::transport::kShmName, O_CREAT | O_RDWR, 0666);
-        if (fd_ < 0) return false;
-        if (ftruncate(fd_, sizeof(macfw::hal::transport::SharedStatus)) != 0) return false;
+        if (fd_ < 0) {
+            std::perror("transport status shm_open");
+            return false;
+        }
+        if (ftruncate(fd_, sizeof(macfw::hal::transport::SharedStatus)) != 0) {
+            std::perror("transport status ftruncate");
+            return false;
+        }
 
         void* p = mmap(nullptr, sizeof(macfw::hal::transport::SharedStatus),
                        PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
-        if (p == MAP_FAILED) return false;
+        if (p == MAP_FAILED) {
+            std::perror("transport status mmap");
+            return false;
+        }
 
         status_ = static_cast<macfw::hal::transport::SharedStatus*>(p);
         new (status_) macfw::hal::transport::SharedStatus;
