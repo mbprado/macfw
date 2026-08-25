@@ -1,4 +1,4 @@
-TOOLS := fwboot fwprobe
+TOOLS := fwboot fwprobe deviceprobe
 .PHONY: all clean $(TOOLS)
 all: $(TOOLS)
 $(TOOLS):
