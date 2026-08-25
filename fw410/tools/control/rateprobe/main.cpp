@@ -170,6 +170,8 @@ bool run(unsigned targetRate, bool execute, bool keep, bool raw) {
             if (!execute) {
                 std::cout << "status: PASS - dry run only; no CONTROL command sent\n"
                           << "to execute: ./rateprobe --execute " << targetRate << " [--keep] [--raw]\n";
+            } else if (outOk && inOk && outRate == targetRate && inRate == targetRate) {
+                std::cout << "rate already " << targetRate << " Hz; no AV/C rate CONTROL sent\n";
             } else {
                 const unsigned restoreOut = outRate, restoreIn = inRate;
                 std::cout << "setting OUTPUT plug 0...\n";
