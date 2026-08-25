@@ -97,11 +97,36 @@ pkgbuild \
     --install-location / \
     "$STAGE/fw410.pkg"
 
+cat > "$STAGE/welcome.html" <<EOF
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+body { font-family: -apple-system, sans-serif; font-size: 13px; line-height: 1.45; }
+h2 { font-size: 15px; margin-top: 18px; }
+ul { margin-top: 6px; }
+</style>
+</head>
+<body>
+<p>You will be guided through the installation of the macfw FireWire Audio Driver ${VERSION}.</p>
+
+<h2>Supported audio interfaces</h2>
+<ul>
+    <li>M-Audio FireWire 410</li>
+</ul>
+
+<p>The installer checks for supported FireWire hardware before installing the driver.</p>
+</body>
+</html>
+EOF
+
 cat > "$STAGE/Distribution.xml" <<EOF
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="1">
     <title>macfw FireWire Audio Driver ${VERSION}</title>
     <organization>${IDENTIFIER}</organization>
+    <welcome file="welcome.html" mime-type="text/html"/>
     <domains enable_localSystem="true" enable_currentUserHome="false" enable_anywhere="false"/>
     <options customize="never" require-scripts="true"/>
     <choices-outline>
@@ -122,6 +147,7 @@ EOF
 productbuild \
     --distribution "$STAGE/Distribution.xml" \
     --package-path "$STAGE" \
+    --resources "$STAGE" \
     "$PKG"
 
 echo "built: $PKG"
