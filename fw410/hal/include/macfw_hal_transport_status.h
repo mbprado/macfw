@@ -6,7 +6,9 @@
 
 namespace macfw::hal::transport {
 
-constexpr const char* kShmName = "/macfw_fw410_transport_status_v1";
+// Keep the Darwin POSIX SHM object name comfortably below the platform's
+// short name limit. The previous v1 name was 32 characters including '/'.
+constexpr const char* kShmName = "/macfw_fw410_status_v1";
 constexpr std::uint32_t kMagic = 0x4d465753; // 'MFWS'
 constexpr std::uint32_t kVersion = 1;
 
