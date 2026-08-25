@@ -5,8 +5,10 @@ This file records limitations and open items for the first macfw M-Audio FireWir
 ## Platform scope
 
 - **Intel Macs only.** Apple Silicon is not currently a project target.
-- **macOS Sonoma and newer** is the current intended platform scope. Broader macOS-version compatibility has not yet been established.
-- Hardware validation so far is concentrated on the development machine and FW410 unit. A broader Mac / FireWire-adapter / firmware matrix is still needed.
+- Hardware validation now includes clean/package tests on **macOS Monterey 12.7.6** and **macOS Sonoma 14.8.9**.
+- **Ventura 13.x remains untested.** Its position between two tested releases is not sufficient evidence to mark it validated.
+- Hardware validation is still concentrated on one development Mac/FW410 combination. A broader Mac / FireWire-adapter / firmware matrix is still needed.
+- See [`COMPATIBILITY.md`](COMPATIBILITY.md) for the current tested matrix.
 
 ## Supported hardware
 
@@ -24,6 +26,12 @@ This file records limitations and open items for the first macfw M-Audio FireWir
 ## Latency
 
 Capture currently uses a deliberately conservative 4,096-frame prefill to prioritize correctness and recovery stability. This produces noticeable software-monitoring latency and has not yet been tuned for low-latency production use.
+
+## Sonoma 14.8.9 capture observation
+
+The packaged driver installs and operates on macOS Sonoma 14.8.9, and playback plus normal transport behavior passed a quick functional test. Capture was functional but audibly somewhat broken/degraded in that test.
+
+No capture tuning or controlled transport-parameter investigation was performed on Sonoma during this pass. The observation is therefore recorded as an open compatibility item rather than attributed to a confirmed Sonoma-specific defect.
 
 ## 44.1 kHz lifecycle
 
@@ -58,7 +66,9 @@ The initial alpha packaging work is focused on reproducible installation and har
 
 ## Package and compatibility testing
 
-The `.pkg` installer has been validated for immediate operation after installation without reboot on the development system. Reboot recovery, delayed hardware attachment, sample-rate switching, physical disconnect/reconnect, and launchd process restart have also been validated there.
+The `.pkg` installer has been validated for immediate operation after installation without reboot. A completely fresh **Monterey 12.7.6** installation worked as expected with the packaged driver. The same installer also functioned on **Sonoma 14.8.9**, with the capture-quality observation noted above.
+
+Reboot recovery, delayed hardware attachment, sample-rate switching, physical disconnect/reconnect, and launchd process restart have also been validated during development testing.
 
 This does not yet constitute a broad compatibility guarantee across all Intel Mac models, FireWire adapters, macOS versions, or FW410 hardware revisions.
 
