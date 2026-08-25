@@ -27,6 +27,20 @@ for file in "$HALTRANSPORT" "$BRIDGE44100" "$BRIDGE48000" "$FWBOOT" "$DEVICEPROB
     fi
 done
 
+set +e
+"$DEVICEPROBE" --require-supported
+probe_status=$?
+set -e
+if [[ $probe_status -ne 0 ]]; then
+    if [[ $probe_status -eq 3 ]]; then
+        echo "error: no supported macfw FireWire interface is connected" >&2
+        echo "connect a supported interface in operational or bootloader mode and retry" >&2
+    else
+        echo "error: macfw device detection failed with status $probe_status" >&2
+    fi
+    exit "$probe_status"
+fi
+
 # Stop an older loaded instance before replacing its runtime files.
 launchctl bootout system/$LABEL >/dev/null 2>&1 || true
 
