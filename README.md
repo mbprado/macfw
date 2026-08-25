@@ -23,11 +23,15 @@ Hardware-validated functionality includes:
 - persistent CoreAudio endpoint with capture silence while transport is offline;
 - automatic launchd-managed transport startup/restart;
 - reboot recovery and delayed hardware attachment after macOS has already booted;
-- native `.pkg` installation, validated to become operational immediately without reboot on the development system.
+- native `.pkg` installation, including a clean-system Monterey 12.7.6 install that became operational as expected.
 
-The current target is **Intel Macs running macOS Sonoma or newer**. Apple Silicon is not currently supported.
+Current macOS test status:
 
-This is alpha software and the cross-machine compatibility matrix is still small. See [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md).
+- **Monterey 12.7.6:** validated on a fresh install, with playback/capture and package installation working as expected;
+- **Ventura 13.x:** not yet tested;
+- **Sonoma 14.8.9:** installer, playback and transport behavior functioned, but capture quality was audibly degraded in the quick functional test and needs follow-up.
+
+Apple Silicon is not currently supported. See [`COMPATIBILITY.md`](COMPATIBILITY.md) and [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) for the current evidence-based compatibility status.
 
 ## Install
 
@@ -92,6 +96,7 @@ macfw/
 ├── README.md
 ├── INSTALL.md
 ├── CHANGELOG.md
+├── COMPATIBILITY.md
 ├── KNOWN-LIMITATIONS.md
 ├── RELEASE-NOTES.md
 ├── RELEASES.md
@@ -165,6 +170,7 @@ Next areas include broader hardware/macOS validation, latency tuning, mixer/cont
 
 - [`INSTALL.md`](INSTALL.md) — install, build, status, troubleshooting and uninstall.
 - [`CHANGELOG.md`](CHANGELOG.md) — user-visible changes.
+- [`COMPATIBILITY.md`](COMPATIBILITY.md) — hardware-tested macOS compatibility matrix.
 - [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) — unsupported/open behavior.
 - [`RELEASE-NOTES.md`](RELEASE-NOTES.md) — current alpha release notes.
 - [`RELEASES.md`](RELEASES.md) — versioning, tagging and release contract.
