@@ -1,0 +1,27 @@
+#!/bin/bash
+set -euo pipefail
+
+PROBE="/tmp/macfw-fw410-package/deviceprobe"
+
+if [[ ! -x "$PROBE" ]]; then
+    echo "macfw FW410 installer: deviceprobe staging helper is missing" >&2
+    exit 1
+fi
+
+set +e
+"$PROBE" --require-supported
+status=$?
+set -e
+
+if [[ $status -eq 0 ]]; then
+    exit 0
+fi
+
+if [[ $status -eq 3 ]]; then
+    echo "macfw FW410 installer: no supported FireWire interface is connected." >&2
+    echo "Connect an M-Audio FireWire 410 in operational or bootloader mode and run the installer again." >&2
+else
+    echo "macfw FW410 installer: device detection failed with status $status." >&2
+fi
+
+exit "$status"
