@@ -4,6 +4,7 @@
 #include "macfw/pcm_ring_buffer.h"
 #include "macfw_hal_shm.h"
 #include "../capture_shared.h"
+#include "../engine_ready.h"
 #include "../full_duplex_shared.h"
 #include "../full_duplex_engine_setup.h"
 #include "../full_duplex_lifecycle.h"
@@ -138,6 +139,7 @@ bool run() {
         CFRunLoopRunInMode(kCFRunLoopDefaultMode,wait,false);
     }
     if (!fcp.reassert44100()) goto cleanup;
+    macfw::transport::signalEngineReady();
 
     {
         FullDuplexRuntimeConfig runtimeConfig;
