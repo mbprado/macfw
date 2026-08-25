@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - '[0-9]+.[0-9][0-9].[0-9][0-9][0-9]'
+      - '[0-9]*.[0-9][0-9].[0-9][0-9][0-9]'
 
 permissions:
   contents: write
@@ -48,7 +48,6 @@ jobs:
         run: |
           set -euo pipefail
           make clean
-          make runtime
           make package
 
       - name: Validate package artifact
@@ -72,12 +71,6 @@ jobs:
           cd package/dist
           shasum -a 256 "$PKG_NAME" > SHA256SUMS
           cat SHA256SUMS
-
-      - name: Prepare release notes
-        shell: bash
-        run: |
-          set -euo pipefail
-          cp RELEASE-NOTES.md package/dist/RELEASE-NOTES.md
 
       - name: Create GitHub Release
         env:
