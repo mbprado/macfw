@@ -44,5 +44,6 @@ uninstall:
 	$(MAKE) -C hal uninstall
 
 clean:
+	$(MAKE) -C lib clean
 	$(MAKE) -C hal clean
 	$(MAKE) -C tools clean
