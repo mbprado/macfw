@@ -52,10 +52,8 @@ bool run() {
     Fw410ControlServer control;
     bool ok = false;
     if (!lifecycle.addCallbackDispatcher() || !fcp.arm(setup.device)) goto cleanup;
-    if (!control.start(fcp)) {
-        std::cerr << "FW410 control socket setup failed\n";
-        goto cleanup;
-    }
+    if (!control.start(fcp))
+        std::cerr << "warning: FW410 control socket unavailable; audio will continue\n";
     if (!lifecycle.startIsoch()) goto cleanup;
 
     {
