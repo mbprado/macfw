@@ -170,6 +170,7 @@ int main(int argc, char** argv) {
     const std::string control = argv[1];
     const std::string action = argv[2];
     std::string command;
+    std::string headphoneMixerSetDisplay;
     bool levelResponse = false;
     bool sourceResponse = false;
     bool headphoneMixerResponse = false;
@@ -201,6 +202,7 @@ int main(int argc, char** argv) {
             if (index < 0 || (state != "on" && state != "off")) return usage();
             command = "HEADPHONE_MIXER SET " + std::to_string(index) +
                       " " + (state == "on" ? "1" : "0");
+            headphoneMixerSetDisplay = std::string(argv[3]) + ": " + state;
         } else {
             return usage();
         }
@@ -228,6 +230,10 @@ int main(int argc, char** argv) {
             return 0;
         }
         if (headphoneMixerResponse) return printHeadphoneMixer(payload);
+        if (!headphoneMixerSetDisplay.empty()) {
+            std::cout << headphoneMixerSetDisplay << '\n';
+            return 0;
+        }
         std::cout << payload << '\n';
         return 0;
     }
