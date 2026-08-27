@@ -86,8 +86,7 @@ public:
                    std::uint8_t audioChannel,
                    std::int16_t& value) {
         // AV/C Audio subunit FUNCTION BLOCK / Feature / CURRENT / Volume.
-        // This matches the Linux snd-firewire-ctl-services AvcLevelOperation
-        // representation: signed 16-bit fixed-point level, 0x0100 per dB.
+        // audioChannel is the encoded AV/C channel number (1 = first channel).
         const UInt8 cmd[12] = {
             0x01, 0x08, 0xb8, 0x81, functionBlock, 0x10, 0x02, audioChannel,
             0x02, 0x02, 0xff, 0xff
@@ -107,6 +106,54 @@ public:
         const UInt8 cmd[12] = {
             0x00, 0x08, 0xb8, 0x81, functionBlock, 0x10, 0x02, audioChannel,
             0x02, 0x02,
+            static_cast<UInt8>((raw >> 8) & 0xff),
+            static_cast<UInt8>(raw & 0xff)
+        };
+        if (!transaction(cmd, sizeof(cmd))) return false;
+        return acceptedResponse();
+    }
+
+    bool readProcessingMixer(std::uint8_t functionBlock,
+                             std::uint8_t inputPlug,
+                             std::uint8_t inputChannel,
+                             std::uint8_t outputChannel,
+                             bool& enabled) {
+        // AV/C Audio subunit FUNCTION BLOCK / Processing / CURRENT / Mixer.
+        // Linux snd-firewire-ctl-services uses 0x0000 for an enabled source and
+        // 0x8000 (negative infinity) for a disabled source.
+        const UInt8 cmd[14] = {
+            0x01, 0x08, 0xb8,
+            0x82, functionBlock, 0x10, 0x04,
+            inputPlug, inputChannel, outputChannel,
+            0x03, 0x02, 0xff, 0xff
+        };
+        if (!transaction(cmd, sizeof(cmd))) return false;
+        if (response_.length < 14 || response_.bytes[0] != 0x0c) return false;
+        const std::uint16_t raw =
+            (static_cast<std::uint16_t>(response_.bytes[12]) << 8) |
+            response_.bytes[13];
+        if (raw == 0x0000) {
+            enabled = true;
+            return true;
+        }
+        if (raw == 0x8000) {
+            enabled = false;
+            return true;
+        }
+        return false;
+    }
+
+    bool writeProcessingMixer(std::uint8_t functionBlock,
+                              std::uint8_t inputPlug,
+                              std::uint8_t inputChannel,
+                              std::uint8_t outputChannel,
+                              bool enabled) {
+        const std::uint16_t raw = enabled ? 0x0000 : 0x8000;
+        const UInt8 cmd[14] = {
+            0x00, 0x08, 0xb8,
+            0x82, functionBlock, 0x10, 0x04,
+            inputPlug, inputChannel, outputChannel,
+            0x03, 0x02,
             static_cast<UInt8>((raw >> 8) & 0xff),
             static_cast<UInt8>(raw & 0xff)
         };
