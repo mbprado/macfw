@@ -1,4 +1,6 @@
 CXX ?= c++
+GIT_SHA := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+CPPFLAGS += -I.. -DMACFW_GIT_SHA=\"$(GIT_SHA)\"
 APP := build/macfw FW410 Control.app
 CONTENTS := $(APP)/Contents
 MACOS := $(CONTENTS)/MacOS
@@ -28,10 +30,13 @@ $(ICNS): $(ICON)
 	iconutil -c icns "$(ICONSET)" -o "$(ICNS)"
 	cp "$(ICON)" "$(RESOURCES)/icon.png"
 
-$(BINARY): $(SOURCES) Info.plist $(ICNS)
+$(BINARY): $(SOURCES) Info.plist $(ICNS) ../version.h
 	mkdir -p "$(MACOS)" "$(RESOURCES)"
 	cp Info.plist "$(CONTENTS)/Info.plist"
-	$(CXX) -std=c++17 -Wall -Wextra -Wpedantic -fobjc-arc \
+	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(GIT_SHA)" "$(CONTENTS)/Info.plist"
+	/usr/libexec/PlistBuddy -c "Delete :MacFWGitCommit" "$(CONTENTS)/Info.plist" >/dev/null 2>&1 || true
+	/usr/libexec/PlistBuddy -c "Add :MacFWGitCommit string $(GIT_SHA)" "$(CONTENTS)/Info.plist"
+	$(CXX) $(CPPFLAGS) -std=c++17 -Wall -Wextra -Wpedantic -fobjc-arc \
 		-framework AppKit -framework Foundation \
 		-o "$(BINARY)" $(SOURCES)
 
