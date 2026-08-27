@@ -2,6 +2,7 @@
 
 #include "full_duplex_fcp_control.h"
 
+#include <array>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -23,6 +24,12 @@ public:
     static constexpr std::uint8_t kHeadphoneLevel = 0x0f;
     static constexpr std::uint8_t kAuxStream12Level = 0x06;
     static constexpr std::uint8_t kAuxOutputLevel = 0x09;
+    static constexpr std::uint8_t kHeadphoneMixerBlock = 0x07;
+    static constexpr std::uint8_t kHeadphoneMixerInputPlug = 0x00;
+    static constexpr std::uint8_t kHeadphoneMixerOutputChannel = 0x01;
+    static constexpr std::array<std::uint8_t, 5> kHeadphoneMixerInputChannels = {
+        0x01, 0x03, 0x05, 0x07, 0x09
+    };
 
     ~Fw410ControlServer() { reset(); }
 
@@ -127,15 +134,15 @@ private:
     bool readStereoLevel(std::uint8_t functionBlock,
                          std::int16_t& left,
                          std::int16_t& right) {
-        return fcp_->readLevel(functionBlock, 0, left) &&
-               fcp_->readLevel(functionBlock, 1, right);
+        return fcp_->readLevel(functionBlock, 1, left) &&
+               fcp_->readLevel(functionBlock, 2, right);
     }
 
     bool writeStereoLevel(std::uint8_t functionBlock,
                           std::int16_t left,
                           std::int16_t right) {
-        if (!fcp_->writeLevel(functionBlock, 0, left)) return false;
-        if (!fcp_->writeLevel(functionBlock, 1, right)) return false;
+        if (!fcp_->writeLevel(functionBlock, 1, left)) return false;
+        if (!fcp_->writeLevel(functionBlock, 2, right)) return false;
         std::int16_t verifyLeft = 0;
         std::int16_t verifyRight = 0;
         return readStereoLevel(functionBlock, verifyLeft, verifyRight) &&
@@ -147,8 +154,6 @@ private:
         errno = 0;
         const long parsed = std::strtol(text.c_str(), &end, 10);
         if (errno != 0 || !end || *end != '\0') return false;
-        // Linux AvcLevelOperation exposes -inf..0 with 0x0100 (1 dB) steps.
-        // Keep raw protocol access strict to that documented range/step.
         if (parsed == -32768) {
             value = static_cast<std::int16_t>(parsed);
             return true;
@@ -197,6 +202,68 @@ private:
         reply("OK " + std::to_string(left) + " " + std::to_string(right) + "\n");
     }
 
+    bool readHeadphoneMixer(std::array<bool, 5>& state) {
+        for (std::size_t i = 0; i < state.size(); ++i) {
+            if (!fcp_->readProcessingMixer(kHeadphoneMixerBlock,
+                                           kHeadphoneMixerInputPlug,
+                                           kHeadphoneMixerInputChannels[i],
+                                           kHeadphoneMixerOutputChannel,
+                                           state[i]))
+                return false;
+        }
+        return true;
+    }
+
+    bool writeHeadphoneMixer(std::size_t index, bool enabled) {
+        if (index >= kHeadphoneMixerInputChannels.size()) return false;
+        if (!fcp_->writeProcessingMixer(kHeadphoneMixerBlock,
+                                        kHeadphoneMixerInputPlug,
+                                        kHeadphoneMixerInputChannels[index],
+                                        kHeadphoneMixerOutputChannel,
+                                        enabled))
+            return false;
+        bool verify = false;
+        return fcp_->readProcessingMixer(kHeadphoneMixerBlock,
+                                         kHeadphoneMixerInputPlug,
+                                         kHeadphoneMixerInputChannels[index],
+                                         kHeadphoneMixerOutputChannel,
+                                         verify) && verify == enabled;
+    }
+
+    void handleHeadphoneMixer(const std::string& command) {
+        if (command == "HEADPHONE_MIXER GET") {
+            std::array<bool, 5> state{};
+            if (!readHeadphoneMixer(state)) {
+                reply("ERR fcp-read-failed\n");
+                return;
+            }
+            std::string out = "OK";
+            for (bool enabled : state) out += enabled ? " 1" : " 0";
+            reply(out + "\n");
+            return;
+        }
+
+        const std::string prefix = "HEADPHONE_MIXER SET ";
+        if (command.rfind(prefix, 0) != 0) {
+            reply("ERR unknown-command\n");
+            return;
+        }
+
+        std::istringstream input(command.substr(prefix.size()));
+        unsigned index = 0;
+        unsigned value = 0;
+        std::string extra;
+        if (!(input >> index >> value) || (input >> extra) || index >= 5 || value > 1) {
+            reply("ERR invalid-headphone-mixer\n");
+            return;
+        }
+        if (!writeHeadphoneMixer(index, value != 0)) {
+            reply("ERR fcp-write-or-verify-failed\n");
+            return;
+        }
+        reply("OK " + std::to_string(index) + " " + std::to_string(value) + "\n");
+    }
+
     void handle(const std::string& command) {
         if (command == "HEADPHONE_SOURCE GET") {
             std::uint8_t value = 0xff;
@@ -233,6 +300,10 @@ private:
         }
         if (command.rfind("AUX_OUTPUT_VOLUME ", 0) == 0) {
             handleLevel(command, "AUX_OUTPUT_VOLUME", kAuxOutputLevel);
+            return;
+        }
+        if (command.rfind("HEADPHONE_MIXER ", 0) == 0) {
+            handleHeadphoneMixer(command);
             return;
         }
 
