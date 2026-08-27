@@ -10,6 +10,7 @@ hal:
 runtime: hal
 	$(MAKE) -C tools transport
 	$(MAKE) -C tools rateprobe
+	$(MAKE) -C tools fw410ctl
 	$(MAKE) -C tools fwboot
 	$(MAKE) -C tools deviceprobe
 
@@ -27,6 +28,7 @@ install:
 	    [ ! -x tools/transport/halbridge48000/halbridge48000 ] || \
 	    [ ! -x tools/transport/transportstatus/transportstatus ] || \
 	    [ ! -x tools/control/rateprobe/rateprobe ] || \
+	    [ ! -x tools/control/fw410ctl/fw410ctl ] || \
 	    [ ! -x tools/device/fwboot/fwboot ] || \
 	    [ ! -x tools/device/deviceprobe/deviceprobe ]; then \
 		echo "error: release runtime is not built; run 'make runtime' as a normal user first" >&2; \
