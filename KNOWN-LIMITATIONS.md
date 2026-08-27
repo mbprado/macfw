@@ -27,17 +27,17 @@ This file records limitations and open items for the first macfw M-Audio FireWir
 
 Capture currently uses a deliberately conservative 4,096-frame prefill to prioritize correctness and recovery stability. This produces noticeable software-monitoring latency and has not yet been tuned for low-latency production use.
 
-## Sonoma 14.8.9 capture observation
-
-The packaged driver installs and operates on macOS Sonoma 14.8.9, and playback plus normal transport behavior passed a quick functional test. Capture was functional but audibly somewhat broken/degraded in that test.
-
-No capture tuning or controlled transport-parameter investigation was performed on Sonoma during this pass. The observation is therefore recorded as an open compatibility item rather than attributed to a confirmed Sonoma-specific defect.
-
 ## 44.1 kHz lifecycle
 
 The FW410 requires a device-specific 44.1 kHz startup sequence, including an AV/C rate reassertion after duplex streaming starts.
 
 Earlier development testing occasionally produced broken 44.1 kHz audio/capture. Removing the unconditional clean-stop reset to 48 kHz reduced this occurrence significantly to practically zero in subsequent testing. The historical failure remains documented until broader hardware testing establishes that the lifecycle is fully robust across machines and interfaces.
+
+## Sleep/wake coverage
+
+Sleep/wake has been hardware-validated on macOS Sonoma 14.8.9: playback and capture resumed normally after wake, and the FW410 remained in its operational personality rather than falling back to its bootloader personality.
+
+This is encouraging and improves on the observed behavior of the original vendor driver on the same hardware, but broader testing across different Macs, sleep durations and FireWire adapter chains is still needed before treating the behavior as universally guaranteed.
 
 ## Offline behavior
 
@@ -66,7 +66,7 @@ The initial alpha packaging work is focused on reproducible installation and har
 
 ## Package and compatibility testing
 
-The `.pkg` installer has been validated for immediate operation after installation without reboot. A completely fresh **Monterey 12.7.6** installation worked as expected with the packaged driver. The same installer also functioned on **Sonoma 14.8.9**, with the capture-quality observation noted above.
+The `.pkg` installer has been validated for immediate operation after installation without reboot. A completely fresh **Monterey 12.7.6** installation worked as expected with the packaged driver. The same installer is also fully functionally validated on **Sonoma 14.8.9**, including playback, capture and sleep/wake recovery.
 
 Reboot recovery, delayed hardware attachment, sample-rate switching, physical disconnect/reconnect, and launchd process restart have also been validated during development testing.
 
@@ -84,6 +84,6 @@ Useful reports should include:
 - exact Intel Mac model;
 - FireWire connection/adapters used;
 - FW410 behavior at 44.1 or 48 kHz;
-- whether the problem occurs after install, boot, rate switch, disconnect/reconnect, or normal streaming;
+- whether the problem occurs after install, boot, rate switch, disconnect/reconnect, sleep/wake, or normal streaming;
 - relevant `/Library/Logs/macfw-fw410-transport.log` output;
 - transport status output where available.
