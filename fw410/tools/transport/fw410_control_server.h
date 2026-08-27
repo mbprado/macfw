@@ -4,8 +4,10 @@
 
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <sstream>
 #include <string>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -17,7 +19,10 @@ namespace macfw::transport::duplex {
 class Fw410ControlServer {
 public:
     static constexpr const char* kSocketPath = "/tmp/macfw-fw410-control.sock";
-    static constexpr std::uint8_t kHeadphoneSelector = 7;
+    static constexpr std::uint8_t kHeadphoneSelector = 0x07;
+    static constexpr std::uint8_t kHeadphoneLevel = 0x0f;
+    static constexpr std::uint8_t kAuxStream12Level = 0x06;
+    static constexpr std::uint8_t kAuxOutputLevel = 0x09;
 
     ~Fw410ControlServer() { reset(); }
 
@@ -119,6 +124,79 @@ private:
         }
     }
 
+    bool readStereoLevel(std::uint8_t functionBlock,
+                         std::int16_t& left,
+                         std::int16_t& right) {
+        return fcp_->readLevel(functionBlock, 0, left) &&
+               fcp_->readLevel(functionBlock, 1, right);
+    }
+
+    bool writeStereoLevel(std::uint8_t functionBlock,
+                          std::int16_t left,
+                          std::int16_t right) {
+        if (!fcp_->writeLevel(functionBlock, 0, left)) return false;
+        if (!fcp_->writeLevel(functionBlock, 1, right)) return false;
+        std::int16_t verifyLeft = 0;
+        std::int16_t verifyRight = 0;
+        return readStereoLevel(functionBlock, verifyLeft, verifyRight) &&
+               verifyLeft == left && verifyRight == right;
+    }
+
+    static bool parseRawLevel(const std::string& text, std::int16_t& value) {
+        char* end = nullptr;
+        errno = 0;
+        const long parsed = std::strtol(text.c_str(), &end, 10);
+        if (errno != 0 || !end || *end != '\0') return false;
+        // Linux AvcLevelOperation exposes -inf..0 with 0x0100 (1 dB) steps.
+        // Keep raw protocol access strict to that documented range/step.
+        if (parsed == -32768) {
+            value = static_cast<std::int16_t>(parsed);
+            return true;
+        }
+        if (parsed < -32768 || parsed > 0 || (parsed % 0x100) != 0) return false;
+        value = static_cast<std::int16_t>(parsed);
+        return true;
+    }
+
+    void handleLevel(const std::string& command,
+                     const std::string& prefix,
+                     std::uint8_t functionBlock) {
+        if (command == prefix + " GET") {
+            std::int16_t left = 0;
+            std::int16_t right = 0;
+            if (!readStereoLevel(functionBlock, left, right)) {
+                reply("ERR fcp-read-failed\n");
+                return;
+            }
+            reply("OK " + std::to_string(left) + " " + std::to_string(right) + "\n");
+            return;
+        }
+
+        const std::string setPrefix = prefix + " SET ";
+        if (command.rfind(setPrefix, 0) != 0) return;
+
+        std::istringstream input(command.substr(setPrefix.size()));
+        std::string leftText;
+        std::string rightText;
+        std::string extra;
+        if (!(input >> leftText >> rightText) || (input >> extra)) {
+            reply("ERR invalid-level\n");
+            return;
+        }
+
+        std::int16_t left = 0;
+        std::int16_t right = 0;
+        if (!parseRawLevel(leftText, left) || !parseRawLevel(rightText, right)) {
+            reply("ERR invalid-level\n");
+            return;
+        }
+        if (!writeStereoLevel(functionBlock, left, right)) {
+            reply("ERR fcp-write-or-verify-failed\n");
+            return;
+        }
+        reply("OK " + std::to_string(left) + " " + std::to_string(right) + "\n");
+    }
+
     void handle(const std::string& command) {
         if (command == "HEADPHONE_SOURCE GET") {
             std::uint8_t value = 0xff;
@@ -142,6 +220,19 @@ private:
                 return;
             }
             reply("OK " + std::to_string(static_cast<unsigned>(verify)) + "\n");
+            return;
+        }
+
+        if (command.rfind("HEADPHONE_VOLUME ", 0) == 0) {
+            handleLevel(command, "HEADPHONE_VOLUME", kHeadphoneLevel);
+            return;
+        }
+        if (command.rfind("AUX_STREAM12_VOLUME ", 0) == 0) {
+            handleLevel(command, "AUX_STREAM12_VOLUME", kAuxStream12Level);
+            return;
+        }
+        if (command.rfind("AUX_OUTPUT_VOLUME ", 0) == 0) {
+            handleLevel(command, "AUX_OUTPUT_VOLUME", kAuxOutputLevel);
             return;
         }
 
