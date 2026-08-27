@@ -1,4 +1,4 @@
-.PHONY: all clean install uninstall package fw410 runtime all-tools
+.PHONY: all clean install uninstall package fw410 runtime all-tools gui
 
 all: fw410
 
@@ -7,6 +7,9 @@ fw410:
 
 runtime:
 	$(MAKE) -C fw410 runtime
+
+gui:
+	$(MAKE) -C fw410 gui
 
 all-tools:
 	$(MAKE) -C fw410 all-tools
