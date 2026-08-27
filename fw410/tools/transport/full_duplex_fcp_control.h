@@ -79,9 +79,39 @@ public:
             0x01, 0x00, 0x00, 0x00
         };
         if (!transaction(cmd, sizeof(cmd))) return false;
-        if (response_.length == 0) return false;
-        const UInt8 r = response_.bytes[0];
-        return r == 0x09 || r == 0x0c || r == 0x0d || r == 0x0f;
+        return acceptedResponse();
+    }
+
+    bool readLevel(std::uint8_t functionBlock,
+                   std::uint8_t audioChannel,
+                   std::int16_t& value) {
+        // AV/C Audio subunit FUNCTION BLOCK / Feature / CURRENT / Volume.
+        // This matches the Linux snd-firewire-ctl-services AvcLevelOperation
+        // representation: signed 16-bit fixed-point level, 0x0100 per dB.
+        const UInt8 cmd[12] = {
+            0x01, 0x08, 0xb8, 0x81, functionBlock, 0x10, 0x02, audioChannel,
+            0x02, 0x02, 0xff, 0xff
+        };
+        if (!transaction(cmd, sizeof(cmd))) return false;
+        if (response_.length < 12 || response_.bytes[0] != 0x0c) return false;
+        value = static_cast<std::int16_t>(
+            (static_cast<std::uint16_t>(response_.bytes[10]) << 8) |
+            response_.bytes[11]);
+        return true;
+    }
+
+    bool writeLevel(std::uint8_t functionBlock,
+                    std::uint8_t audioChannel,
+                    std::int16_t value) {
+        const std::uint16_t raw = static_cast<std::uint16_t>(value);
+        const UInt8 cmd[12] = {
+            0x00, 0x08, 0xb8, 0x81, functionBlock, 0x10, 0x02, audioChannel,
+            0x02, 0x02,
+            static_cast<UInt8>((raw >> 8) & 0xff),
+            static_cast<UInt8>(raw & 0xff)
+        };
+        if (!transaction(cmd, sizeof(cmd))) return false;
+        return acceptedResponse();
     }
 
 private:
@@ -134,6 +164,12 @@ private:
         while (!response_.received && CFAbsoluteTimeGetCurrent() < deadline)
             CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
         return response_.received;
+    }
+
+    bool acceptedResponse() const {
+        if (response_.length == 0) return false;
+        const UInt8 r = response_.bytes[0];
+        return r == 0x09 || r == 0x0c || r == 0x0d || r == 0x0f;
     }
 
     bool setRate44100(UInt8 opcode) {
