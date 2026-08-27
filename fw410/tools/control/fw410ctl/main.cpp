@@ -7,7 +7,7 @@
 #include <unistd.h>
 
 namespace {
-constexpr const char* kSocketPath = "/var/run/macfw-fw410-control.sock";
+constexpr const char* kSocketPath = "/tmp/macfw-fw410-control.sock";
 
 int usage() {
     std::cerr << "usage:\n"
