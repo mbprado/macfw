@@ -1,6 +1,6 @@
 PREFIX ?= /Library/Application Support/macfw/fw410
 
-.PHONY: all clean install uninstall hal runtime all-tools
+.PHONY: all clean install uninstall hal runtime all-tools gui
 
 all: hal runtime
 
@@ -13,6 +13,9 @@ runtime: hal
 	$(MAKE) -C tools fw410ctl
 	$(MAKE) -C tools fwboot
 	$(MAKE) -C tools deviceprobe
+
+gui:
+	$(MAKE) -C control-panel
 
 all-tools: hal
 	$(MAKE) -C tools
@@ -49,3 +52,4 @@ clean:
 	$(MAKE) -C lib clean
 	$(MAKE) -C hal clean
 	$(MAKE) -C tools clean
+	$(MAKE) -C control-panel clean
