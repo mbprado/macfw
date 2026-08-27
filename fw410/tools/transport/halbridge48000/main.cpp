@@ -7,6 +7,8 @@
 #include "../engine_ready.h"
 #include "../full_duplex_shared.h"
 #include "../full_duplex_engine_setup.h"
+#include "../full_duplex_fcp_control.h"
+#include "../fw410_control_server.h"
 #include "../full_duplex_lifecycle.h"
 #include "../full_duplex_runtime.h"
 
@@ -54,6 +56,18 @@ bool run() {
                            kCaptureMaxPacket, kPlaybackMaxPacket))
         return false;
     if (!lifecycle.addCallbackDispatcher()) return false;
+
+    Fw410FcpControl fcp;
+    if (!fcp.arm(setup.device)) {
+        std::cerr << "FW410 FCP control setup failed\n";
+        return false;
+    }
+    Fw410ControlServer control;
+    if (!control.start(fcp)) {
+        std::cerr << "FW410 control socket setup failed\n";
+        return false;
+    }
+
     if (!lifecycle.startIsoch()) return false;
 
     requestInteractiveQos();
@@ -71,10 +85,13 @@ bool run() {
         gStopRequested, setup.native, setup.input, pcm, rx, setup.captureShared, capturePump,
         streamer, runtimeConfig,
         [&](std::vector<float>& audio, std::vector<std::int32_t>& mapped) {
+            control.service();
             drainPlayback(*setup.input.ring(), pcm, audio, mapped);
         });
 
     std::cout << "stop requested; restoring ISO/CMP resources\n";
+    control.reset();
+    fcp.reset();
     lifecycle.stop();
     return runtimeOk;
 }
