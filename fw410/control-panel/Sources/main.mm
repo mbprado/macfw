@@ -16,7 +16,11 @@ static NSString *RunTool(NSString *path, NSArray<NSString *> *args, int *statusO
     task.standardOutput = pipe;
     task.standardError = pipe;
     @try {
-        [task launchAndReturnError:nil];
+        NSError *launchError = nil;
+        if (![task launchAndReturnError:&launchError]) {
+            if (statusOut) *statusOut = 126;
+            return launchError.localizedDescription ?: @"task failed";
+        }
         [task waitUntilExit];
     } @catch (NSException *exception) {
         if (statusOut) *statusOut = 126;
@@ -124,9 +128,9 @@ static NSString *RunTool(NSString *path, NSArray<NSString *> *args, int *statusO
     slider.minValue = -128;
     slider.maxValue = 0;
     slider.numberOfTickMarks = 0;
-    slider.continuous = NO;
+    slider.continuous = YES;
     slider.target = self;
-    slider.action = @selector(volumeChanged:);
+    slider.action = @selector(volumeSliderMoved:);
     [content addSubview:slider];
 
     NSTextField *value = [NSTextField labelWithString:@"0 dB"];
@@ -187,12 +191,21 @@ static NSString *RunTool(NSString *path, NSArray<NSString *> *args, int *statusO
 
 - (double)dbFromLine:(NSString *)line {
     if ([line containsString:@"-inf"]) return -128;
-    NSArray *parts = [line componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-    for (NSString *p in parts) if (p.length && ([p hasPrefix:@"-"] || [p characterAtIndex:0] >= '0')) return p.doubleValue;
+
+    NSRange colon = [line rangeOfString:@":"];
+    if (colon.location == NSNotFound || colon.location + 1 >= line.length) return 0;
+
+    NSString *tail = [[line substringFromIndex:colon.location + 1]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    NSScanner *scanner = [NSScanner scannerWithString:tail];
+    double value = 0;
+    if ([scanner scanDouble:&value]) return value;
     return 0;
 }
 
-- (NSString *)displayDb:(double)v { return v <= -128 ? @"−∞" : [NSString stringWithFormat:@"%.0f dB", v]; }
+- (NSString *)displayDb:(double)v {
+    return v <= -128 ? @"−∞" : [NSString stringWithFormat:@"%.0f dB", v];
+}
 
 - (void)parseMixer:(NSString *)text {
     NSArray *lines = [text componentsSeparatedByString:@"\n"];
@@ -208,11 +221,25 @@ static NSString *RunTool(NSString *path, NSArray<NSString *> *args, int *statusO
     [self refresh:nil];
 }
 
-- (void)volumeChanged:(id)sender {
+- (void)volumeSliderMoved:(NSSlider *)sender {
+    self.leftValue.stringValue = [self displayDb:round(self.leftSlider.doubleValue)];
+    self.rightValue.stringValue = [self displayDb:round(self.rightSlider.doubleValue)];
+
+    NSEvent *event = NSApp.currentEvent;
+    if (event && event.type == NSEventTypeLeftMouseDragged) return;
+
+    [self commitVolume];
+}
+
+- (void)commitVolume {
     int l = (int)llround(self.leftSlider.doubleValue);
     int r = (int)llround(self.rightSlider.doubleValue);
     int st = 0;
-    RunTool(kControlTool, @[@"headphone-volume", @"set", [NSString stringWithFormat:@"%d", l], [NSString stringWithFormat:@"%d", r]], &st);
+    RunTool(kControlTool,
+            @[@"headphone-volume", @"set",
+              [NSString stringWithFormat:@"%d", l],
+              [NSString stringWithFormat:@"%d", r]],
+            &st);
     [self refresh:nil];
 }
 
