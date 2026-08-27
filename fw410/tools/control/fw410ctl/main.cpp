@@ -1,3 +1,4 @@
+#include <array>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
@@ -10,6 +11,9 @@
 
 namespace {
 constexpr const char* kSocketPath = "/tmp/macfw-fw410-control.sock";
+constexpr std::array<const char*, 5> kHeadphoneMixerLabels = {
+    "1/2", "3/4", "5/6", "7/8", "9/10"
+};
 
 int usage() {
     std::cerr
@@ -18,6 +22,8 @@ int usage() {
         << "  fw410ctl headphone-source set mixer|aux\n"
         << "  fw410ctl headphone-volume get\n"
         << "  fw410ctl headphone-volume set <dB|-inf> [<right-dB|-inf>]\n"
+        << "  fw410ctl headphone-mixer get\n"
+        << "  fw410ctl headphone-mixer set 1/2|3/4|5/6|7/8|9/10 on|off\n"
         << "  fw410ctl aux-stream12-volume get\n"
         << "  fw410ctl aux-stream12-volume set <dB|-inf> [<right-dB|-inf>]\n"
         << "  fw410ctl aux-output-volume get\n"
@@ -135,6 +141,27 @@ bool buildVolumeCommand(const std::string& wireName,
     command = wireName + " SET " + std::to_string(left) + " " + std::to_string(right);
     return true;
 }
+
+int headphoneMixerIndex(const std::string& label) {
+    for (std::size_t i = 0; i < kHeadphoneMixerLabels.size(); ++i)
+        if (label == kHeadphoneMixerLabels[i]) return static_cast<int>(i);
+    return -1;
+}
+
+int printHeadphoneMixer(const std::string& payload) {
+    std::istringstream input(payload);
+    for (const char* label : kHeadphoneMixerLabels) {
+        int value = -1;
+        if (!(input >> value) || (value != 0 && value != 1)) {
+            std::cout << payload << '\n';
+            return 0;
+        }
+        std::cout << label << ": " << (value ? "on" : "off") << '\n';
+    }
+    std::string extra;
+    if (input >> extra) std::cout << "extra: " << extra << '\n';
+    return 0;
+}
 }
 
 int main(int argc, char** argv) {
@@ -145,6 +172,7 @@ int main(int argc, char** argv) {
     std::string command;
     bool levelResponse = false;
     bool sourceResponse = false;
+    bool headphoneMixerResponse = false;
 
     if (control == "headphone-source") {
         if (action == "get" && argc == 3) {
@@ -163,6 +191,19 @@ int main(int argc, char** argv) {
     } else if (control == "headphone-volume") {
         if (!buildVolumeCommand("HEADPHONE_VOLUME", argc, argv, command)) return usage();
         levelResponse = true;
+    } else if (control == "headphone-mixer") {
+        if (action == "get" && argc == 3) {
+            command = "HEADPHONE_MIXER GET";
+            headphoneMixerResponse = true;
+        } else if (action == "set" && argc == 5) {
+            const int index = headphoneMixerIndex(argv[3]);
+            const std::string state = argv[4];
+            if (index < 0 || (state != "on" && state != "off")) return usage();
+            command = "HEADPHONE_MIXER SET " + std::to_string(index) +
+                      " " + (state == "on" ? "1" : "0");
+        } else {
+            return usage();
+        }
     } else if (control == "aux-stream12-volume") {
         if (!buildVolumeCommand("AUX_STREAM12_VOLUME", argc, argv, command)) return usage();
         levelResponse = true;
@@ -186,6 +227,7 @@ int main(int argc, char** argv) {
             else std::cout << payload << '\n';
             return 0;
         }
+        if (headphoneMixerResponse) return printHeadphoneMixer(payload);
         std::cout << payload << '\n';
         return 0;
     }
