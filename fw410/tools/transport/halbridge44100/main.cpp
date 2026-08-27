@@ -7,17 +7,16 @@
 #include "../engine_ready.h"
 #include "../full_duplex_shared.h"
 #include "../full_duplex_engine_setup.h"
+#include "../full_duplex_fcp_control.h"
+#include "../fw410_control_server.h"
 #include "../full_duplex_lifecycle.h"
 #include "../full_duplex_runtime.h"
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/firewire/IOFireWireLib.h>
 
-#include <algorithm>
-#include <array>
 #include <csignal>
 #include <cstdint>
-#include <cstring>
 #include <iomanip>
 #include <iostream>
 
@@ -25,83 +24,8 @@ namespace {
 using namespace macfw::transport::duplex;
 constexpr UInt32 kCycleLead = 2048;
 
-constexpr UInt16 kFcpAddressHi = 0xffff;
-constexpr UInt32 kFcpCommandLo = 0xf0000b00;
-constexpr UInt32 kFcpResponseLo = 0xf0000d00;
-constexpr UInt32 kFcpResponseSize = 0x200;
-constexpr double kFcpTimeoutSeconds = 1.0;
-
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
-
-class FcpRateReassertion {
-public:
-    ~FcpRateReassertion() { reset(); }
-    bool arm(macfw::FireWireDevice& device) {
-        native_ = device.nativeHandle(); generation_ = device.generation(); node_ = device.nodeID();
-        response_.expectedNode = node_;
-        responseSpace_ = (*native_)->CreateInitialUnitsPseudoAddressSpace(
-            native_, kFcpResponseLo, kFcpResponseSize, &response_, 1024, nullptr,
-            kFWAddressSpaceNoReadAccess | kFWAddressSpaceShareIfExists,
-            CFUUIDGetUUIDBytes(kIOFireWirePseudoAddressSpaceInterfaceID));
-        if (!responseSpace_) return false;
-        (*responseSpace_)->SetWriteHandler(responseSpace_, responseHandler);
-        if (!(*responseSpace_)->TurnOnNotification(responseSpace_)) { reset(); return false; }
-        notificationOn_ = true; return true;
-    }
-    bool reassert44100() {
-        const bool out = setRate(0x18), in = setRate(0x19);
-        std::cout << "post-start AV/C reassert:\n"
-                  << "    OUTPUT plug 0 -> 44100: " << (out ? "accepted" : "failed") << '\n'
-                  << "    INPUT plug 0  -> 44100: " << (in ? "accepted" : "failed") << '\n';
-        return out && in;
-    }
-    void reset() {
-        if (responseSpace_) {
-            if (notificationOn_) (*responseSpace_)->TurnOffNotification(responseSpace_);
-            (*responseSpace_)->Release(responseSpace_);
-        }
-        responseSpace_ = nullptr; notificationOn_ = false; native_ = nullptr;
-    }
-private:
-    struct ResponseContext {
-        UInt16 expectedNode = 0; bool received = false; UInt32 length = 0;
-        std::array<UInt8, kFcpResponseSize> bytes{};
-    };
-    static UInt32 responseHandler(IOFireWireLibPseudoAddressSpaceRef space, FWClientCommandID commandID,
-                                  UInt32 packetLen, void* packet, UInt16 srcNodeID,
-                                  UInt32, UInt32, void* refCon) {
-        auto* ctx = static_cast<ResponseContext*>(refCon);
-        if (ctx && packet && srcNodeID == ctx->expectedNode) {
-            ctx->length = std::min<UInt32>(packetLen, ctx->bytes.size());
-            std::memcpy(ctx->bytes.data(), packet, ctx->length); ctx->received = true;
-        }
-        (*space)->ClientCommandIsComplete(space, commandID, kIOReturnSuccess);
-        return kIOReturnSuccess;
-    }
-    bool transaction(const UInt8* cmd, UInt32 len) {
-        response_.received = false; response_.length = 0; response_.bytes.fill(0);
-        FWAddress a{}; a.nodeID = node_; a.addressHi = kFcpAddressHi; a.addressLo = kFcpCommandLo;
-        UInt32 size = len;
-        if ((*native_)->Write(native_, 0, &a, cmd, &size, true, generation_) != kIOReturnSuccess) return false;
-        const CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + kFcpTimeoutSeconds;
-        while (!response_.received && CFAbsoluteTimeGetCurrent() < deadline)
-            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, true);
-        return response_.received;
-    }
-    bool setRate(UInt8 opcode) {
-        const UInt8 cmd[8] = {0x00,0xff,opcode,0x00,0x90,0x01,0xff,0xff};
-        if (!transaction(cmd,sizeof(cmd))) return false;
-        const UInt8 r = response_.length ? response_.bytes[0] : 0;
-        const bool accepted = r==0x09 || r==0x0c || r==0x0d || r==0x0f;
-        return response_.length>=8 && accepted && response_.bytes[1]==0xff &&
-               response_.bytes[2]==opcode && response_.bytes[3]==0x00 &&
-               response_.bytes[4]==0x90 && (response_.bytes[5]&0x07)==0x01;
-    }
-    IOFireWireLibDeviceRef native_ = nullptr;
-    IOFireWireLibPseudoAddressSpaceRef responseSpace_ = nullptr;
-    ResponseContext response_{}; UInt32 generation_ = 0; UInt16 node_ = 0; bool notificationOn_ = false;
-};
 
 bool run() {
     FullDuplexEngineSetup setup;
@@ -111,12 +35,12 @@ bool run() {
         return false;
 
     macfw::transport::CaptureReceivePump capturePump(0x01, true);
-    macfw::PcmRingBuffer pcm(kPcmCapacityFrames,kPcmChannels);
-    auto rx=macfw::AmdtpReceiveRing::create(setup.device,kCaptureSlots,kCaptureMaxPacket);
-    auto tx=macfw::AmdtpTransmitRing::createSilence44100(setup.device,setup.firstCycle,kPlaybackSlots);
+    macfw::PcmRingBuffer pcm(kPcmCapacityFrames, kPcmChannels);
+    auto rx = macfw::AmdtpReceiveRing::create(setup.device, kCaptureSlots, kCaptureMaxPacket);
+    auto tx = macfw::AmdtpTransmitRing::createSilence44100(setup.device, setup.firstCycle, kPlaybackSlots);
     if (!pcm.valid() || !rx || !tx) return false;
 
-    macfw::AmdtpPcmStream44100 streamer(tx,pcm,setup.initialCycle,setup.firstCycle,kHalfPackets);
+    macfw::AmdtpPcmStream44100 streamer(tx, pcm, setup.initialCycle, setup.firstCycle, kHalfPackets);
     if (!streamer.valid() || !streamer.prime()) return false;
 
     FireWireDuplexLifecycle lifecycle;
@@ -124,20 +48,28 @@ bool run() {
                            kCaptureMaxPacket, kPlaybackMaxPacket))
         return false;
 
-    FcpRateReassertion fcp;
-    bool ok=false;
+    Fw410FcpControl fcp;
+    Fw410ControlServer control;
+    bool ok = false;
     if (!lifecycle.addCallbackDispatcher() || !fcp.arm(setup.device)) goto cleanup;
+    if (!control.start(fcp)) {
+        std::cerr << "FW410 control socket setup failed\n";
+        goto cleanup;
+    }
     if (!lifecycle.startIsoch()) goto cleanup;
 
     {
-        UInt32 nowCt=0; if ((*setup.native)->GetCycleTime(setup.native,&nowCt)!=kIOReturnSuccess) goto cleanup;
-        const UInt32 now=cycleCount(nowCt), forward=(setup.firstCycle+kCyclesPerSecond-now)%kCyclesPerSecond;
-        if (forward>4096u) goto cleanup;
-        const double wait=static_cast<double>(forward)/kCyclesPerSecond+0.020;
+        UInt32 nowCt = 0;
+        if ((*setup.native)->GetCycleTime(setup.native, &nowCt) != kIOReturnSuccess) goto cleanup;
+        const UInt32 now = cycleCount(nowCt);
+        const UInt32 forward = (setup.firstCycle + kCyclesPerSecond - now) % kCyclesPerSecond;
+        if (forward > 4096u) goto cleanup;
+        const double wait = static_cast<double>(forward) / kCyclesPerSecond + 0.020;
         std::cout << "duplex ISO started; waiting " << std::fixed << std::setprecision(3) << wait
                   << " s before 44.1 reassert\n" << std::defaultfloat;
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode,wait,false);
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, wait, false);
     }
+
     if (!fcp.reassert44100()) goto cleanup;
     macfw::transport::signalEngineReady();
 
@@ -152,6 +84,7 @@ bool run() {
             gStopRequested, setup.native, setup.input, pcm, rx, setup.captureShared, capturePump,
             streamer, runtimeConfig,
             [&](std::vector<float>& audio, std::vector<std::int32_t>& mapped) {
+                control.service();
                 pumpPlayback(*setup.input.ring(), pcm, audio, mapped);
             });
 
@@ -159,6 +92,7 @@ bool run() {
     }
 
 cleanup:
+    control.reset();
     lifecycle.stopIsochAndRestoreCmp();
     fcp.reset();
     lifecycle.removeDispatchers();
@@ -172,5 +106,5 @@ int halbridge44100_inner_main() {
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
     std::cout << "macfw halbridge44100 — native 44.1 kHz full-duplex CoreAudio HAL to FW410 transport\n";
-    return run()?0:1;
+    return run() ? 0 : 1;
 }
