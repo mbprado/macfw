@@ -16,7 +16,7 @@ namespace macfw::transport::duplex {
 
 class Fw410ControlServer {
 public:
-    static constexpr const char* kSocketPath = "/var/run/macfw-fw410-control.sock";
+    static constexpr const char* kSocketPath = "/tmp/macfw-fw410-control.sock";
     static constexpr std::uint8_t kHeadphoneSelector = 7;
 
     ~Fw410ControlServer() { reset(); }
