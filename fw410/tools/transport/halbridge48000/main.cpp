@@ -58,14 +58,11 @@ bool run() {
     if (!lifecycle.addCallbackDispatcher()) return false;
 
     Fw410FcpControl fcp;
-    if (!fcp.arm(setup.device)) {
-        std::cerr << "FW410 FCP control setup failed\n";
-        return false;
-    }
     Fw410ControlServer control;
-    if (!control.start(fcp)) {
-        std::cerr << "FW410 control socket setup failed\n";
-        return false;
+    if (!fcp.arm(setup.device)) {
+        std::cerr << "warning: FW410 FCP control unavailable; audio will continue\n";
+    } else if (!control.start(fcp)) {
+        std::cerr << "warning: FW410 control socket unavailable; audio will continue\n";
     }
 
     if (!lifecycle.startIsoch()) return false;
