@@ -1,22 +1,19 @@
-SWIFTC ?= xcrun swiftc
-TARGET ?= x86_64-apple-macosx12.0
+CXX ?= c++
 APP := build/macfw FW410 Control.app
 CONTENTS := $(APP)/Contents
 MACOS := $(CONTENTS)/MacOS
 BINARY := $(MACOS)/macfw-fw410-control
-SOURCES := Sources/MacFW410Control.swift
-MODULE_CACHE := build/swift-module-cache
+SOURCES := Sources/main.mm
 
 .PHONY: all clean run
 
 all: $(BINARY)
 
 $(BINARY): $(SOURCES) Info.plist
-	mkdir -p "$(MACOS)" "$(MODULE_CACHE)"
+	mkdir -p "$(MACOS)"
 	cp Info.plist "$(CONTENTS)/Info.plist"
-	$(SWIFTC) -target $(TARGET) -Onone \
-		-module-cache-path "$(MODULE_CACHE)" \
-		-framework SwiftUI -framework AppKit \
+	$(CXX) -std=c++17 -Wall -Wextra -Wpedantic -fobjc-arc \
+		-framework AppKit -framework Foundation \
 		-o "$(BINARY)" $(SOURCES)
 
 run: all
