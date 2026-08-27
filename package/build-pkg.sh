@@ -37,6 +37,7 @@ required=(
     "$FW410_DIR/tools/transport/halbridge48000/halbridge48000"
     "$FW410_DIR/tools/transport/transportstatus/transportstatus"
     "$FW410_DIR/tools/control/rateprobe/rateprobe"
+    "$FW410_DIR/tools/control/fw410ctl/fw410ctl"
     "$FW410_DIR/tools/device/fwboot/fwboot"
     "$DEVICEPROBE"
     "$PLIST"
@@ -65,6 +66,7 @@ for rel in \
     tools/transport/halbridge48000/halbridge48000 \
     tools/transport/transportstatus/transportstatus \
     tools/control/rateprobe/rateprobe \
+    tools/control/fw410ctl/fw410ctl \
     tools/device/fwboot/fwboot \
     tools/device/deviceprobe/deviceprobe; do
     mkdir -p "$ROOT/Library/Application Support/macfw/fw410/$(dirname "$rel")"
