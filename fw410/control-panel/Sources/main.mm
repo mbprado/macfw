@@ -19,15 +19,16 @@ static NSString *RunTool(NSString *path, NSArray<NSString *> *args, int *statusO
         NSError *launchError = nil;
         if (![task launchAndReturnError:&launchError]) {
             if (statusOut) *statusOut = 126;
-            return launchError.localizedDescription ?: @"task failed";
+            return launchError.localizedDescription != nil ? launchError.localizedDescription : @"task failed";
         }
         [task waitUntilExit];
     } @catch (NSException *exception) {
         if (statusOut) *statusOut = 126;
-        return exception.reason ?: @"task failed";
+        return exception.reason != nil ? exception.reason : @"task failed";
     }
     NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-    NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+    NSString *decoded = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    NSString *text = decoded != nil ? decoded : @"";
     if (statusOut) *statusOut = task.terminationStatus;
     return [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
@@ -103,9 +104,9 @@ static NSString *RunTool(NSString *path, NSArray<NSString *> *args, int *statusO
     NSArray<NSString *> *labels = @[@"1/2", @"3/4", @"5/6", @"7/8", @"9/10"];
     NSMutableArray *buttons = [NSMutableArray array];
     CGFloat x = 24;
-    for (NSInteger i = 0; i < labels.count; ++i) {
+    for (NSUInteger i = 0; i < labels.count; ++i) {
         NSButton *b = [NSButton checkboxWithTitle:labels[i] target:self action:@selector(mixerChanged:)];
-        b.tag = i;
+        b.tag = (NSInteger)i;
         b.frame = NSMakeRect(x, y - 38, 82, 24);
         [content addSubview:b];
         [buttons addObject:b];
@@ -247,14 +248,14 @@ static NSString *RunTool(NSString *path, NSArray<NSString *> *args, int *statusO
     NSArray *labels = @[@"1/2", @"3/4", @"5/6", @"7/8", @"9/10"];
     NSString *state = sender.state == NSControlStateValueOn ? @"on" : @"off";
     int st = 0;
-    RunTool(kControlTool, @[@"headphone-mixer", @"set", labels[sender.tag], state], &st);
+    RunTool(kControlTool, @[@"headphone-mixer", @"set", labels[(NSUInteger)sender.tag], state], &st);
     [self refresh:nil];
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return YES; }
 @end
 
-int main(int argc, const char *argv[]) {
+int main(void) {
     @autoreleasepool {
         NSApplication *app = [NSApplication sharedApplication];
         AppDelegate *delegate = [[AppDelegate alloc] init];
