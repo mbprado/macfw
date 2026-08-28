@@ -110,6 +110,10 @@ public:
         setRoute(Source::SoftwareReturn12, Destination::MixerBusSpdif, true);
     }
 
+    // Compatibility for the existing software-only LOAD_MACFW IPC command.
+    // Keep its historical behavior while the IPC vocabulary is migrated.
+    void loadMacfwPlaybackPreset() { loadMacfwRemappedExperimentPreset(); }
+
     const RouteMatrix& routes() const { return routes_; }
 
     static constexpr std::size_t index(Source source) {
