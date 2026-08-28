@@ -19,7 +19,7 @@ constexpr std::array<const char*,7> kMainMixerSourceLabels={"Analog In 1/2","S/P
 constexpr std::array<const char*,5> kMainMixerDestinationArgs={"1/2","3/4","5/6","7/8","9/10"};
 constexpr std::array<const char*,5> kMainMixerDestinationLabels={"Mixer Out 1/2","Mixer Out 3/4","Mixer Out 5/6","Mixer Out 7/8","Mixer Out 9/10"};
 
-int usage(){std::cerr<<"usage:\n  fw410ctl output-state get\n  fw410ctl output-source get 1/2|3/4|5/6|7/8|spdif\n  fw410ctl output-source set 1/2|3/4|5/6|7/8|spdif mixer|aux\n  fw410ctl output-volume get 1/2|3/4|5/6|7/8|spdif\n  fw410ctl output-volume set 1/2|3/4|5/6|7/8|spdif <dB|-inf> [<right-dB|-inf>]\n  fw410ctl mixer-route get analog|spdif|1/2|3/4|5/6|7/8|9/10 1/2|3/4|5/6|7/8|9/10\n  fw410ctl headphone-source get\n  fw410ctl headphone-source set mixer|aux\n  fw410ctl headphone-volume get\n  fw410ctl headphone-volume set <dB|-inf> [<right-dB|-inf>]\n  fw410ctl headphone-mixer get\n  fw410ctl headphone-mixer set 1/2|3/4|5/6|7/8|9/10 on|off\n  fw410ctl aux-stream12-volume get\n  fw410ctl aux-stream12-volume set <dB|-inf> [<right-dB|-inf>]\n  fw410ctl aux-output-volume get\n  fw410ctl aux-output-volume set <dB|-inf> [<right-dB|-inf>]\n\nvolume range: -128..0 dB in 1 dB steps; -inf uses AV/C negative infinity\n";return 64;}
+int usage(){std::cerr<<"usage:\n  fw410ctl output-state get\n  fw410ctl output-source get 1/2|3/4|5/6|7/8|spdif\n  fw410ctl output-source set 1/2|3/4|5/6|7/8|spdif mixer|aux\n  fw410ctl output-volume get 1/2|3/4|5/6|7/8|spdif\n  fw410ctl output-volume set 1/2|3/4|5/6|7/8|spdif <dB|-inf> [<right-dB|-inf>]\n  fw410ctl mixer-route get analog|spdif|1/2|3/4|5/6|7/8|9/10 1/2|3/4|5/6|7/8|9/10\n  fw410ctl mixer-route set analog|spdif|1/2|3/4|5/6|7/8|9/10 1/2|3/4|5/6|7/8|9/10 on|off\n  fw410ctl headphone-source get\n  fw410ctl headphone-source set mixer|aux\n  fw410ctl headphone-volume get\n  fw410ctl headphone-volume set <dB|-inf> [<right-dB|-inf>]\n  fw410ctl headphone-mixer get\n  fw410ctl headphone-mixer set 1/2|3/4|5/6|7/8|9/10 on|off\n  fw410ctl aux-stream12-volume get\n  fw410ctl aux-stream12-volume set <dB|-inf> [<right-dB|-inf>]\n  fw410ctl aux-output-volume get\n  fw410ctl aux-output-volume set <dB|-inf> [<right-dB|-inf>]\n\nvolume range: -128..0 dB in 1 dB steps; -inf uses AV/C negative infinity\n";return 64;}
 
 bool transact(const std::string&c,std::string&r){int fd=socket(AF_UNIX,SOCK_STREAM,0);if(fd<0){std::cerr<<"fw410ctl: socket: "<<std::strerror(errno)<<'\n';return false;}sockaddr_un a{};a.sun_family=AF_UNIX;std::strncpy(a.sun_path,kSocketPath,sizeof(a.sun_path)-1);if(connect(fd,reinterpret_cast<sockaddr*>(&a),sizeof(a))!=0){std::cerr<<"fw410ctl: cannot connect to "<<kSocketPath<<": "<<std::strerror(errno)<<'\n';close(fd);return false;}std::string w=c+"\n";const char*p=w.data();std::size_t left=w.size();while(left){ssize_t n=send(fd,p,left,0);if(n<=0){close(fd);return false;}p+=n;left-=static_cast<std::size_t>(n);}r.clear();char b[256];while(r.find('\n')==std::string::npos){ssize_t n=recv(fd,b,sizeof(b),0);if(n>0){r.append(b,static_cast<std::size_t>(n));if(r.size()>1024)break;}else break;}close(fd);return !r.empty();}
 bool getPayload(const std::string&c,std::string&p){std::string r;if(!transact(c,r))return false;if(!r.empty()&&r.back()=='\n')r.pop_back();if(r.rfind("OK ",0)!=0){std::cerr<<"fw410ctl: "<<r<<'\n';return false;}p=r.substr(3);return true;}
@@ -38,7 +38,21 @@ int printOutputState(){std::cout<<"FW410 physical output state (read-only):\n";f
 int outputSourceCommand(const std::string&a,int argc,char**argv){if((a=="get"&&argc!=4)||(a=="set"&&argc!=5))return usage();int i=outputIndex(argv[3]);if(i<0)return usage();if(a=="get"){std::string p;if(!getPayload("OUTPUT_PAIR GET "+std::to_string(i),p))return 1;int s=-1,l=0,r=0;if(!parseOutput(p,s,l,r))return 1;std::cout<<kOutputLabels[i]<<": "<<outputSourceName(s)<<" ("<<s<<")\n";return 0;}int s=std::string(argv[4])=="mixer"?0:std::string(argv[4])=="aux"?1:-1;if(s<0)return usage();std::string p;if(!getPayload("OUTPUT_PAIR SET_SOURCE "+std::to_string(i)+" "+std::to_string(s),p))return 1;std::cout<<kOutputLabels[i]<<": "<<outputSourceName(s)<<" ("<<s<<")\n";return 0;}
 int outputVolumeCommand(const std::string&a,int argc,char**argv){if((a=="get"&&argc!=4)||(a=="set"&&(argc!=5&&argc!=6)))return usage();int i=outputIndex(argv[3]);if(i<0)return usage();if(a=="get"){std::string p;if(!getPayload("OUTPUT_PAIR GET "+std::to_string(i),p))return 1;int s=-1,l=0,r=0;if(!parseOutput(p,s,l,r))return 1;std::cout<<kOutputLabels[i]<<"\nleft:  "<<rawToDb(l)<<" (raw "<<l<<")\nright: "<<rawToDb(r)<<" (raw "<<r<<")\n";return 0;}int l=0,r=0;if(!dbToRaw(argv[4],l))return usage();if(argc==6){if(!dbToRaw(argv[5],r))return usage();}else r=l;std::string p;if(!getPayload("OUTPUT_PAIR SET_LEVEL "+std::to_string(i)+" "+std::to_string(l)+" "+std::to_string(r),p))return 1;std::istringstream in(p);int vi=-1,vl=0,vr=0;if(!(in>>vi>>vl>>vr)||vi!=i||vl!=l||vr!=r){std::cerr<<"fw410ctl: invalid output-level verification: "<<p<<'\n';return 1;}std::cout<<kOutputLabels[i]<<"\nleft:  "<<rawToDb(vl)<<" (raw "<<vl<<")\nright: "<<rawToDb(vr)<<" (raw "<<vr<<")\n";return 0;}
 
-int mainMixerRouteCommand(const std::string&a,int argc,char**argv){if(a!="get"||argc!=5)return usage();int src=indexOf(std::string(argv[3]),kMainMixerSourceArgs);int dst=indexOf(std::string(argv[4]),kMainMixerDestinationArgs);if(src<0||dst<0)return usage();std::string p;if(!getPayload("MAIN_MIXER_ROUTE GET "+std::to_string(src)+" "+std::to_string(dst),p))return 1;std::istringstream in(p);int rs=-1,rd=-1,v=-1;std::string x;if(!(in>>rs>>rd>>v)||(in>>x)||rs!=src||rd!=dst||(v!=0&&v!=1)){std::cerr<<"fw410ctl: invalid main-mixer response: "<<p<<'\n';return 1;}std::cout<<kMainMixerSourceLabels[static_cast<std::size_t>(src)]<<" -> "<<kMainMixerDestinationLabels[static_cast<std::size_t>(dst)]<<": "<<(v?"on":"off")<<" ("<<v<<")\n";return 0;}
+int mainMixerRouteCommand(const std::string&a,int argc,char**argv){
+    if((a=="get"&&argc!=5)||(a=="set"&&argc!=6))return usage();
+    int src=indexOf(std::string(argv[3]),kMainMixerSourceArgs);int dst=indexOf(std::string(argv[4]),kMainMixerDestinationArgs);if(src<0||dst<0)return usage();
+    std::string command="MAIN_MIXER_ROUTE "+std::string(a=="get"?"GET":"SET")+" "+std::to_string(src)+" "+std::to_string(dst);
+    int expected=-1;
+    if(a=="set"){
+        std::string state=argv[5];if(state=="on")expected=1;else if(state=="off")expected=0;else return usage();
+        command+=" "+std::to_string(expected);
+    }
+    std::string p;if(!getPayload(command,p))return 1;
+    std::istringstream in(p);int rs=-1,rd=-1,v=-1;std::string x;
+    if(!(in>>rs>>rd>>v)||(in>>x)||rs!=src||rd!=dst||(v!=0&&v!=1)||(expected>=0&&v!=expected)){std::cerr<<"fw410ctl: invalid main-mixer response: "<<p<<'\n';return 1;}
+    std::cout<<kMainMixerSourceLabels[static_cast<std::size_t>(src)]<<" -> "<<kMainMixerDestinationLabels[static_cast<std::size_t>(dst)]<<": "<<(v?"on":"off")<<" ("<<v<<")\n";
+    return 0;
+}
 
 bool parseStereo(const std::string&p,int&l,int&r){std::istringstream in(p);std::string x;return static_cast<bool>(in>>l>>r)&&!(in>>x);}
 int printLevel(const std::string&p){int l=0,r=0;if(!parseStereo(p,l,r)){std::cout<<p<<'\n';return 0;}std::cout<<"left:  "<<rawToDb(l)<<" (raw "<<l<<")\nright: "<<rawToDb(r)<<" (raw "<<r<<")\n";return 0;}
@@ -52,7 +66,7 @@ int main(int argc,char**argv){
     if(control=="output-state")return action=="get"&&argc==3?printOutputState():usage();
     if(control=="output-source")return (action=="get"||action=="set")?outputSourceCommand(action,argc,argv):usage();
     if(control=="output-volume")return (action=="get"||action=="set")?outputVolumeCommand(action,argc,argv):usage();
-    if(control=="mixer-route")return mainMixerRouteCommand(action,argc,argv);
+    if(control=="mixer-route")return (action=="get"||action=="set")?mainMixerRouteCommand(action,argc,argv):usage();
     std::string command,display;bool level=false,source=false,mixer=false;
     if(control=="headphone-source"){
         if(action=="get"&&argc==3){command="HEADPHONE_SOURCE GET";source=true;}
