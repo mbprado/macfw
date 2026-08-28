@@ -8,9 +8,9 @@ namespace macfw::transport::duplex {
 
 // Software-only description of the FW410 normal/main mixer.
 //
-// This deliberately performs no AV/C I/O.  The FW410 ASIC is known to be
+// This deliberately performs no AV/C I/O. The FW410 ASIC is known to be
 // sensitive to mixer STATUS traffic, and the Linux implementation does not
-// use STATUS to discover the normal mixer state.  Keep topology/state separate
+// use STATUS to discover the normal mixer state. Keep topology/state separate
 // from hardware programming until the complete model is validated.
 class Fw410MainMixerModel {
 public:
@@ -28,11 +28,11 @@ public:
     };
 
     enum class Destination : std::size_t {
-        MixerOutput12 = 0,
-        MixerOutput34,
-        MixerOutput56,
-        MixerOutput78,
-        MixerOutput910,
+        MixerBus12 = 0,
+        MixerBus34,
+        MixerBus56,
+        MixerBus78,
+        MixerBusSpdif,
     };
 
     struct AvcSource {
@@ -73,24 +73,41 @@ public:
 
     void clear() { routes_ = {}; }
 
-    // Populate software state with the matrix that would preserve macfw's
-    // CoreAudio-visible physical pair order after full_duplex_shared.h remaps
-    // samples into the FW410's unusual AMDTP stream order:
+    // Original/Linux identity-style software-return assignment. The original
+    // M-Audio control panel shows these destinations as the five routing
+    // buttons at the bottom of each source strip (1/2, 3/4, 5/6, 7/8, spd).
+    // They are mixer-bus assignments, not CoreAudio physical-output selectors.
     //
-    //   CoreAudio A1/2      -> FW stream 3/4  -> Mixer Out 1/2
-    //   CoreAudio A3/4      -> FW stream 5/6  -> Mixer Out 3/4
-    //   CoreAudio A5/6      -> FW stream 7/8  -> Mixer Out 5/6
-    //   CoreAudio A7/8      -> FW stream 9/10 -> Mixer Out 7/8
-    //   CoreAudio S/PDIF LR -> FW stream 1/2  -> Mixer Out 9/10
+    //   SW Return 1/2   -> Mixer Bus 1/2
+    //   SW Return 3/4   -> Mixer Bus 3/4
+    //   SW Return 5/6   -> Mixer Bus 5/6
+    //   SW Return 7/8   -> Mixer Bus 7/8
+    //   SW Return 9/10  -> Mixer Bus S/PDIF
     //
-    // This method changes software state only.  It sends no AV/C command.
-    void loadMacfwPlaybackPreset() {
+    // This matches snd-firewire-ctl-services' initial cached state. Software
+    // state only: this method sends no AV/C command.
+    void loadOriginalIdentityPreset() {
         clear();
-        setRoute(Source::SoftwareReturn34, Destination::MixerOutput12, true);
-        setRoute(Source::SoftwareReturn56, Destination::MixerOutput34, true);
-        setRoute(Source::SoftwareReturn78, Destination::MixerOutput56, true);
-        setRoute(Source::SoftwareReturn910, Destination::MixerOutput78, true);
-        setRoute(Source::SoftwareReturn12, Destination::MixerOutput910, true);
+        setRoute(Source::SoftwareReturn12, Destination::MixerBus12, true);
+        setRoute(Source::SoftwareReturn34, Destination::MixerBus34, true);
+        setRoute(Source::SoftwareReturn56, Destination::MixerBus56, true);
+        setRoute(Source::SoftwareReturn78, Destination::MixerBus78, true);
+        setRoute(Source::SoftwareReturn910, Destination::MixerBusSpdif, true);
+    }
+
+    // Historical experimental preset retained for comparison. This was based
+    // on interpreting mixer destinations as physical playback outputs and
+    // compensating for macfw's CoreAudio->AMDTP channel remap. The original
+    // M-Audio UI shows that interpretation is probably wrong: these are mixer
+    // bus assignments. Do not use this as a hardware initialization preset.
+    // Software state only: this method sends no AV/C command.
+    void loadMacfwRemappedExperimentPreset() {
+        clear();
+        setRoute(Source::SoftwareReturn34, Destination::MixerBus12, true);
+        setRoute(Source::SoftwareReturn56, Destination::MixerBus34, true);
+        setRoute(Source::SoftwareReturn78, Destination::MixerBus56, true);
+        setRoute(Source::SoftwareReturn910, Destination::MixerBus78, true);
+        setRoute(Source::SoftwareReturn12, Destination::MixerBusSpdif, true);
     }
 
     const RouteMatrix& routes() const { return routes_; }
@@ -104,7 +121,7 @@ public:
     }
 
 private:
-    // Intentionally starts empty.  This is software state only and must not be
+    // Intentionally starts empty. This is software state only and must not be
     // presented as the current hardware state.
     RouteMatrix routes_{};
 };
