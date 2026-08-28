@@ -119,11 +119,11 @@ src 6 -> dst 3
 src 2 -> dst 4
 ```
 
-The original control-panel UI makes that interpretation unlikely. The destinations are mixer buses, not direct CoreAudio/physical output assignments. This remapped matrix is therefore retained only as a historical software-only experiment and **must not be treated as the intended hardware initialization**.
+Although the original UI semantics alone do not imply this remap, hardware testing later showed that this is the coherent baseline compatible with macfw's current AMDTP channel ordering: after writing all 35 cells using this matrix, normal CoreAudio output routing remains correct.
 
 ## Original/Linux identity preset
 
-The natural software-return assignment shown by the original UI semantics is the same identity-style cached state used by Linux `snd-firewire-ctl-services`:
+The logical software-return assignment used by Linux `snd-firewire-ctl-services` is:
 
 ```text
 SW Return 1/2   -> Mixer Bus 1/2
@@ -145,7 +145,7 @@ src 6 -> dst 4
 
 This is represented by `Fw410MainMixerModel::loadOriginalIdentityPreset()`.
 
-Important: matching the original UI and Linux cached state does **not** prove that macfw should write the 35 cells during startup. Earlier hardware experiments showed that writing a complete mixer matrix can alter/break otherwise-correct multichannel playback behavior.
+On macfw, writing this complete 35-cell identity matrix does not kill the audio path, but it shifts playback: CoreAudio output 1/2 becomes audible on physical output 3/4. This is consistent with macfw's different AMDTP channel ordering and confirms that Linux's logical identity state cannot be copied directly as macfw's playback baseline.
 
 ## Why STATUS cannot be treated as authoritative state
 
@@ -156,17 +156,17 @@ Therefore:
 - do not brute-force STATUS polling;
 - do not initialize the software model from STATUS results;
 - do not assume an OFF STATUS result means the corresponding normal playback path is absent;
-- keep cached mixer state separate from the physical output routing layer.
+- maintain a trusted cached matrix after coherent initialization.
 
-## Hardware validation result: isolated mixer CONTROL writes are unsafe
+## Hardware validation: coherent initialization is required
 
-A deliberately narrow hardware test was performed after the software model and identity preset were validated. The test exposed exactly one AV/C CONTROL write corresponding to the visually unambiguous original-control-panel cell:
+An isolated mixer CONTROL write was first tested for the unambiguous cell:
 
 ```text
 Analog Input 1/2 -> Mixer Bus 1/2
 ```
 
-The command wrote:
+with:
 
 ```text
 functionBlock = 0x01
@@ -175,25 +175,62 @@ inputChannel  = 0x01
 outputChannel = 0x01
 ```
 
-with enabled represented as `0x0000`. No main-mixer STATUS request was issued.
+and enabled represented as `0x0000`.
 
-Observed hardware behavior:
+When this single write was issued against the FW410's unknown/default state, normal playback stopped on all outputs. Writing the same cell back OFF did not restore audio; physical disconnect/reconnect was required.
 
-1. Before the write, normal macfw playback was working.
-2. After setting this single cell ON, audio stopped on all output channels.
-3. Setting the same cell back OFF succeeded at the AV/C command level but did **not** restore audio.
-4. Restarting/reversing the one cell was insufficient; audio recovered only after physically disconnecting/reconnecting the FW410.
+The Linux implementation provided the key clue: it does not discover this matrix with STATUS. Its cache path deliberately forces a CONTROL write for every cell, establishing one complete known 7x5 state before later differential updates.
 
-This reproduces the destructive behavior previously seen with an isolated software-return mixer write, but now with an analog-input route. Therefore the failure is not specific to the earlier software-return/AMDTP mapping hypothesis.
+### Full 35-cell tests
 
-### Current conclusion
+Two complete matrices were then tested using 35 sequential CONTROL requests, with no mixer STATUS reads.
 
-**Do not issue isolated CONTROL writes to the FW410 main/normal processing-mixer matrix while the device is in its normal macfw operating state.** A single valid-looking cell write can transition the device into an audio state that cannot be restored by writing that cell back.
+1. **Linux/original identity matrix:** all 35 writes succeeded and audio remained alive, but CoreAudio output 1/2 moved to physical 3/4.
+2. **macfw-remapped matrix:** all 35 writes succeeded and normal macfw playback routing remained unaffected.
 
-The temporary `MAIN_MIXER_HW ANALOG12_BUS12` command used for this experiment has been removed from the branch.
+The validated macfw baseline is therefore:
 
-This leaves an important open question: the original M-Audio driver and Linux implementation can control this matrix, so they are probably establishing additional device state, initialization ordering, or a coherent mixer context that macfw does not yet reproduce. Future work should focus on identifying that prerequisite/context rather than trying more isolated cells.
+```text
+src 3 -> dst 0
+src 4 -> dst 1
+src 5 -> dst 2
+src 6 -> dst 3
+src 2 -> dst 4
+```
 
-## Recommended next investigation
+with the other 30 cells disabled.
 
-Do **not** perform more live mixer writes yet. The next useful direction is to compare initialization/state sequencing around the main mixer in the Linux driver and, where possible, the original M-Audio stack. In particular, determine whether mixer CONTROL operations depend on other processing-function-block state, stream configuration, or a device initialization sequence that is absent from macfw.
+### Cached incremental-write test
+
+After establishing the complete macfw-remapped matrix, the previously destructive isolated cell was tested again:
+
+```text
+Analog Input 1/2 -> Mixer Bus 1/2
+src 0 -> dst 0
+```
+
+Turning that cell ON and OFF with individual CONTROL requests no longer disturbed normal playback.
+
+With an external signal injected into the analog inputs, enabling the route produced the expected stereo monitoring behavior:
+
+```text
+Analog Input 1 -> Output 1
+Analog Input 2 -> Output 2
+```
+
+Before enabling the route there was no analog-monitor signal on outputs 1/2.
+
+This confirms both the route semantics and the required state-management rule.
+
+## Current implementation rule
+
+The supported main-mixer path must follow this sequence:
+
+1. establish the complete 35-cell macfw-compatible matrix;
+2. store that matrix as trusted software state;
+3. never use mixer STATUS to reconstruct it;
+4. apply later route changes as differential CONTROL writes against the cached state.
+
+`fw410_control_server.h` now exposes a production-oriented `MAIN_MIXER` IPC layer that lazily performs the 35-cell initialization on first access, then serves cached GET/SET operations. The older `MAIN_MIXER_HW` and `MAIN_MIXER_MODEL` commands remain experimental/debug interfaces while the production path is validated.
+
+The GUI should use the normal IPC/`fw410ctl` path rather than directly owning FireWire or issuing AV/C requests.
