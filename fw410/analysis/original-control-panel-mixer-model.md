@@ -143,9 +143,9 @@ src 5 -> dst 3
 src 6 -> dst 4
 ```
 
-This is now represented by `Fw410MainMixerModel::loadOriginalIdentityPreset()`.
+This is represented by `Fw410MainMixerModel::loadOriginalIdentityPreset()`.
 
-Important: matching the original UI and Linux cached state does **not** yet prove that macfw should write all 35 cells during startup. Earlier hardware experiments showed that writing a complete mixer matrix can alter/break otherwise-correct multichannel playback behavior. Hardware initialization remains intentionally disabled while the relationship between the mixer buses and the normal playback/output path is validated.
+Important: matching the original UI and Linux cached state does **not** prove that macfw should write the 35 cells during startup. Earlier hardware experiments showed that writing a complete mixer matrix can alter/break otherwise-correct multichannel playback behavior.
 
 ## Why STATUS cannot be treated as authoritative state
 
@@ -158,8 +158,42 @@ Therefore:
 - do not assume an OFF STATUS result means the corresponding normal playback path is absent;
 - keep cached mixer state separate from the physical output routing layer.
 
-## Safe next hardware validation
+## Hardware validation result: isolated mixer CONTROL writes are unsafe
 
-Before any automatic 35-cell initialization, validate a single known original-control-panel routing function against hardware. A useful test is one source-to-bus assignment whose meaning is visually unambiguous in the original UI, such as `Analog Input 1/2 -> Mixer Bus 1/2`, while observing whether normal software playback remains unchanged.
+A deliberately narrow hardware test was performed after the software model and identity preset were validated. The test exposed exactly one AV/C CONTROL write corresponding to the visually unambiguous original-control-panel cell:
 
-The goal is to prove that our AV/C processing-mixer cell corresponds to the original control-panel routing button, not to infer physical playback routing from AMDTP channel order.
+```text
+Analog Input 1/2 -> Mixer Bus 1/2
+```
+
+The command wrote:
+
+```text
+functionBlock = 0x01
+inputPlug     = 0x02
+inputChannel  = 0x01
+outputChannel = 0x01
+```
+
+with enabled represented as `0x0000`. No main-mixer STATUS request was issued.
+
+Observed hardware behavior:
+
+1. Before the write, normal macfw playback was working.
+2. After setting this single cell ON, audio stopped on all output channels.
+3. Setting the same cell back OFF succeeded at the AV/C command level but did **not** restore audio.
+4. Restarting/reversing the one cell was insufficient; audio recovered only after physically disconnecting/reconnecting the FW410.
+
+This reproduces the destructive behavior previously seen with an isolated software-return mixer write, but now with an analog-input route. Therefore the failure is not specific to the earlier software-return/AMDTP mapping hypothesis.
+
+### Current conclusion
+
+**Do not issue isolated CONTROL writes to the FW410 main/normal processing-mixer matrix while the device is in its normal macfw operating state.** A single valid-looking cell write can transition the device into an audio state that cannot be restored by writing that cell back.
+
+The temporary `MAIN_MIXER_HW ANALOG12_BUS12` command used for this experiment has been removed from the branch.
+
+This leaves an important open question: the original M-Audio driver and Linux implementation can control this matrix, so they are probably establishing additional device state, initialization ordering, or a coherent mixer context that macfw does not yet reproduce. Future work should focus on identifying that prerequisite/context rather than trying more isolated cells.
+
+## Recommended next investigation
+
+Do **not** perform more live mixer writes yet. The next useful direction is to compare initialization/state sequencing around the main mixer in the Linux driver and, where possible, the original M-Audio stack. In particular, determine whether mixer CONTROL operations depend on other processing-function-block state, stream configuration, or a device initialization sequence that is absent from macfw.
