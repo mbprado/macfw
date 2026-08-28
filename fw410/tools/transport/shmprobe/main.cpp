@@ -37,11 +37,14 @@ void printPlaybackPeaks(const macfw::hal::SharedPcmRing& ring) {
     };
     constexpr std::size_t kSnapshotFrames = 512;
 
+    // Inspect the most recently written frames rather than only unread frames.
+    // The transport normally consumes the ring immediately, so availableFrames()
+    // is often zero even while CoreAudio is continuously writing valid audio.
+    // Ring storage remains intact until those slots are overwritten, making this
+    // a non-destructive snapshot of recent HAL output activity.
     const auto w = ring.writeFrame.load(std::memory_order_acquire);
-    const auto r = ring.readFrame.load(std::memory_order_acquire);
-    const std::uint64_t available = w - r;
     const std::size_t frames = static_cast<std::size_t>(
-        std::min<std::uint64_t>(available, kSnapshotFrames));
+        std::min<std::uint64_t>(w, kSnapshotFrames));
 
     std::array<float, macfw::hal::kChannels> peaks{};
     const std::uint64_t start = w - frames;
@@ -52,7 +55,7 @@ void printPlaybackPeaks(const macfw::hal::SharedPcmRing& ring) {
             peaks[ch] = std::max(peaks[ch], std::fabs(ring.samples[base + ch]));
     }
 
-    std::printf("Playback channel peak snapshot (%zu buffered frames):\n", frames);
+    std::printf("Playback channel peak snapshot (%zu recent frames):\n", frames);
     for (std::size_t ch = 0; ch < peaks.size(); ++ch)
         std::printf("    ch %2zu %-10s %.6f\n", ch + 1, kNames[ch], peaks[ch]);
 }
