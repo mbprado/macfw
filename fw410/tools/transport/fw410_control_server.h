@@ -33,13 +33,15 @@ public:
     static constexpr std::uint8_t kSpdifConnectorSelector = 0x01;
 
     // Main 14x10 mixer mapping from snd-firewire-ctl-services Fw410MixerProtocol.
-    // AudioCh::Each(n) is encoded by AV/C as (2*n)+1.
+    // AudioCh::Each(n) is encoded in the AV/C channel byte as n+1. This matches
+    // the already hardware-validated headphone mixer mapping (Each(0,2,4,6,8)
+    // -> channels 1,3,5,7,9).
     // Keep this path single-cell/read-only until it is validated on hardware;
     // the FW410 ASIC is known to be sensitive to bursts of mixer STATUS requests.
     static constexpr std::uint8_t kMainMixerBlock = 0x01;
     static constexpr std::array<std::uint8_t, 7> kMainMixerSourceBlocks = {0x02,0x03,0x01,0x00,0x00,0x00,0x00};
-    static constexpr std::array<std::uint8_t, 7> kMainMixerSourceChannels = {0x01,0x01,0x01,0x01,0x05,0x09,0x0d};
-    static constexpr std::array<std::uint8_t, 5> kMainMixerDestinationChannels = {0x01,0x05,0x09,0x0d,0x11};
+    static constexpr std::array<std::uint8_t, 7> kMainMixerSourceChannels = {0x01,0x01,0x01,0x01,0x03,0x05,0x07};
+    static constexpr std::array<std::uint8_t, 5> kMainMixerDestinationChannels = {0x01,0x03,0x05,0x07,0x09};
 
     ~Fw410ControlServer(){reset();}
     bool start(Fw410FcpControl& fcp){reset();fcp_=&fcp;listenFd_=socket(AF_UNIX,SOCK_STREAM,0);if(listenFd_<0)return false;int flags=fcntl(listenFd_,F_GETFL,0);if(flags>=0)fcntl(listenFd_,F_SETFL,flags|O_NONBLOCK);sockaddr_un a{};a.sun_family=AF_UNIX;if(std::strlen(kSocketPath)>=sizeof(a.sun_path)){reset();return false;}std::strncpy(a.sun_path,kSocketPath,sizeof(a.sun_path)-1);unlink(kSocketPath);if(bind(listenFd_,reinterpret_cast<sockaddr*>(&a),sizeof(a))!=0){reset();return false;}chmod(kSocketPath,0666);if(listen(listenFd_,4)!=0){reset();return false;}std::printf("FW410 control socket: %s\n",kSocketPath);return true;}
