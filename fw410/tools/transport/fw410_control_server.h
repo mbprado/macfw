@@ -120,6 +120,19 @@ private:
         }
         reply("ERR unknown-command\n");
     }
+    void handleMainMixerHardwareProbe(const std::string&c){
+        const std::string p="MAIN_MIXER_HW ANALOG12_BUS12 SET ";
+        if(c.rfind(p,0)!=0){reply("ERR unknown-command\n");return;}
+        std::istringstream in(c.substr(p.size()));unsigned value=0;std::string x;
+        if(!(in>>value)||(in>>x)||value>1){reply("ERR invalid-main-mixer-hw-probe\n");return;}
+        // Exact original-control-panel cell: Analog Input 1/2 -> Mixer Bus 1/2.
+        // Deliberately one CONTROL write only; do not STATUS-read the main mixer.
+        if(!fcp_->writeProcessingMixer(0x01,0x02,0x01,0x01,value!=0)){
+            reply("ERR fcp-write-failed\n");
+            return;
+        }
+        reply("OK hardware-write analog12-bus12 "+std::to_string(value)+"\n");
+    }
     void handleOutputPair(const std::string&c){
         const std::string gp="OUTPUT_PAIR GET ";if(c.rfind(gp,0)==0){std::istringstream in(c.substr(gp.size()));unsigned i=0;std::string x;if(!(in>>i)||(in>>x)||i>=5){reply("ERR invalid-output-pair\n");return;}std::uint8_t s=0xff;std::int16_t l=0,r=0;if(!fcp_->readSelector(kOutputSelectorBlocks[i],s)||!readStereoLevel(kOutputLevelBlocks[i],l,r)){reply("ERR fcp-read-failed\n");return;}reply("OK "+std::to_string(static_cast<unsigned>(s))+" "+std::to_string(l)+" "+std::to_string(r)+"\n");return;}
         const std::string sp="OUTPUT_PAIR SET_SOURCE ";if(c.rfind(sp,0)==0){std::istringstream in(c.substr(sp.size()));unsigned i=0,s=0;std::string x;if(!(in>>i>>s)||(in>>x)||i>=5||s>1){reply("ERR invalid-output-source\n");return;}auto fb=kOutputSelectorBlocks[i];auto v=static_cast<std::uint8_t>(s);if(!fcp_->writeSelector(fb,v)){reply("ERR fcp-write-failed\n");return;}std::uint8_t verify=0xff;if(!fcp_->readSelector(fb,verify)||verify!=v){reply("ERR verify-failed\n");return;}reply("OK "+std::to_string(i)+" "+std::to_string(static_cast<unsigned>(verify))+"\n");return;}
@@ -130,6 +143,7 @@ private:
         if(c=="HEADPHONE_SOURCE GET"){std::uint8_t v=0xff;if(!fcp_->readSelector(kHeadphoneSelector,v)){reply("ERR fcp-read-failed\n");return;}reply("OK "+std::to_string(static_cast<unsigned>(v))+"\n");return;}
         if(c=="HEADPHONE_SOURCE SET 0"||c=="HEADPHONE_SOURCE SET 1"){std::uint8_t v=c.back()=='1'?1:0;if(!fcp_->writeSelector(kHeadphoneSelector,v)){reply("ERR fcp-write-failed\n");return;}std::uint8_t q=0xff;if(!fcp_->readSelector(kHeadphoneSelector,q)||q!=v){reply("ERR verify-failed\n");return;}reply("OK "+std::to_string(static_cast<unsigned>(q))+"\n");return;}
         if(c=="SPDIF_CONNECTOR GET"){std::uint8_t v=0xff;if(!fcp_->readSelector(kSpdifConnectorSelector,v)){reply("ERR fcp-read-failed\n");return;}reply("OK "+std::to_string(static_cast<unsigned>(v))+"\n");return;}
+        if(c.rfind("MAIN_MIXER_HW ",0)==0){handleMainMixerHardwareProbe(c);return;}
         if(c.rfind("MAIN_MIXER_MODEL ",0)==0){handleMainMixerModel(c);return;}
         if(c.rfind("OUTPUT_PAIR ",0)==0){handleOutputPair(c);return;}
         if(c.rfind("HEADPHONE_VOLUME ",0)==0){handleLevel(c,"HEADPHONE_VOLUME",kHeadphoneLevel);return;}
