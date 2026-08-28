@@ -35,8 +35,7 @@ public:
     // Main 14x10 mixer mapping from snd-firewire-ctl-services Fw410MixerProtocol.
     // AudioCh::Each(n) is encoded in the AV/C channel byte as n+1. This matches
     // the already hardware-validated headphone mixer mapping (Each(0,2,4,6,8)
-    // -> channels 1,3,5,7,9).
-    // Keep this path single-cell/read-only until it is validated on hardware;
+    // -> channels 1,3,5,7,9). Main-mixer access remains strictly single-cell;
     // the FW410 ASIC is known to be sensitive to bursts of mixer STATUS requests.
     static constexpr std::uint8_t kMainMixerBlock = 0x01;
     static constexpr std::array<std::uint8_t, 7> kMainMixerSourceBlocks = {0x02,0x03,0x01,0x00,0x00,0x00,0x00};
@@ -57,23 +56,24 @@ private:
     bool readHeadphoneMixer(std::array<bool,5>&s){for(std::size_t i=0;i<s.size();++i)if(!fcp_->readProcessingMixer(kHeadphoneMixerBlock,kHeadphoneMixerInputPlug,kHeadphoneMixerInputChannels[i],kHeadphoneMixerOutputChannel,s[i]))return false;return true;}
     bool writeHeadphoneMixer(std::size_t i,bool e){if(i>=5||!fcp_->writeProcessingMixer(kHeadphoneMixerBlock,kHeadphoneMixerInputPlug,kHeadphoneMixerInputChannels[i],kHeadphoneMixerOutputChannel,e))return false;bool v=false;return fcp_->readProcessingMixer(kHeadphoneMixerBlock,kHeadphoneMixerInputPlug,kHeadphoneMixerInputChannels[i],kHeadphoneMixerOutputChannel,v)&&v==e;}
     void handleHeadphoneMixer(const std::string&c){if(c=="HEADPHONE_MIXER GET"){std::array<bool,5>s{};if(!readHeadphoneMixer(s)){reply("ERR fcp-read-failed\n");return;}std::string o="OK";for(bool e:s)o+=e?" 1":" 0";reply(o+"\n");return;}std::string p="HEADPHONE_MIXER SET ";if(c.rfind(p,0)!=0){reply("ERR unknown-command\n");return;}std::istringstream in(c.substr(p.size()));unsigned i=0,v=0;std::string x;if(!(in>>i>>v)||(in>>x)||i>=5||v>1){reply("ERR invalid-headphone-mixer\n");return;}if(!writeHeadphoneMixer(i,v!=0)){reply("ERR fcp-write-or-verify-failed\n");return;}reply("OK "+std::to_string(i)+" "+std::to_string(v)+"\n");}
+    bool readMainMixerRoute(unsigned src,unsigned dst,bool&enabled){if(src>=kMainMixerSourceBlocks.size()||dst>=kMainMixerDestinationChannels.size())return false;return fcp_->readProcessingMixer(kMainMixerBlock,kMainMixerSourceBlocks[src],kMainMixerSourceChannels[src],kMainMixerDestinationChannels[dst],enabled);}
+    bool writeMainMixerRoute(unsigned src,unsigned dst,bool enabled){if(src>=kMainMixerSourceBlocks.size()||dst>=kMainMixerDestinationChannels.size())return false;if(!fcp_->writeProcessingMixer(kMainMixerBlock,kMainMixerSourceBlocks[src],kMainMixerSourceChannels[src],kMainMixerDestinationChannels[dst],enabled))return false;bool verify=false;return readMainMixerRoute(src,dst,verify)&&verify==enabled;}
     void handleMainMixerRoute(const std::string&c){
         const std::string gp="MAIN_MIXER_ROUTE GET ";
-        if(c.rfind(gp,0)!=0){reply("ERR unknown-command\n");return;}
-        std::istringstream in(c.substr(gp.size()));
-        unsigned src=0,dst=0;std::string x;
-        if(!(in>>src>>dst)||(in>>x)||src>=kMainMixerSourceBlocks.size()||dst>=kMainMixerDestinationChannels.size()){
-            reply("ERR invalid-main-mixer-route\n");return;
+        if(c.rfind(gp,0)==0){
+            std::istringstream in(c.substr(gp.size()));unsigned src=0,dst=0;std::string x;
+            if(!(in>>src>>dst)||(in>>x)||src>=kMainMixerSourceBlocks.size()||dst>=kMainMixerDestinationChannels.size()){reply("ERR invalid-main-mixer-route\n");return;}
+            bool enabled=false;if(!readMainMixerRoute(src,dst,enabled)){reply("ERR fcp-read-failed\n");return;}
+            reply("OK "+std::to_string(src)+" "+std::to_string(dst)+" "+(enabled?"1":"0")+"\n");return;
         }
-        bool enabled=false;
-        if(!fcp_->readProcessingMixer(kMainMixerBlock,
-                                      kMainMixerSourceBlocks[src],
-                                      kMainMixerSourceChannels[src],
-                                      kMainMixerDestinationChannels[dst],
-                                      enabled)){
-            reply("ERR fcp-read-failed\n");return;
+        const std::string sp="MAIN_MIXER_ROUTE SET ";
+        if(c.rfind(sp,0)==0){
+            std::istringstream in(c.substr(sp.size()));unsigned src=0,dst=0,v=0;std::string x;
+            if(!(in>>src>>dst>>v)||(in>>x)||src>=kMainMixerSourceBlocks.size()||dst>=kMainMixerDestinationChannels.size()||v>1){reply("ERR invalid-main-mixer-route\n");return;}
+            if(!writeMainMixerRoute(src,dst,v!=0)){reply("ERR fcp-write-or-verify-failed\n");return;}
+            reply("OK "+std::to_string(src)+" "+std::to_string(dst)+" "+std::to_string(v)+"\n");return;
         }
-        reply("OK "+std::to_string(src)+" "+std::to_string(dst)+" "+(enabled?"1":"0")+"\n");
+        reply("ERR unknown-command\n");
     }
     void handleOutputPair(const std::string&c){
         const std::string gp="OUTPUT_PAIR GET ";if(c.rfind(gp,0)==0){std::istringstream in(c.substr(gp.size()));unsigned i=0;std::string x;if(!(in>>i)||(in>>x)||i>=5){reply("ERR invalid-output-pair\n");return;}std::uint8_t s=0xff;std::int16_t l=0,r=0;if(!fcp_->readSelector(kOutputSelectorBlocks[i],s)||!readStereoLevel(kOutputLevelBlocks[i],l,r)){reply("ERR fcp-read-failed\n");return;}reply("OK "+std::to_string(static_cast<unsigned>(s))+" "+std::to_string(l)+" "+std::to_string(r)+"\n");return;}
