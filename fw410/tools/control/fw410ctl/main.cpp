@@ -17,11 +17,16 @@ constexpr std::array<const char*, 5> kHeadphoneMixerLabels = {
 constexpr std::array<const char*, 5> kOutputLabels = {
     "Analog 1/2", "Analog 3/4", "Analog 5/6", "Analog 7/8", "S/PDIF L/R"
 };
+constexpr std::array<const char*, 5> kOutputArgs = {
+    "1/2", "3/4", "5/6", "7/8", "spdif"
+};
 
 int usage() {
     std::cerr
         << "usage:\n"
         << "  fw410ctl output-state get\n"
+        << "  fw410ctl output-source get 1/2|3/4|5/6|7/8|spdif\n"
+        << "  fw410ctl output-source set 1/2|3/4|5/6|7/8|spdif mixer|aux\n"
         << "  fw410ctl headphone-source get\n"
         << "  fw410ctl headphone-source set mixer|aux\n"
         << "  fw410ctl headphone-volume get\n"
@@ -129,6 +134,12 @@ std::string spdifConnectorName(int source) {
     return "unknown";
 }
 
+int outputIndex(const std::string& label) {
+    for (std::size_t i = 0; i < kOutputArgs.size(); ++i)
+        if (label == kOutputArgs[i]) return static_cast<int>(i);
+    return -1;
+}
+
 int printOutputState() {
     std::cout << "FW410 physical output state (read-only):\n";
     for (std::size_t i = 0; i < kOutputLabels.size(); ++i) {
@@ -162,6 +173,51 @@ int printOutputState() {
     }
     std::cout << "  S/PDIF connector: " << spdifConnectorName(connector)
               << " (" << connector << ")\n";
+    return 0;
+}
+
+int outputSourceCommand(const std::string& action, int argc, char** argv) {
+    if ((action == "get" && argc != 4) || (action == "set" && argc != 5)) return usage();
+    const int index = outputIndex(argv[3]);
+    if (index < 0) return usage();
+
+    if (action == "get") {
+        std::string payload;
+        if (!getPayload("OUTPUT_PAIR GET " + std::to_string(index), payload)) return 1;
+        std::istringstream input(payload);
+        int source = -1;
+        int left = 0;
+        int right = 0;
+        std::string extra;
+        if (!(input >> source >> left >> right) || (input >> extra)) {
+            std::cerr << "fw410ctl: invalid output response: " << payload << '\n';
+            return 1;
+        }
+        std::cout << kOutputLabels[static_cast<std::size_t>(index)] << ": "
+                  << outputSourceName(source) << " (" << source << ")\n";
+        return 0;
+    }
+
+    std::string sourceText = argv[4];
+    int source = -1;
+    if (sourceText == "mixer") source = 0;
+    else if (sourceText == "aux") source = 1;
+    else return usage();
+
+    std::string payload;
+    if (!getPayload("OUTPUT_PAIR SET_SOURCE " + std::to_string(index) + " " +
+                    std::to_string(source), payload)) return 1;
+    std::istringstream input(payload);
+    int verifyIndex = -1;
+    int verifySource = -1;
+    std::string extra;
+    if (!(input >> verifyIndex >> verifySource) || (input >> extra) ||
+        verifyIndex != index || verifySource != source) {
+        std::cerr << "fw410ctl: invalid output-source verification: " << payload << '\n';
+        return 1;
+    }
+    std::cout << kOutputLabels[static_cast<std::size_t>(index)] << ": "
+              << outputSourceName(verifySource) << " (" << verifySource << ")\n";
     return 0;
 }
 
@@ -237,6 +293,10 @@ int main(int argc, char** argv) {
     if (control == "output-state") {
         if (action == "get" && argc == 3) return printOutputState();
         return usage();
+    }
+    if (control == "output-source") {
+        if (action != "get" && action != "set") return usage();
+        return outputSourceCommand(action, argc, argv);
     }
 
     std::string command;
