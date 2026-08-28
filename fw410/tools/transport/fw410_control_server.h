@@ -120,15 +120,8 @@ private:
         }
         reply("ERR unknown-command\n");
     }
-    void handleMainMixerHardware(const std::string&c){
-        if(c!="MAIN_MIXER_HW INIT_ORIGINAL"){reply("ERR unknown-command\n");return;}
-
-        // Match snd-firewire-ctl-services' FW410 normal-mixer cache strategy:
-        // establish one coherent software-known identity matrix by issuing
-        // CONTROL for every one of the 7x5 cells. Do not use STATUS here.
-        Fw410MainMixerModel desired;
-        desired.loadOriginalIdentityPreset();
-        std::size_t writes=0;
+    bool writeFullMainMixer(const Fw410MainMixerModel& desired,std::size_t& writes,std::size_t& failedSrc,std::size_t& failedDst){
+        writes=0;
         for(std::size_t dst=0;dst<Fw410MainMixerModel::kDestinationCount;++dst){
             const auto destination=static_cast<Fw410MainMixerModel::Destination>(dst);
             const auto outputChannel=Fw410MainMixerModel::kAvcDestinationChannels[dst];
@@ -137,14 +130,38 @@ private:
                 const auto& avc=Fw410MainMixerModel::kAvcSources[src];
                 const bool enabled=desired.route(source,destination);
                 if(!fcp_->writeProcessingMixer(Fw410MainMixerModel::kDestinationFunctionBlock,avc.functionBlock,avc.channel,outputChannel,enabled)){
-                    reply("ERR fcp-write-failed after "+std::to_string(writes)+" writes src="+std::to_string(src)+" dst="+std::to_string(dst)+"\n");
-                    return;
+                    failedSrc=src;failedDst=dst;return false;
                 }
                 ++writes;
             }
         }
+        return true;
+    }
+    void handleMainMixerHardware(const std::string&c){
+        Fw410MainMixerModel desired;
+        const char* label=nullptr;
+        if(c=="MAIN_MIXER_HW INIT_ORIGINAL"){
+            // Linux/original-control-panel logical software-return identity.
+            desired.loadOriginalIdentityPreset();
+            label="original-identity";
+        }else if(c=="MAIN_MIXER_HW INIT_MACFW"){
+            // Experimental full coherent matrix aligned to macfw's current AMDTP
+            // playback ordering. This is deliberately not an automatic startup path.
+            desired.loadMacfwRemappedExperimentPreset();
+            label="macfw-remapped";
+        }else{
+            reply("ERR unknown-command\n");return;
+        }
+
+        // Match the Linux normal-mixer cache strategy: CONTROL-write every one
+        // of the 7x5 cells and do not issue mixer STATUS requests.
+        std::size_t writes=0,failedSrc=0,failedDst=0;
+        if(!writeFullMainMixer(desired,writes,failedSrc,failedDst)){
+            reply("ERR fcp-write-failed after "+std::to_string(writes)+" writes src="+std::to_string(failedSrc)+" dst="+std::to_string(failedDst)+"\n");
+            return;
+        }
         mainMixerModel_=desired;
-        reply("OK hardware-write original-identity 35\n");
+        reply("OK hardware-write "+std::string(label)+" 35\n");
     }
     void handleOutputPair(const std::string&c){
         const std::string gp="OUTPUT_PAIR GET ";if(c.rfind(gp,0)==0){std::istringstream in(c.substr(gp.size()));unsigned i=0;std::string x;if(!(in>>i)||(in>>x)||i>=5){reply("ERR invalid-output-pair\n");return;}std::uint8_t s=0xff;std::int16_t l=0,r=0;if(!fcp_->readSelector(kOutputSelectorBlocks[i],s)||!readStereoLevel(kOutputLevelBlocks[i],l,r)){reply("ERR fcp-read-failed\n");return;}reply("OK "+std::to_string(static_cast<unsigned>(s))+" "+std::to_string(l)+" "+std::to_string(r)+"\n");return;}
