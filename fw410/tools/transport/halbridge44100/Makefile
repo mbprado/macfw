@@ -2,6 +2,7 @@ CXX ?= c++
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Wpedantic
 CPPFLAGS += -I../../../lib/include -I../../../hal/include
 LDFLAGS += -framework IOKit -framework CoreFoundation
+CONTROL_HEADERS := ../fw410_control_server.h ../full_duplex_fcp_control.h
 
 all: halbridge44100
 
@@ -11,7 +12,7 @@ lib:
 rateprobe:
 	$(MAKE) -C ../../control/rateprobe rateprobe
 
-halbridge44100: main.cpp entry.cpp lib rateprobe
+halbridge44100: main.cpp entry.cpp $(CONTROL_HEADERS) lib rateprobe
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) main.cpp entry.cpp ../../../lib/libmacfw.a $(LDFLAGS) -o $@
 
 clean:
