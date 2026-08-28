@@ -28,7 +28,7 @@ Implemented and hardware-tested:
 - Info tab with component/system/device information;
 - headphone state preserved across 44.1 <-> 48 kHz transitions.
 
-## 1. Outputs tab — next implementation target
+## 1. Outputs tab — active implementation target
 
 Expose the five physical stereo output pairs:
 
@@ -38,7 +38,16 @@ Expose the five physical stereo output pairs:
 - Analog 7/8
 - S/PDIF L/R
 
-Target controls, subject to protocol confirmation:
+Hardware-validated control primitives now include:
+
+- read-only state for all five output pairs while full-duplex audio remains active;
+- per-pair Mixer/AUX source selection with hardware read-back verification;
+- independent L/R physical output level writes with hardware read-back verification;
+- simultaneous stereo level writes;
+- `-inf` level/mute representation;
+- S/PDIF connector state readback.
+
+The GUI target is therefore:
 
 - output source/routing selection;
 - independent L/R output level;
@@ -46,7 +55,19 @@ Target controls, subject to protocol confirmation:
 - mute;
 - balance through independent L/R levels where appropriate.
 
-Protocol work must precede GUI exposure. Existing Linux/legacy-panel mappings are references, but every write path is to be validated on the real FW410 while audio remains active.
+### Stereo link / lock behavior
+
+Each stereo output pair should have a small native lock/link button beside the L/R level controls.
+
+- unlocked: L and R move independently;
+- locked: moving either L or R moves both channels together;
+- locking should not itself cause an unexpected level jump;
+- while linked, preserve the existing L/R offset if the pair was unequal when locked, clamping safely at the hardware limits;
+- provide an explicit way to make both channels equal when desired rather than silently doing so when the lock is enabled.
+
+The link is GUI behavior built on the already-validated independent AV/C L/R writes; it is not a new hardware control.
+
+Protocol work must continue to precede GUI exposure. Existing Linux/legacy-panel mappings are references, but every new write path is to be validated on the real FW410 while audio remains active.
 
 ## 2. Mixer tab
 
@@ -138,12 +159,14 @@ Success criteria include glitch-free playback/capture, correct reported latency 
 
 ## 7. Stereo link controls
 
-Provide a small native link control for stereo level pairs.
+Generalize the output lock/link interaction to every stereo level pair for which it is useful.
 
-- linked: one level movement updates both channels while preserving the intended stereo relationship;
-- unlinked: L/R are independently adjustable and can be used for balance/pan-like behavior.
+- linked: moving either channel updates both while preserving the pre-link L/R offset;
+- unlinked: L/R are independently adjustable and can be used for balance/pan-like behavior;
+- enabling link must not itself change hardware level;
+- explicit equalize/reset behavior may set both channels to the same value when requested.
 
-This should reuse the already-proven independent AV/C L/R level writes rather than inventing new hardware semantics.
+This reuses the already-proven independent AV/C L/R level writes rather than inventing new hardware semantics. Point 1 implements the interaction first for physical outputs; point 7 applies the same UX consistently to the broader mixer/control panel.
 
 ## 8. Presets / state
 
@@ -214,4 +237,4 @@ Some infrastructure can be shared across later items, but this order keeps the f
 
 ## Immediate next checkpoint
 
-Start point 1 by mapping the existing FW410 output control topology from the repository probes/Linux protocol reference into the transport-owned control server. First expose read-only state through `fw410ctl`; then add one narrowly scoped write at a time and hardware-test it while 44.1/48 kHz full-duplex audio is active. Only validated controls are added to the Outputs GUI tab.
+Finish point 1 by exposing the now-validated physical output controls in the AppKit GUI. Use five compact stereo output strips with source selection, L/R level, mute and a lock/link button. The lock is UI-side behavior and must not alter hardware state merely by being enabled. After the Outputs tab is hardware-tested at 44.1 and 48 kHz, move to the internal Mixer mapping.
