@@ -85,6 +85,26 @@ private:
             reply("OK software-only "+std::to_string(src)+" "+std::to_string(dst)+" "+std::to_string(value)+"\n");
             return;
         }
+        if(c=="MAIN_MIXER_MODEL PLAN"){
+            std::string o="OK software-only 35\n";
+            for(std::size_t dst=0;dst<Fw410MainMixerModel::kDestinationCount;++dst){
+                const auto destination=static_cast<Fw410MainMixerModel::Destination>(dst);
+                const auto outCh=Fw410MainMixerModel::kAvcDestinationChannels[dst];
+                for(std::size_t src=0;src<Fw410MainMixerModel::kSourceCount;++src){
+                    const auto source=static_cast<Fw410MainMixerModel::Source>(src);
+                    const auto& avc=Fw410MainMixerModel::kAvcSources[src];
+                    const bool enabled=mainMixerModel_.route(source,destination);
+                    o+="src="+std::to_string(src)+" dst="+std::to_string(dst)+
+                       " fb="+std::to_string(Fw410MainMixerModel::kDestinationFunctionBlock)+
+                       " inputPlug="+std::to_string(avc.functionBlock)+
+                       " inputCh="+std::to_string(avc.channel)+
+                       " outputCh="+std::to_string(outCh)+
+                       " raw="+(enabled?std::string("0x0000"):std::string("0x8000"))+"\n";
+                }
+            }
+            reply(o);
+            return;
+        }
         if(c=="MAIN_MIXER_MODEL TOPOLOGY"){
             std::string o="OK";
             for(const auto& src:Fw410MainMixerModel::kAvcSources){o+=" "+std::to_string(src.functionBlock)+":"+std::to_string(src.channel);}
