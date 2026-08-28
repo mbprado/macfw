@@ -35,7 +35,7 @@ public:
 
     ~Fw410ControlServer(){reset();}
     bool start(Fw410FcpControl& fcp){reset();fcp_=&fcp;listenFd_=socket(AF_UNIX,SOCK_STREAM,0);if(listenFd_<0)return false;int flags=fcntl(listenFd_,F_GETFL,0);if(flags>=0)fcntl(listenFd_,F_SETFL,flags|O_NONBLOCK);sockaddr_un a{};a.sun_family=AF_UNIX;if(std::strlen(kSocketPath)>=sizeof(a.sun_path)){reset();return false;}std::strncpy(a.sun_path,kSocketPath,sizeof(a.sun_path)-1);unlink(kSocketPath);if(bind(listenFd_,reinterpret_cast<sockaddr*>(&a),sizeof(a))!=0){reset();return false;}chmod(kSocketPath,0666);if(listen(listenFd_,4)!=0){reset();return false;}std::printf("FW410 control socket: %s\n",kSocketPath);return true;}
-    void reset(){if(clientFd_>=0)close(clientFd_);clientFd_=-1;request_.clear();if(listenFd_>=0)close(listenFd_);listenFd_=-1;unlink(kSocketPath);fcp_=nullptr;}
+    void reset(){if(clientFd_>=0)close(clientFd_);clientFd_=-1;request_.clear();if(listenFd_>=0)close(listenFd_);listenFd_=-1;unlink(kSocketPath);fcp_=nullptr;mainMixerHardwareInitialized_=false;}
     void service(){if(listenFd_<0||!fcp_)return;if(clientFd_<0){clientFd_=accept(listenFd_,nullptr,nullptr);if(clientFd_>=0){int flags=fcntl(clientFd_,F_GETFL,0);if(flags>=0)fcntl(clientFd_,F_SETFL,flags|O_NONBLOCK);request_.clear();}else if(errno!=EAGAIN&&errno!=EWOULDBLOCK)return;}if(clientFd_<0)return;char b[256];ssize_t n=recv(clientFd_,b,sizeof(b),0);if(n>0){request_.append(b,static_cast<std::size_t>(n));if(request_.size()>1024){reply("ERR request-too-long\n");finishClient();return;}auto nl=request_.find('\n');if(nl!=std::string::npos){handle(request_.substr(0,nl));finishClient();}}else if(n==0||(errno!=EAGAIN&&errno!=EWOULDBLOCK))finishClient();}
 private:
     void finishClient(){if(clientFd_>=0)close(clientFd_);clientFd_=-1;request_.clear();}
@@ -48,119 +48,41 @@ private:
     bool writeHeadphoneMixer(std::size_t i,bool e){if(i>=5||!fcp_->writeProcessingMixer(kHeadphoneMixerBlock,kHeadphoneMixerInputPlug,kHeadphoneMixerInputChannels[i],kHeadphoneMixerOutputChannel,e))return false;bool v=false;return fcp_->readProcessingMixer(kHeadphoneMixerBlock,kHeadphoneMixerInputPlug,kHeadphoneMixerInputChannels[i],kHeadphoneMixerOutputChannel,v)&&v==e;}
     void handleHeadphoneMixer(const std::string&c){if(c=="HEADPHONE_MIXER GET"){std::array<bool,5>s{};if(!readHeadphoneMixer(s)){reply("ERR fcp-read-failed\n");return;}std::string o="OK";for(bool e:s)o+=e?" 1":" 0";reply(o+"\n");return;}std::string p="HEADPHONE_MIXER SET ";if(c.rfind(p,0)!=0){reply("ERR unknown-command\n");return;}std::istringstream in(c.substr(p.size()));unsigned i=0,v=0;std::string x;if(!(in>>i>>v)||(in>>x)||i>=5||v>1){reply("ERR invalid-headphone-mixer\n");return;}if(!writeHeadphoneMixer(i,v!=0)){reply("ERR fcp-write-or-verify-failed\n");return;}reply("OK "+std::to_string(i)+" "+std::to_string(v)+"\n");}
     void handleMainMixerModel(const std::string&c){
-        if(c=="MAIN_MIXER_MODEL GET"){
-            std::string o="OK";
-            for(const auto& row:mainMixerModel_.routes())for(bool enabled:row)o+=enabled?" 1":" 0";
-            reply(o+"\n");
-            return;
-        }
-        if(c=="MAIN_MIXER_MODEL LOAD_ORIGINAL"){
-            mainMixerModel_.loadOriginalIdentityPreset();
-            reply("OK software-only original-identity-preset\n");
-            return;
-        }
-        if(c=="MAIN_MIXER_MODEL LOAD_MACFW"){
-            mainMixerModel_.loadMacfwPlaybackPreset();
-            reply("OK software-only macfw-playback-preset\n");
-            return;
-        }
-        if(c=="MAIN_MIXER_MODEL CLEAR"){
-            mainMixerModel_.clear();
-            reply("OK software-only cleared\n");
-            return;
-        }
+        if(c=="MAIN_MIXER_MODEL GET"){std::string o="OK";for(const auto& row:mainMixerModel_.routes())for(bool enabled:row)o+=enabled?" 1":" 0";reply(o+"\n");return;}
+        if(c=="MAIN_MIXER_MODEL LOAD_ORIGINAL"){mainMixerModel_.loadOriginalIdentityPreset();reply("OK software-only original-identity-preset\n");return;}
+        if(c=="MAIN_MIXER_MODEL LOAD_MACFW"){mainMixerModel_.loadMacfwPlaybackPreset();reply("OK software-only macfw-playback-preset\n");return;}
+        if(c=="MAIN_MIXER_MODEL CLEAR"){mainMixerModel_.clear();reply("OK software-only cleared\n");return;}
         const std::string rg="MAIN_MIXER_MODEL ROUTE GET ";
-        if(c.rfind(rg,0)==0){
-            std::istringstream in(c.substr(rg.size()));
-            unsigned src=0,dst=0;std::string x;
-            if(!(in>>src>>dst)||(in>>x)||src>=Fw410MainMixerModel::kSourceCount||dst>=Fw410MainMixerModel::kDestinationCount){reply("ERR invalid-main-mixer-route\n");return;}
-            const auto source=static_cast<Fw410MainMixerModel::Source>(src);
-            const auto destination=static_cast<Fw410MainMixerModel::Destination>(dst);
-            reply("OK "+std::to_string(src)+" "+std::to_string(dst)+" "+(mainMixerModel_.route(source,destination)?"1":"0")+"\n");
-            return;
-        }
+        if(c.rfind(rg,0)==0){std::istringstream in(c.substr(rg.size()));unsigned src=0,dst=0;std::string x;if(!(in>>src>>dst)||(in>>x)||src>=Fw410MainMixerModel::kSourceCount||dst>=Fw410MainMixerModel::kDestinationCount){reply("ERR invalid-main-mixer-route\n");return;}const auto source=static_cast<Fw410MainMixerModel::Source>(src);const auto destination=static_cast<Fw410MainMixerModel::Destination>(dst);reply("OK "+std::to_string(src)+" "+std::to_string(dst)+" "+(mainMixerModel_.route(source,destination)?"1":"0")+"\n");return;}
         const std::string rs="MAIN_MIXER_MODEL ROUTE SET ";
-        if(c.rfind(rs,0)==0){
-            std::istringstream in(c.substr(rs.size()));
-            unsigned src=0,dst=0,value=0;std::string x;
-            if(!(in>>src>>dst>>value)||(in>>x)||src>=Fw410MainMixerModel::kSourceCount||dst>=Fw410MainMixerModel::kDestinationCount||value>1){reply("ERR invalid-main-mixer-route\n");return;}
-            const auto source=static_cast<Fw410MainMixerModel::Source>(src);
-            const auto destination=static_cast<Fw410MainMixerModel::Destination>(dst);
-            mainMixerModel_.setRoute(source,destination,value!=0);
-            reply("OK software-only "+std::to_string(src)+" "+std::to_string(dst)+" "+std::to_string(value)+"\n");
-            return;
-        }
-        if(c=="MAIN_MIXER_MODEL PLAN"){
-            std::string o="OK software-only 35\n";
-            for(std::size_t dst=0;dst<Fw410MainMixerModel::kDestinationCount;++dst){
-                const auto destination=static_cast<Fw410MainMixerModel::Destination>(dst);
-                const auto outCh=Fw410MainMixerModel::kAvcDestinationChannels[dst];
-                for(std::size_t src=0;src<Fw410MainMixerModel::kSourceCount;++src){
-                    const auto source=static_cast<Fw410MainMixerModel::Source>(src);
-                    const auto& avc=Fw410MainMixerModel::kAvcSources[src];
-                    const bool enabled=mainMixerModel_.route(source,destination);
-                    o+="src="+std::to_string(src)+" dst="+std::to_string(dst)+
-                       " fb="+std::to_string(Fw410MainMixerModel::kDestinationFunctionBlock)+
-                       " inputPlug="+std::to_string(avc.functionBlock)+
-                       " inputCh="+std::to_string(avc.channel)+
-                       " outputCh="+std::to_string(outCh)+
-                       " raw="+(enabled?std::string("0x0000"):std::string("0x8000"))+"\n";
-                }
-            }
-            reply(o);
-            return;
-        }
-        if(c=="MAIN_MIXER_MODEL TOPOLOGY"){
-            std::string o="OK";
-            for(const auto& src:Fw410MainMixerModel::kAvcSources){o+=" "+std::to_string(src.functionBlock)+":"+std::to_string(src.channel);}
-            o+=" -> "+std::to_string(Fw410MainMixerModel::kDestinationFunctionBlock)+":";
-            for(std::size_t i=0;i<Fw410MainMixerModel::kAvcDestinationChannels.size();++i){if(i)o+=",";o+=std::to_string(Fw410MainMixerModel::kAvcDestinationChannels[i]);}
-            reply(o+"\n");
-            return;
-        }
+        if(c.rfind(rs,0)==0){std::istringstream in(c.substr(rs.size()));unsigned src=0,dst=0,value=0;std::string x;if(!(in>>src>>dst>>value)||(in>>x)||src>=Fw410MainMixerModel::kSourceCount||dst>=Fw410MainMixerModel::kDestinationCount||value>1){reply("ERR invalid-main-mixer-route\n");return;}const auto source=static_cast<Fw410MainMixerModel::Source>(src);const auto destination=static_cast<Fw410MainMixerModel::Destination>(dst);mainMixerModel_.setRoute(source,destination,value!=0);reply("OK software-only "+std::to_string(src)+" "+std::to_string(dst)+" "+std::to_string(value)+"\n");return;}
+        if(c=="MAIN_MIXER_MODEL PLAN"){std::string o="OK software-only 35\n";for(std::size_t dst=0;dst<Fw410MainMixerModel::kDestinationCount;++dst){const auto destination=static_cast<Fw410MainMixerModel::Destination>(dst);const auto outCh=Fw410MainMixerModel::kAvcDestinationChannels[dst];for(std::size_t src=0;src<Fw410MainMixerModel::kSourceCount;++src){const auto source=static_cast<Fw410MainMixerModel::Source>(src);const auto& avc=Fw410MainMixerModel::kAvcSources[src];const bool enabled=mainMixerModel_.route(source,destination);o+="src="+std::to_string(src)+" dst="+std::to_string(dst)+" fb="+std::to_string(Fw410MainMixerModel::kDestinationFunctionBlock)+" inputPlug="+std::to_string(avc.functionBlock)+" inputCh="+std::to_string(avc.channel)+" outputCh="+std::to_string(outCh)+" raw="+(enabled?std::string("0x0000"):std::string("0x8000"))+"\n";}}reply(o);return;}
+        if(c=="MAIN_MIXER_MODEL TOPOLOGY"){std::string o="OK";for(const auto& src:Fw410MainMixerModel::kAvcSources)o+=" "+std::to_string(src.functionBlock)+":"+std::to_string(src.channel);o+=" -> "+std::to_string(Fw410MainMixerModel::kDestinationFunctionBlock)+":";for(std::size_t i=0;i<Fw410MainMixerModel::kAvcDestinationChannels.size();++i){if(i)o+=",";o+=std::to_string(Fw410MainMixerModel::kAvcDestinationChannels[i]);}reply(o+"\n");return;}
         reply("ERR unknown-command\n");
     }
-    bool writeFullMainMixer(const Fw410MainMixerModel& desired,std::size_t& writes,std::size_t& failedSrc,std::size_t& failedDst){
-        writes=0;
-        for(std::size_t dst=0;dst<Fw410MainMixerModel::kDestinationCount;++dst){
-            const auto destination=static_cast<Fw410MainMixerModel::Destination>(dst);
-            const auto outputChannel=Fw410MainMixerModel::kAvcDestinationChannels[dst];
-            for(std::size_t src=0;src<Fw410MainMixerModel::kSourceCount;++src){
-                const auto source=static_cast<Fw410MainMixerModel::Source>(src);
-                const auto& avc=Fw410MainMixerModel::kAvcSources[src];
-                const bool enabled=desired.route(source,destination);
-                if(!fcp_->writeProcessingMixer(Fw410MainMixerModel::kDestinationFunctionBlock,avc.functionBlock,avc.channel,outputChannel,enabled)){
-                    failedSrc=src;failedDst=dst;return false;
-                }
-                ++writes;
-            }
-        }
-        return true;
-    }
+    bool writeFullMainMixer(const Fw410MainMixerModel& desired,std::size_t& writes,std::size_t& failedSrc,std::size_t& failedDst){writes=0;for(std::size_t dst=0;dst<Fw410MainMixerModel::kDestinationCount;++dst){const auto destination=static_cast<Fw410MainMixerModel::Destination>(dst);const auto outputChannel=Fw410MainMixerModel::kAvcDestinationChannels[dst];for(std::size_t src=0;src<Fw410MainMixerModel::kSourceCount;++src){const auto source=static_cast<Fw410MainMixerModel::Source>(src);const auto& avc=Fw410MainMixerModel::kAvcSources[src];const bool enabled=desired.route(source,destination);if(!fcp_->writeProcessingMixer(Fw410MainMixerModel::kDestinationFunctionBlock,avc.functionBlock,avc.channel,outputChannel,enabled)){failedSrc=src;failedDst=dst;return false;}++writes;}}return true;}
     void handleMainMixerHardware(const std::string&c){
-        Fw410MainMixerModel desired;
-        const char* label=nullptr;
-        if(c=="MAIN_MIXER_HW INIT_ORIGINAL"){
-            // Linux/original-control-panel logical software-return identity.
-            desired.loadOriginalIdentityPreset();
-            label="original-identity";
-        }else if(c=="MAIN_MIXER_HW INIT_MACFW"){
-            // Experimental full coherent matrix aligned to macfw's current AMDTP
-            // playback ordering. This is deliberately not an automatic startup path.
-            desired.loadMacfwRemappedExperimentPreset();
-            label="macfw-remapped";
-        }else{
-            reply("ERR unknown-command\n");return;
-        }
-
-        // Match the Linux normal-mixer cache strategy: CONTROL-write every one
-        // of the 7x5 cells and do not issue mixer STATUS requests.
-        std::size_t writes=0,failedSrc=0,failedDst=0;
-        if(!writeFullMainMixer(desired,writes,failedSrc,failedDst)){
-            reply("ERR fcp-write-failed after "+std::to_string(writes)+" writes src="+std::to_string(failedSrc)+" dst="+std::to_string(failedDst)+"\n");
+        const std::string routePrefix="MAIN_MIXER_HW ROUTE SET ";
+        if(c.rfind(routePrefix,0)==0){
+            if(!mainMixerHardwareInitialized_){reply("ERR main-mixer-not-initialized\n");return;}
+            std::istringstream in(c.substr(routePrefix.size()));unsigned src=0,dst=0,value=0;std::string x;
+            if(!(in>>src>>dst>>value)||(in>>x)||src>=Fw410MainMixerModel::kSourceCount||dst>=Fw410MainMixerModel::kDestinationCount||value>1){reply("ERR invalid-main-mixer-route\n");return;}
+            const auto source=static_cast<Fw410MainMixerModel::Source>(src);const auto destination=static_cast<Fw410MainMixerModel::Destination>(dst);
+            const bool enabled=value!=0;
+            if(mainMixerModel_.route(source,destination)==enabled){reply("OK hardware-cached unchanged "+std::to_string(src)+" "+std::to_string(dst)+" "+std::to_string(value)+"\n");return;}
+            const auto& avc=Fw410MainMixerModel::kAvcSources[src];const auto outputChannel=Fw410MainMixerModel::kAvcDestinationChannels[dst];
+            if(!fcp_->writeProcessingMixer(Fw410MainMixerModel::kDestinationFunctionBlock,avc.functionBlock,avc.channel,outputChannel,enabled)){reply("ERR fcp-write-failed\n");return;}
+            mainMixerModel_.setRoute(source,destination,enabled);
+            reply("OK hardware-cached "+std::to_string(src)+" "+std::to_string(dst)+" "+std::to_string(value)+"\n");
             return;
         }
-        mainMixerModel_=desired;
+        Fw410MainMixerModel desired;const char* label=nullptr;
+        if(c=="MAIN_MIXER_HW INIT_ORIGINAL"){desired.loadOriginalIdentityPreset();label="original-identity";}
+        else if(c=="MAIN_MIXER_HW INIT_MACFW"){desired.loadMacfwRemappedExperimentPreset();label="macfw-remapped";}
+        else{reply("ERR unknown-command\n");return;}
+        std::size_t writes=0,failedSrc=0,failedDst=0;
+        if(!writeFullMainMixer(desired,writes,failedSrc,failedDst)){mainMixerHardwareInitialized_=false;reply("ERR fcp-write-failed after "+std::to_string(writes)+" writes src="+std::to_string(failedSrc)+" dst="+std::to_string(failedDst)+"\n");return;}
+        mainMixerModel_=desired;mainMixerHardwareInitialized_=true;
         reply("OK hardware-write "+std::string(label)+" 35\n");
     }
     void handleOutputPair(const std::string&c){
@@ -182,7 +104,7 @@ private:
         if(c.rfind("HEADPHONE_MIXER ",0)==0){handleHeadphoneMixer(c);return;}
         reply("ERR unknown-command\n");
     }
-    Fw410FcpControl*fcp_=nullptr;int listenFd_=-1;int clientFd_=-1;std::string request_;Fw410MainMixerModel mainMixerModel_{};
+    Fw410FcpControl*fcp_=nullptr;int listenFd_=-1;int clientFd_=-1;std::string request_;Fw410MainMixerModel mainMixerModel_{};bool mainMixerHardwareInitialized_=false;
 };
 
 } // namespace macfw::transport::duplex
