@@ -32,6 +32,15 @@ public:
     static constexpr std::array<std::uint8_t, 5> kOutputLevelBlocks = {0x0a,0x0b,0x0c,0x0d,0x0e};
     static constexpr std::uint8_t kSpdifConnectorSelector = 0x01;
 
+    // Main 14x10 mixer mapping from snd-firewire-ctl-services Fw410MixerProtocol.
+    // AudioCh::Each(n) is encoded by AV/C as (2*n)+1.
+    // Keep this path single-cell/read-only until it is validated on hardware;
+    // the FW410 ASIC is known to be sensitive to bursts of mixer STATUS requests.
+    static constexpr std::uint8_t kMainMixerBlock = 0x01;
+    static constexpr std::array<std::uint8_t, 7> kMainMixerSourceBlocks = {0x02,0x03,0x01,0x00,0x00,0x00,0x00};
+    static constexpr std::array<std::uint8_t, 7> kMainMixerSourceChannels = {0x01,0x01,0x01,0x01,0x05,0x09,0x0d};
+    static constexpr std::array<std::uint8_t, 5> kMainMixerDestinationChannels = {0x01,0x05,0x09,0x0d,0x11};
+
     ~Fw410ControlServer(){reset();}
     bool start(Fw410FcpControl& fcp){reset();fcp_=&fcp;listenFd_=socket(AF_UNIX,SOCK_STREAM,0);if(listenFd_<0)return false;int flags=fcntl(listenFd_,F_GETFL,0);if(flags>=0)fcntl(listenFd_,F_SETFL,flags|O_NONBLOCK);sockaddr_un a{};a.sun_family=AF_UNIX;if(std::strlen(kSocketPath)>=sizeof(a.sun_path)){reset();return false;}std::strncpy(a.sun_path,kSocketPath,sizeof(a.sun_path)-1);unlink(kSocketPath);if(bind(listenFd_,reinterpret_cast<sockaddr*>(&a),sizeof(a))!=0){reset();return false;}chmod(kSocketPath,0666);if(listen(listenFd_,4)!=0){reset();return false;}std::printf("FW410 control socket: %s\n",kSocketPath);return true;}
     void reset(){if(clientFd_>=0)close(clientFd_);clientFd_=-1;request_.clear();if(listenFd_>=0)close(listenFd_);listenFd_=-1;unlink(kSocketPath);fcp_=nullptr;}
@@ -46,6 +55,24 @@ private:
     bool readHeadphoneMixer(std::array<bool,5>&s){for(std::size_t i=0;i<s.size();++i)if(!fcp_->readProcessingMixer(kHeadphoneMixerBlock,kHeadphoneMixerInputPlug,kHeadphoneMixerInputChannels[i],kHeadphoneMixerOutputChannel,s[i]))return false;return true;}
     bool writeHeadphoneMixer(std::size_t i,bool e){if(i>=5||!fcp_->writeProcessingMixer(kHeadphoneMixerBlock,kHeadphoneMixerInputPlug,kHeadphoneMixerInputChannels[i],kHeadphoneMixerOutputChannel,e))return false;bool v=false;return fcp_->readProcessingMixer(kHeadphoneMixerBlock,kHeadphoneMixerInputPlug,kHeadphoneMixerInputChannels[i],kHeadphoneMixerOutputChannel,v)&&v==e;}
     void handleHeadphoneMixer(const std::string&c){if(c=="HEADPHONE_MIXER GET"){std::array<bool,5>s{};if(!readHeadphoneMixer(s)){reply("ERR fcp-read-failed\n");return;}std::string o="OK";for(bool e:s)o+=e?" 1":" 0";reply(o+"\n");return;}std::string p="HEADPHONE_MIXER SET ";if(c.rfind(p,0)!=0){reply("ERR unknown-command\n");return;}std::istringstream in(c.substr(p.size()));unsigned i=0,v=0;std::string x;if(!(in>>i>>v)||(in>>x)||i>=5||v>1){reply("ERR invalid-headphone-mixer\n");return;}if(!writeHeadphoneMixer(i,v!=0)){reply("ERR fcp-write-or-verify-failed\n");return;}reply("OK "+std::to_string(i)+" "+std::to_string(v)+"\n");}
+    void handleMainMixerRoute(const std::string&c){
+        const std::string gp="MAIN_MIXER_ROUTE GET ";
+        if(c.rfind(gp,0)!=0){reply("ERR unknown-command\n");return;}
+        std::istringstream in(c.substr(gp.size()));
+        unsigned src=0,dst=0;std::string x;
+        if(!(in>>src>>dst)||(in>>x)||src>=kMainMixerSourceBlocks.size()||dst>=kMainMixerDestinationChannels.size()){
+            reply("ERR invalid-main-mixer-route\n");return;
+        }
+        bool enabled=false;
+        if(!fcp_->readProcessingMixer(kMainMixerBlock,
+                                      kMainMixerSourceBlocks[src],
+                                      kMainMixerSourceChannels[src],
+                                      kMainMixerDestinationChannels[dst],
+                                      enabled)){
+            reply("ERR fcp-read-failed\n");return;
+        }
+        reply("OK "+std::to_string(src)+" "+std::to_string(dst)+" "+(enabled?"1":"0")+"\n");
+    }
     void handleOutputPair(const std::string&c){
         const std::string gp="OUTPUT_PAIR GET ";if(c.rfind(gp,0)==0){std::istringstream in(c.substr(gp.size()));unsigned i=0;std::string x;if(!(in>>i)||(in>>x)||i>=5){reply("ERR invalid-output-pair\n");return;}std::uint8_t s=0xff;std::int16_t l=0,r=0;if(!fcp_->readSelector(kOutputSelectorBlocks[i],s)||!readStereoLevel(kOutputLevelBlocks[i],l,r)){reply("ERR fcp-read-failed\n");return;}reply("OK "+std::to_string(static_cast<unsigned>(s))+" "+std::to_string(l)+" "+std::to_string(r)+"\n");return;}
         const std::string sp="OUTPUT_PAIR SET_SOURCE ";if(c.rfind(sp,0)==0){std::istringstream in(c.substr(sp.size()));unsigned i=0,s=0;std::string x;if(!(in>>i>>s)||(in>>x)||i>=5||s>1){reply("ERR invalid-output-source\n");return;}auto fb=kOutputSelectorBlocks[i];auto v=static_cast<std::uint8_t>(s);if(!fcp_->writeSelector(fb,v)){reply("ERR fcp-write-failed\n");return;}std::uint8_t verify=0xff;if(!fcp_->readSelector(fb,verify)||verify!=v){reply("ERR verify-failed\n");return;}reply("OK "+std::to_string(i)+" "+std::to_string(static_cast<unsigned>(verify))+"\n");return;}
@@ -56,6 +83,7 @@ private:
         if(c=="HEADPHONE_SOURCE GET"){std::uint8_t v=0xff;if(!fcp_->readSelector(kHeadphoneSelector,v)){reply("ERR fcp-read-failed\n");return;}reply("OK "+std::to_string(static_cast<unsigned>(v))+"\n");return;}
         if(c=="HEADPHONE_SOURCE SET 0"||c=="HEADPHONE_SOURCE SET 1"){std::uint8_t v=c.back()=='1'?1:0;if(!fcp_->writeSelector(kHeadphoneSelector,v)){reply("ERR fcp-write-failed\n");return;}std::uint8_t q=0xff;if(!fcp_->readSelector(kHeadphoneSelector,q)||q!=v){reply("ERR verify-failed\n");return;}reply("OK "+std::to_string(static_cast<unsigned>(q))+"\n");return;}
         if(c=="SPDIF_CONNECTOR GET"){std::uint8_t v=0xff;if(!fcp_->readSelector(kSpdifConnectorSelector,v)){reply("ERR fcp-read-failed\n");return;}reply("OK "+std::to_string(static_cast<unsigned>(v))+"\n");return;}
+        if(c.rfind("MAIN_MIXER_ROUTE ",0)==0){handleMainMixerRoute(c);return;}
         if(c.rfind("OUTPUT_PAIR ",0)==0){handleOutputPair(c);return;}
         if(c.rfind("HEADPHONE_VOLUME ",0)==0){handleLevel(c,"HEADPHONE_VOLUME",kHeadphoneLevel);return;}
         if(c.rfind("AUX_STREAM12_VOLUME ",0)==0){handleLevel(c,"AUX_STREAM12_VOLUME",kAuxStream12Level);return;}
