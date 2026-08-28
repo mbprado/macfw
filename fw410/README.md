@@ -42,11 +42,25 @@ CoreAudio integration is hardware-confirmed for:
 - simultaneous playback, recording and live monitoring in Logic Pro;
 - runtime 44.1 <-> 48 kHz switching through `haltransport`;
 - physical disconnect/reconnect with automatic transport recovery;
-- logical CoreAudio-device continuity while the physical FW410 transport is offline.
+- logical CoreAudio-device continuity while the physical FW410 transport is offline;
+- live headphone source, level and five-pair mixer control through the transport-owned control IPC;
+- a native AppKit control panel for headphone, AUX and system/device information.
 
 The transport-status ABI explicitly reports `OFFLINE`, `RECOVERING`, and `ONLINE`, plus requested/active rate, native-engine PID, transition sequence and heartbeat. A native engine is not published `ONLINE` until it explicitly reports READY after successful transport startup.
 
 Detailed capture design and evidence: [`analysis/capture-pipeline.md`](analysis/capture-pipeline.md).
+
+## Control panel
+
+The current native macOS control panel is intentionally built with AppKit/Objective-C++ and the standard Command Line Tools rather than requiring full Xcode. It uses the validated control API while audio remains owned by the active transport engine.
+
+Current tabs:
+
+- **Headphones** — mixer/AUX source, independent L/R level and five mixer-output pair enables;
+- **AUX** — software return 1/2 -> AUX and AUX output stereo levels;
+- **Info** — macfw/HAL build information, transport state/rate, macOS/Mac identity, FireWire controller information and FW410 identity.
+
+The planned expansion order is documented in [`analysis/control-panel-roadmap.md`](analysis/control-panel-roadmap.md). In short: Outputs -> Mixer -> Inputs/Monitoring -> Meters -> Device -> Buffer/Latency -> stereo linking -> presets -> optional menu-bar status -> diagnostics refinement.
 
 ## Boot identity
 
@@ -55,7 +69,7 @@ before: FW Bootloader / model 0x00010058
 after:  FW 410        / model 0x00010046
 ```
 
-`haltransport` now handles this personality transition during physical reconnect recovery, reacquiring fresh FireWire generation/node state and issuing the guarded boot cue only when the known FW410 loader preflight matches.
+`haltransport` handles this personality transition during physical reconnect recovery, reacquiring fresh FireWire generation/node state and issuing the guarded boot cue only when the known FW410 loader preflight matches.
 
 ## Playback
 
@@ -72,7 +86,7 @@ Native 44.1 playback is hardware-confirmed. The FW410 requires an M-Audio-specif
 
 If both directions are already at 44100, the initial redundant AV/C CONTROL is skipped, but the proven post-start reassert remains mandatory.
 
-A clean 44.1 kHz supervisor stop now leaves the FW410 at 44.1 kHz instead of forcing the development-era 48 kHz restore. Repeated hardware validation showed faster, consistent restarts with the expected `OFFLINE -> RECOVERING -> ONLINE` sequence and one successful native-engine PID per restart. Abnormal 44.1 engine failure retains the conservative best-effort 48 kHz recovery restore.
+A clean 44.1 kHz supervisor stop leaves the FW410 at 44.1 kHz instead of forcing the development-era 48 kHz restore. Repeated hardware validation showed faster, consistent restarts with the expected `OFFLINE -> RECOVERING -> ONLINE` sequence and one successful native-engine PID per restart. Abnormal 44.1 engine failure retains the conservative best-effort 48 kHz recovery restore.
 
 Detailed rate lifecycle: [`analysis/sample-rate-lifecycle.md`](analysis/sample-rate-lifecycle.md).
 
@@ -166,8 +180,9 @@ The logical **M-Audio FireWire 410** CoreAudio device intentionally remains regi
 - [x] 44.1/48 rate control
 - [x] M-Audio 44.1 startup quirk
 - [x] guarded bootloader recovery
-- [x] basic mixer/selector probing
-- [ ] complete mixer/control mapping
+- [x] headphone source/level/mixer mapping
+- [x] initial AUX level mapping
+- [ ] complete mixer/output/input control mapping
 - [ ] MIDI byte transport validation
 
 ### M4 — Audio DevKit
@@ -180,7 +195,7 @@ The logical **M-Audio FireWire 410** CoreAudio device intentionally remains regi
 - [x] transport availability/status ABI
 - [x] automatic supervisor lifecycle/recovery
 
-### M5 — CoreAudio integration
+### M5 — CoreAudio integration and control panel
 
 - [x] FW410 appears as a normal CoreAudio device
 - [x] native 44.1/48 playback
@@ -189,20 +204,25 @@ The logical **M-Audio FireWire 410** CoreAudio device intentionally remains regi
 - [x] native 44.1/48 recording in Logic Pro
 - [x] simultaneous playback/capture
 - [x] HAL remains logically present through physical disconnect/reconnect
-- [ ] complete offline-state behavior/telemetry in the HAL
-- [ ] controls
+- [x] live transport-owned control IPC
+- [x] native AppKit Headphones/AUX/Info control panel
+- [ ] Outputs controls
+- [ ] full mixer controls
+- [ ] input/direct-monitor controls
+- [ ] live meters
+- [ ] buffer/latency control after dedicated investigation
 
 ## Current phase
 
-The project has moved beyond basic full-duplex integration. Both supported native rates, rate switching, transport readiness reporting, supervisor restart, and physical disconnect/reconnect recovery are hardware-validated.
+The audio transport and recovery architecture is hardware-validated at both supported native rates. Development is now expanding the production control surface behind the same transport-owned IPC that already allows headphone and AUX controls to coexist with full-duplex audio.
 
-The current integration direction is to finish the separation between the persistent CoreAudio endpoint and the recoverable physical transport. The HAL should remain registered, observe the versioned transport-status ABI, return silence/empty capture while transport is offline, and resume transparently when the native engine returns `ONLINE`.
-
-Latency tuning remains a later optimization. The intentionally conservative capture prefill is useful for correctness validation but makes software monitoring noticeably latent.
+The control-panel roadmap intentionally prioritizes proven hardware controls before latency tuning. Output routing/levels are next, followed by the wider mixer and direct-monitor paths. Metering can then be added from already-decoded PCM without requiring extra FireWire ownership. Buffer/latency controls remain a separate investigation because the stack contains multiple buffering layers and should not expose an ambiguous or unsafe generic buffer slider.
 
 ## Documentation
 
 - [`analysis/current-integration-status.md`](analysis/current-integration-status.md) — current handoff and immediate next work.
+- [`analysis/control-panel-roadmap.md`](analysis/control-panel-roadmap.md) — ordered ten-point GUI/control expansion plan.
+- [`analysis/headphone-control.md`](analysis/headphone-control.md) — validated headphone/AUX control model and CLI surface.
 - [`analysis/sample-rate-lifecycle.md`](analysis/sample-rate-lifecycle.md) — validated 44.1/48 kHz setup, restart and cleanup policy.
 - [`analysis/capture-pipeline.md`](analysis/capture-pipeline.md) — validated capture architecture and controlled quality evidence.
 - [`analysis/stream-topology.md`](analysis/stream-topology.md) — raw and CoreAudio channel mapping.
