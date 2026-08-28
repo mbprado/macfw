@@ -274,32 +274,60 @@ private:
         reply("OK " + std::to_string(index) + " " + std::to_string(value) + "\n");
     }
 
-    void handleOutputPairGet(const std::string& command) {
-        const std::string prefix = "OUTPUT_PAIR GET ";
-        if (command.rfind(prefix, 0) != 0) {
-            reply("ERR unknown-command\n");
+    void handleOutputPair(const std::string& command) {
+        const std::string getPrefix = "OUTPUT_PAIR GET ";
+        if (command.rfind(getPrefix, 0) == 0) {
+            std::istringstream input(command.substr(getPrefix.size()));
+            unsigned index = 0;
+            std::string extra;
+            if (!(input >> index) || (input >> extra) || index >= kOutputSelectorBlocks.size()) {
+                reply("ERR invalid-output-pair\n");
+                return;
+            }
+
+            std::uint8_t source = 0xff;
+            std::int16_t left = 0;
+            std::int16_t right = 0;
+            if (!fcp_->readSelector(kOutputSelectorBlocks[index], source) ||
+                !readStereoLevel(kOutputLevelBlocks[index], left, right)) {
+                reply("ERR fcp-read-failed\n");
+                return;
+            }
+
+            reply("OK " + std::to_string(static_cast<unsigned>(source)) + " " +
+                  std::to_string(left) + " " + std::to_string(right) + "\n");
             return;
         }
 
-        std::istringstream input(command.substr(prefix.size()));
-        unsigned index = 0;
-        std::string extra;
-        if (!(input >> index) || (input >> extra) || index >= kOutputSelectorBlocks.size()) {
-            reply("ERR invalid-output-pair\n");
+        const std::string setSourcePrefix = "OUTPUT_PAIR SET_SOURCE ";
+        if (command.rfind(setSourcePrefix, 0) == 0) {
+            std::istringstream input(command.substr(setSourcePrefix.size()));
+            unsigned index = 0;
+            unsigned source = 0;
+            std::string extra;
+            if (!(input >> index >> source) || (input >> extra) ||
+                index >= kOutputSelectorBlocks.size() || source > 1) {
+                reply("ERR invalid-output-source\n");
+                return;
+            }
+
+            const auto block = kOutputSelectorBlocks[index];
+            const auto value = static_cast<std::uint8_t>(source);
+            if (!fcp_->writeSelector(block, value)) {
+                reply("ERR fcp-write-failed\n");
+                return;
+            }
+            std::uint8_t verify = 0xff;
+            if (!fcp_->readSelector(block, verify) || verify != value) {
+                reply("ERR verify-failed\n");
+                return;
+            }
+            reply("OK " + std::to_string(index) + " " +
+                  std::to_string(static_cast<unsigned>(verify)) + "\n");
             return;
         }
 
-        std::uint8_t source = 0xff;
-        std::int16_t left = 0;
-        std::int16_t right = 0;
-        if (!fcp_->readSelector(kOutputSelectorBlocks[index], source) ||
-            !readStereoLevel(kOutputLevelBlocks[index], left, right)) {
-            reply("ERR fcp-read-failed\n");
-            return;
-        }
-
-        reply("OK " + std::to_string(static_cast<unsigned>(source)) + " " +
-              std::to_string(left) + " " + std::to_string(right) + "\n");
+        reply("ERR unknown-command\n");
     }
 
     void handle(const std::string& command) {
@@ -338,8 +366,8 @@ private:
             return;
         }
 
-        if (command.rfind("OUTPUT_PAIR GET ", 0) == 0) {
-            handleOutputPairGet(command);
+        if (command.rfind("OUTPUT_PAIR ", 0) == 0) {
+            handleOutputPair(command);
             return;
         }
         if (command.rfind("HEADPHONE_VOLUME ", 0) == 0) {
