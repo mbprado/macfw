@@ -64,6 +64,27 @@ private:
             reply("OK software-only cleared\n");
             return;
         }
+        const std::string rg="MAIN_MIXER_MODEL ROUTE GET ";
+        if(c.rfind(rg,0)==0){
+            std::istringstream in(c.substr(rg.size()));
+            unsigned src=0,dst=0;std::string x;
+            if(!(in>>src>>dst)||(in>>x)||src>=Fw410MainMixerModel::kSourceCount||dst>=Fw410MainMixerModel::kDestinationCount){reply("ERR invalid-main-mixer-route\n");return;}
+            const auto source=static_cast<Fw410MainMixerModel::Source>(src);
+            const auto destination=static_cast<Fw410MainMixerModel::Destination>(dst);
+            reply("OK "+std::to_string(src)+" "+std::to_string(dst)+" "+(mainMixerModel_.route(source,destination)?"1":"0")+"\n");
+            return;
+        }
+        const std::string rs="MAIN_MIXER_MODEL ROUTE SET ";
+        if(c.rfind(rs,0)==0){
+            std::istringstream in(c.substr(rs.size()));
+            unsigned src=0,dst=0,value=0;std::string x;
+            if(!(in>>src>>dst>>value)||(in>>x)||src>=Fw410MainMixerModel::kSourceCount||dst>=Fw410MainMixerModel::kDestinationCount||value>1){reply("ERR invalid-main-mixer-route\n");return;}
+            const auto source=static_cast<Fw410MainMixerModel::Source>(src);
+            const auto destination=static_cast<Fw410MainMixerModel::Destination>(dst);
+            mainMixerModel_.setRoute(source,destination,value!=0);
+            reply("OK software-only "+std::to_string(src)+" "+std::to_string(dst)+" "+std::to_string(value)+"\n");
+            return;
+        }
         if(c=="MAIN_MIXER_MODEL TOPOLOGY"){
             std::string o="OK";
             for(const auto& src:Fw410MainMixerModel::kAvcSources){o+=" "+std::to_string(src.functionBlock)+":"+std::to_string(src.channel);}
