@@ -6,7 +6,7 @@ CONTENTS := $(APP)/Contents
 MACOS := $(CONTENTS)/MacOS
 RESOURCES := $(CONTENTS)/Resources
 BINARY := $(MACOS)/macfw-fw410-control
-SOURCES := Sources/main.mm
+SOURCES := Sources/main.mm Sources/outputs_extension.mm
 ICON := icon.png
 ICONSET := build/icon.iconset
 ICNS := $(RESOURCES)/icon.icns
@@ -30,7 +30,7 @@ $(ICNS): $(ICON)
 	iconutil -c icns "$(ICONSET)" -o "$(ICNS)"
 	cp "$(ICON)" "$(RESOURCES)/icon.png"
 
-$(BINARY): $(SOURCES) Info.plist $(ICNS) ../version.h
+$(BINARY): $(SOURCES) Sources/stereo_link.h Info.plist $(ICNS) ../version.h
 	mkdir -p "$(MACOS)" "$(RESOURCES)"
 	cp Info.plist "$(CONTENTS)/Info.plist"
 	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(GIT_SHA)" "$(CONTENTS)/Info.plist"
