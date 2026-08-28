@@ -54,6 +54,11 @@ private:
             reply(o+"\n");
             return;
         }
+        if(c=="MAIN_MIXER_MODEL LOAD_ORIGINAL"){
+            mainMixerModel_.loadOriginalIdentityPreset();
+            reply("OK software-only original-identity-preset\n");
+            return;
+        }
         if(c=="MAIN_MIXER_MODEL LOAD_MACFW"){
             mainMixerModel_.loadMacfwPlaybackPreset();
             reply("OK software-only macfw-playback-preset\n");
