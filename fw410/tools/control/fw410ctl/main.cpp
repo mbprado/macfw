@@ -14,10 +14,14 @@ constexpr const char* kSocketPath = "/tmp/macfw-fw410-control.sock";
 constexpr std::array<const char*, 5> kHeadphoneMixerLabels = {
     "1/2", "3/4", "5/6", "7/8", "9/10"
 };
+constexpr std::array<const char*, 5> kOutputLabels = {
+    "Analog 1/2", "Analog 3/4", "Analog 5/6", "Analog 7/8", "S/PDIF L/R"
+};
 
 int usage() {
     std::cerr
         << "usage:\n"
+        << "  fw410ctl output-state get\n"
         << "  fw410ctl headphone-source get\n"
         << "  fw410ctl headphone-source set mixer|aux\n"
         << "  fw410ctl headphone-volume get\n"
@@ -79,6 +83,18 @@ bool transact(const std::string& command, std::string& response) {
     return !response.empty();
 }
 
+bool getPayload(const std::string& command, std::string& payload) {
+    std::string response;
+    if (!transact(command, response)) return false;
+    if (!response.empty() && response.back() == '\n') response.pop_back();
+    if (response.rfind("OK ", 0) != 0) {
+        std::cerr << "fw410ctl: " << response << '\n';
+        return false;
+    }
+    payload = response.substr(3);
+    return true;
+}
+
 bool dbToRaw(const std::string& text, int& raw) {
     if (text == "-inf" || text == "mute") {
         raw = -32768;
@@ -99,6 +115,54 @@ std::string rawToDb(int raw) {
     std::ostringstream out;
     out << raw << " raw (" << (static_cast<double>(raw) / 256.0) << " dB)";
     return out.str();
+}
+
+std::string outputSourceName(int source) {
+    if (source == 0) return "mixer";
+    if (source == 1) return "aux";
+    return "unknown";
+}
+
+std::string spdifConnectorName(int source) {
+    if (source == 0) return "coaxial";
+    if (source == 1) return "optical";
+    return "unknown";
+}
+
+int printOutputState() {
+    std::cout << "FW410 physical output state (read-only):\n";
+    for (std::size_t i = 0; i < kOutputLabels.size(); ++i) {
+        std::string payload;
+        if (!getPayload("OUTPUT_PAIR GET " + std::to_string(i), payload)) return 1;
+
+        std::istringstream input(payload);
+        int source = -1;
+        int left = 0;
+        int right = 0;
+        std::string extra;
+        if (!(input >> source >> left >> right) || (input >> extra)) {
+            std::cerr << "fw410ctl: invalid output-state response: " << payload << '\n';
+            return 1;
+        }
+
+        std::cout << "  " << kOutputLabels[i] << ":\n"
+                  << "    source: " << outputSourceName(source) << " (" << source << ")\n"
+                  << "    left:   " << rawToDb(left) << " (raw " << left << ")\n"
+                  << "    right:  " << rawToDb(right) << " (raw " << right << ")\n";
+    }
+
+    std::string payload;
+    if (!getPayload("SPDIF_CONNECTOR GET", payload)) return 1;
+    std::istringstream input(payload);
+    int connector = -1;
+    std::string extra;
+    if (!(input >> connector) || (input >> extra)) {
+        std::cerr << "fw410ctl: invalid S/PDIF connector response: " << payload << '\n';
+        return 1;
+    }
+    std::cout << "  S/PDIF connector: " << spdifConnectorName(connector)
+              << " (" << connector << ")\n";
+    return 0;
 }
 
 bool parseStereoRawResponse(const std::string& payload, int& left, int& right) {
@@ -169,6 +233,12 @@ int main(int argc, char** argv) {
 
     const std::string control = argv[1];
     const std::string action = argv[2];
+
+    if (control == "output-state") {
+        if (action == "get" && argc == 3) return printOutputState();
+        return usage();
+    }
+
     std::string command;
     std::string headphoneMixerSetDisplay;
     bool levelResponse = false;
