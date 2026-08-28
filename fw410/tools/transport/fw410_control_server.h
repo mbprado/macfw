@@ -31,6 +31,16 @@ public:
         0x01, 0x03, 0x05, 0x07, 0x09
     };
 
+    // Linux snd-firewire-ctl-services Fw410PhysOutputProtocol mapping.
+    // Pair order: Analog 1/2, 3/4, 5/6, 7/8, S/PDIF L/R.
+    static constexpr std::array<std::uint8_t, 5> kOutputSelectorBlocks = {
+        0x02, 0x03, 0x04, 0x05, 0x06
+    };
+    static constexpr std::array<std::uint8_t, 5> kOutputLevelBlocks = {
+        0x0a, 0x0b, 0x0c, 0x0d, 0x0e
+    };
+    static constexpr std::uint8_t kSpdifConnectorSelector = 0x01;
+
     ~Fw410ControlServer() { reset(); }
 
     bool start(Fw410FcpControl& fcp) {
@@ -264,6 +274,34 @@ private:
         reply("OK " + std::to_string(index) + " " + std::to_string(value) + "\n");
     }
 
+    void handleOutputPairGet(const std::string& command) {
+        const std::string prefix = "OUTPUT_PAIR GET ";
+        if (command.rfind(prefix, 0) != 0) {
+            reply("ERR unknown-command\n");
+            return;
+        }
+
+        std::istringstream input(command.substr(prefix.size()));
+        unsigned index = 0;
+        std::string extra;
+        if (!(input >> index) || (input >> extra) || index >= kOutputSelectorBlocks.size()) {
+            reply("ERR invalid-output-pair\n");
+            return;
+        }
+
+        std::uint8_t source = 0xff;
+        std::int16_t left = 0;
+        std::int16_t right = 0;
+        if (!fcp_->readSelector(kOutputSelectorBlocks[index], source) ||
+            !readStereoLevel(kOutputLevelBlocks[index], left, right)) {
+            reply("ERR fcp-read-failed\n");
+            return;
+        }
+
+        reply("OK " + std::to_string(static_cast<unsigned>(source)) + " " +
+              std::to_string(left) + " " + std::to_string(right) + "\n");
+    }
+
     void handle(const std::string& command) {
         if (command == "HEADPHONE_SOURCE GET") {
             std::uint8_t value = 0xff;
@@ -290,6 +328,20 @@ private:
             return;
         }
 
+        if (command == "SPDIF_CONNECTOR GET") {
+            std::uint8_t value = 0xff;
+            if (!fcp_->readSelector(kSpdifConnectorSelector, value)) {
+                reply("ERR fcp-read-failed\n");
+                return;
+            }
+            reply("OK " + std::to_string(static_cast<unsigned>(value)) + "\n");
+            return;
+        }
+
+        if (command.rfind("OUTPUT_PAIR GET ", 0) == 0) {
+            handleOutputPairGet(command);
+            return;
+        }
         if (command.rfind("HEADPHONE_VOLUME ", 0) == 0) {
             handleLevel(command, "HEADPHONE_VOLUME", kHeadphoneLevel);
             return;
