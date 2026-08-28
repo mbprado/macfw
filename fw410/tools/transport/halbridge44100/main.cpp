@@ -9,6 +9,7 @@
 #include "../full_duplex_engine_setup.h"
 #include "../full_duplex_fcp_control.h"
 #include "../fw410_control_server.h"
+#include "../fw410_main_mixer_init.h"
 #include "../full_duplex_lifecycle.h"
 #include "../full_duplex_runtime.h"
 
@@ -52,6 +53,7 @@ bool run() {
     Fw410ControlServer control;
     bool ok = false;
     if (!lifecycle.addCallbackDispatcher() || !fcp.arm(setup.device)) goto cleanup;
+    if (!initializeFw410MainMixerLikeLinux(fcp)) goto cleanup;
     if (!control.start(fcp))
         std::cerr << "warning: FW410 control socket unavailable; audio will continue\n";
     if (!lifecycle.startIsoch()) goto cleanup;
