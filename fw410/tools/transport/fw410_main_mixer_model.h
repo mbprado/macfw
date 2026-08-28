@@ -71,6 +71,28 @@ public:
         routes_[index(destination)][index(source)] = enabled;
     }
 
+    void clear() { routes_ = {}; }
+
+    // Populate software state with the matrix that would preserve macfw's
+    // CoreAudio-visible physical pair order after full_duplex_shared.h remaps
+    // samples into the FW410's unusual AMDTP stream order:
+    //
+    //   CoreAudio A1/2      -> FW stream 3/4  -> Mixer Out 1/2
+    //   CoreAudio A3/4      -> FW stream 5/6  -> Mixer Out 3/4
+    //   CoreAudio A5/6      -> FW stream 7/8  -> Mixer Out 5/6
+    //   CoreAudio A7/8      -> FW stream 9/10 -> Mixer Out 7/8
+    //   CoreAudio S/PDIF LR -> FW stream 1/2  -> Mixer Out 9/10
+    //
+    // This method changes software state only.  It sends no AV/C command.
+    void loadMacfwPlaybackPreset() {
+        clear();
+        setRoute(Source::SoftwareReturn34, Destination::MixerOutput12, true);
+        setRoute(Source::SoftwareReturn56, Destination::MixerOutput34, true);
+        setRoute(Source::SoftwareReturn78, Destination::MixerOutput56, true);
+        setRoute(Source::SoftwareReturn910, Destination::MixerOutput78, true);
+        setRoute(Source::SoftwareReturn12, Destination::MixerOutput910, true);
+    }
+
     const RouteMatrix& routes() const { return routes_; }
 
     static constexpr std::size_t index(Source source) {
@@ -83,9 +105,7 @@ public:
 
 private:
     // Intentionally starts empty.  This is software state only and must not be
-    // presented as the current hardware state.  A future initialization policy
-    // can populate it only after we decide exactly which complete matrix macfw
-    // should program into the device.
+    // presented as the current hardware state.
     RouteMatrix routes_{};
 };
 
