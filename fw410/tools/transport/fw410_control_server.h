@@ -54,8 +54,17 @@ private:
             reply(o+"\n");
             return;
         }
-        const std::string tp="MAIN_MIXER_MODEL TOPOLOGY";
-        if(c==tp){
+        if(c=="MAIN_MIXER_MODEL LOAD_MACFW"){
+            mainMixerModel_.loadMacfwPlaybackPreset();
+            reply("OK software-only macfw-playback-preset\n");
+            return;
+        }
+        if(c=="MAIN_MIXER_MODEL CLEAR"){
+            mainMixerModel_.clear();
+            reply("OK software-only cleared\n");
+            return;
+        }
+        if(c=="MAIN_MIXER_MODEL TOPOLOGY"){
             std::string o="OK";
             for(const auto& src:Fw410MainMixerModel::kAvcSources){o+=" "+std::to_string(src.functionBlock)+":"+std::to_string(src.channel);}
             o+=" -> "+std::to_string(Fw410MainMixerModel::kDestinationFunctionBlock)+":";
