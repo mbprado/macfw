@@ -3,7 +3,10 @@
 
 #include <CoreAudio/AudioServerPlugIn.h>
 
+#include <algorithm>
+#include <array>
 #include <cerrno>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
@@ -25,6 +28,33 @@ const char* operationName(std::uint32_t op) {
 
 void printOperation(const char* label, std::uint32_t op) {
     std::printf("    %-18s %u (%s)\n", label, op, operationName(op));
+}
+
+void printPlaybackPeaks(const macfw::hal::SharedPcmRing& ring) {
+    static constexpr std::array<const char*, macfw::hal::kChannels> kNames = {
+        "Analog 1", "Analog 2", "Analog 3", "Analog 4", "Analog 5",
+        "Analog 6", "Analog 7", "Analog 8", "S/PDIF L", "S/PDIF R"
+    };
+    constexpr std::size_t kSnapshotFrames = 512;
+
+    const auto w = ring.writeFrame.load(std::memory_order_acquire);
+    const auto r = ring.readFrame.load(std::memory_order_acquire);
+    const std::uint64_t available = w - r;
+    const std::size_t frames = static_cast<std::size_t>(
+        std::min<std::uint64_t>(available, kSnapshotFrames));
+
+    std::array<float, macfw::hal::kChannels> peaks{};
+    const std::uint64_t start = w - frames;
+    for (std::size_t i = 0; i < frames; ++i) {
+        const std::size_t base = static_cast<std::size_t>(
+            (start + i) % macfw::hal::kCapacityFrames) * macfw::hal::kChannels;
+        for (std::size_t ch = 0; ch < macfw::hal::kChannels; ++ch)
+            peaks[ch] = std::max(peaks[ch], std::fabs(ring.samples[base + ch]));
+    }
+
+    std::printf("Playback channel peak snapshot (%zu buffered frames):\n", frames);
+    for (std::size_t ch = 0; ch < peaks.size(); ++ch)
+        std::printf("    ch %2zu %-10s %.6f\n", ch + 1, kNames[ch], peaks[ch]);
 }
 
 void printCaptureState() {
@@ -98,6 +128,8 @@ int main() {
         std::printf("    available:          %llu frames\n", static_cast<unsigned long long>(macfw::hal::availableFrames(*ring)));
         std::printf("    dropped frames:     %llu\n", static_cast<unsigned long long>(ring->droppedFrames.load(std::memory_order_acquire)));
         std::printf("    underrun frames:    %llu\n", static_cast<unsigned long long>(ring->underrunFrames.load(std::memory_order_acquire)));
+
+        printPlaybackPeaks(*ring);
 
         std::printf("HAL I/O instrumentation:\n");
         std::printf("    StartIO calls:      %llu\n", static_cast<unsigned long long>(ring->startIOCalls.load(std::memory_order_acquire)));
