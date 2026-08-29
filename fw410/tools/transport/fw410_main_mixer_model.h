@@ -6,12 +6,12 @@
 
 namespace macfw::transport::duplex {
 
-// Software-only description of the FW410 normal/main mixer.
+// Software description of the FW410 normal/main mixer.
 //
-// This deliberately performs no AV/C I/O. The FW410 ASIC is known to be
-// sensitive to mixer STATUS traffic, and the Linux implementation does not
-// use STATUS to discover the normal mixer state. Keep topology/state separate
-// from hardware programming until the complete model is validated.
+// This class performs no AV/C I/O itself. The FW410 ASIC is known to be
+// sensitive to mixer STATUS traffic, and the Linux implementation likewise
+// establishes a complete state with CONTROL requests and then trusts cached
+// software state rather than polling STATUS.
 class Fw410MainMixerModel {
 public:
     static constexpr std::size_t kSourceCount = 7;
@@ -84,8 +84,10 @@ public:
     //   SW Return 7/8   -> Mixer Bus 7/8
     //   SW Return 9/10  -> Mixer Bus S/PDIF
     //
-    // This matches snd-firewire-ctl-services' initial cached state. Software
-    // state only: this method sends no AV/C command.
+    // This matches snd-firewire-ctl-services' initial cached state. On macfw
+    // it is useful as the original logical reference, but it is not the
+    // correct hardware baseline for macfw's current AMDTP slot ordering.
+    // Software state only: this method sends no AV/C command.
     void loadOriginalIdentityPreset() {
         clear();
         setRoute(Source::SoftwareReturn12, Destination::MixerBus12, true);
@@ -95,11 +97,19 @@ public:
         setRoute(Source::SoftwareReturn910, Destination::MixerBusSpdif, true);
     }
 
-    // Historical experimental preset retained for comparison. This was based
-    // on interpreting mixer destinations as physical playback outputs and
-    // compensating for macfw's CoreAudio->AMDTP channel remap. The original
-    // M-Audio UI shows that interpretation is probably wrong: these are mixer
-    // bus assignments. Do not use this as a hardware initialization preset.
+    // Hardware-validated macfw routing baseline. The FW410's raw software-
+    // return identities are rotated relative to the user-facing CoreAudio
+    // playback order used by macfw. Writing all 35 cells with this mapping
+    // establishes one coherent mixer state without disturbing normal playback;
+    // later route changes can then be issued as differential CONTROL writes
+    // against the trusted cached matrix.
+    //
+    //   raw SW Return 3/4   -> Mixer Bus 1/2
+    //   raw SW Return 5/6   -> Mixer Bus 3/4
+    //   raw SW Return 7/8   -> Mixer Bus 5/6
+    //   raw SW Return 9/10  -> Mixer Bus 7/8
+    //   raw SW Return 1/2   -> Mixer Bus S/PDIF
+    //
     // Software state only: this method sends no AV/C command.
     void loadMacfwRemappedExperimentPreset() {
         clear();
@@ -110,8 +120,8 @@ public:
         setRoute(Source::SoftwareReturn12, Destination::MixerBusSpdif, true);
     }
 
-    // Compatibility for the existing software-only LOAD_MACFW IPC command.
-    // Keep its historical behavior while the IPC vocabulary is migrated.
+    // Compatibility aliases for the existing IPC/backend vocabulary. The
+    // historical function name is retained to avoid changing tested behavior.
     void loadMacfwPlaybackPreset() { loadMacfwRemappedExperimentPreset(); }
 
     const RouteMatrix& routes() const { return routes_; }
@@ -125,8 +135,8 @@ public:
     }
 
 private:
-    // Intentionally starts empty. This is software state only and must not be
-    // presented as the current hardware state.
+    // Intentionally starts empty. Hardware state becomes authoritative only
+    // after the control server successfully establishes a complete baseline.
     RouteMatrix routes_{};
 };
 
