@@ -1,13 +1,13 @@
 # Installing macfw for the M-Audio FireWire 410
 
-This guide covers the first macfw FW410 alpha runtime for Intel macOS.
+This guide covers the current macfw FW410 alpha runtime for Intel macOS.
 
 > **Alpha software:** this driver has been hardware-tested on the development Intel Mac, but it is not yet a signed/notarized public production release. Back up important work before testing it on another system.
 
 ## Requirements
 
 - Intel Mac.
-- macOS Sonoma or newer is the current project target.
+- A hardware-tested macOS release. Current validation includes Monterey 12.7.6, Ventura 13.7.8 and Sonoma 14.8.9.
 - M-Audio FireWire 410 connected through a working FireWire path.
 - Administrator access.
 
@@ -25,9 +25,15 @@ Apple Silicon is not currently supported.
    sudo installer -pkg macfw-fw410-0.01.000-<build>.pkg -target /
    ```
 
-4. The installer validates the connected interface, installs the CoreAudio HAL plug-in and transport runtime, loads the launchd service, and restarts `coreaudiod`.
-5. A reboot is normally **not required**. Hardware validation confirmed that the FW410 can become usable immediately after package installation.
-6. Open Audio MIDI Setup and select **M-Audio FireWire 410**. Native 44.1 kHz and 48 kHz are currently supported.
+4. The installer validates the connected interface and installs:
+   - the CoreAudio HAL plug-in;
+   - the transport/control runtime;
+   - the launchd service;
+   - **macfw FW410 Control.app** in `/Applications`.
+5. The installer loads the launchd service and restarts `coreaudiod`.
+6. A reboot is normally **not required**. Hardware validation confirmed that the FW410 can become usable immediately after installation.
+7. Open Audio MIDI Setup and select **M-Audio FireWire 410**. Native 44.1 kHz and 48 kHz are currently supported.
+8. Open `/Applications/macfw FW410 Control.app` for the validated hardware controls.
 
 The installed runtime is managed automatically by launchd. You do not need to run `haltransport` manually.
 
@@ -41,15 +47,47 @@ cd macfw
 make
 ```
 
+The default build now produces the installable HAL bundle, the release runtime/control binaries and the native control-panel application.
+
 Then install the already-built artifacts as root:
 
 ```bash
 sudo make install
 ```
 
-Do not run the compilation itself with `sudo`. `make install` intentionally installs already-built artifacts rather than compiling as root.
+Do not run compilation itself with `sudo`. The install targets intentionally verify that the artifacts already exist instead of compiling them as root.
 
 The source installer uses the same supported-device gate as the package installation.
+
+## Build targets
+
+From the repository root:
+
+```bash
+make             # HAL + release runtime + GUI
+make hal         # HAL only
+make runtime     # installed runtime/control binaries only
+make gui         # native control-panel application only
+make all-tools   # all development/reverse-engineering tools
+make package     # complete .pkg installer
+make clean
+```
+
+The `runtime` target is intentionally narrow. It builds only the binaries used by the installed service/control path instead of compiling all historical probes and experiments.
+
+For GUI-only development:
+
+```bash
+make gui
+open "fw410/control-panel/build/macfw FW410 Control.app"
+```
+
+For transport-only development without replacing the HAL or GUI:
+
+```bash
+make runtime
+sudo bash fw410/service/install-service.sh
+```
 
 ## Building a package locally
 
@@ -58,6 +96,8 @@ From the repository root:
 ```bash
 make package
 ```
+
+`make package` builds the complete installable set first and packages the HAL, runtime/service and control panel.
 
 The generated installer is placed under:
 
@@ -76,6 +116,7 @@ package/dist/macfw-fw410-0.01.000-<git-sha>.pkg
 The current installation includes:
 
 ```text
+/Applications/macfw FW410 Control.app
 /Library/Audio/Plug-Ins/HAL/macfw-fw410.driver
 /Library/Application Support/macfw/fw410/
 /Library/LaunchDaemons/com.mbprado.macfw.fw410.transport.plist
@@ -87,6 +128,28 @@ The launchd service is:
 ```text
 com.mbprado.macfw.fw410.transport
 ```
+
+The installed control CLI is:
+
+```text
+/Library/Application Support/macfw/fw410/tools/control/fw410ctl/fw410ctl
+```
+
+## Control architecture
+
+The GUI and CLI do not open FireWire directly. Both use the transport-owned control socket:
+
+```text
+macfw FW410 Control.app / fw410ctl
+        |
+/tmp/macfw-fw410-control.sock
+        |
+active transport process
+        |
+FW410 AV/C
+```
+
+This allows hardware controls to coexist with active playback/capture without competing for the FireWire device.
 
 ## Checking status
 
@@ -128,6 +191,14 @@ While the interface is unavailable:
 
 When the FW410 returns, the transport supervisor reacquires it and playback/capture resume without requiring the application to reselect the device. This behavior has been hardware-validated in Logic Pro.
 
+## Main mixer initialization note
+
+The FW410 main-mixer ASIC is not treated like an ordinary read/write register matrix. Hardware testing showed that an isolated mixer CONTROL write against an unknown state can disrupt playback. The production control server therefore establishes a complete known 35-cell mixer baseline on first main-mixer access, caches it, and applies later route changes differentially. Mixer STATUS polling is deliberately avoided.
+
+The GUI presents software-return rows in CoreAudio/Logic order even though the FW410's raw AV/C software-return identities are rotated relative to macfw's AMDTP ordering.
+
+See [`fw410/analysis/original-control-panel-mixer-model.md`](fw410/analysis/original-control-panel-mixer-model.md) for the validated model.
+
 ## Uninstalling a source installation
 
 From the repository root:
@@ -135,6 +206,8 @@ From the repository root:
 ```bash
 sudo make uninstall
 ```
+
+This removes the launchd runtime, the installed control-panel application and the HAL bundle.
 
 For packaged alpha builds, use the project-provided uninstall path when one is included with that release. Do not manually remove individual runtime files while the launchd service is active.
 
@@ -155,6 +228,16 @@ tail -n 100 /Library/Logs/macfw-fw410-transport.log
 ```
 
 The launchd supervisor is designed to survive boot without the interface and to recover when the FW410 is connected later.
+
+### Control panel is present but controls do not respond
+
+Confirm the transport is `ONLINE`, then test the installed CLI through the same control path, for example:
+
+```bash
+"/Library/Application Support/macfw/fw410/tools/control/fw410ctl/fw410ctl" mixer get
+```
+
+If the CLI also fails, inspect the transport log/socket path rather than opening the FireWire device with a standalone probe while the transport is active.
 
 ### 44.1 kHz startup
 
