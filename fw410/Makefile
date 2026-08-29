@@ -29,12 +29,14 @@ install:
 	    [ ! -x tools/control/rateprobe/rateprobe ] || \
 	    [ ! -x tools/control/fw410ctl/fw410ctl ] || \
 	    [ ! -x tools/device/fwboot/fwboot ] || \
-	    [ ! -x tools/device/deviceprobe/deviceprobe ]; then \
-		echo "error: release artifacts are not built; run 'make' as a normal user first" >&2; \
+	    [ ! -x tools/device/deviceprobe/deviceprobe ] || \
+	    [ ! -x "control-panel/build/macfw FW410 Control.app/Contents/MacOS/macfw-fw410-control" ]; then \
+		echo "error: installable artifacts are not built; run 'make' as a normal user first" >&2; \
 		exit 1; \
 	fi
 	$(MAKE) -C hal install
 	bash service/install-service.sh
+	$(MAKE) -C control-panel install
 
 uninstall:
 	@if [ "$$(id -u)" -ne 0 ]; then \
@@ -42,6 +44,7 @@ uninstall:
 		exit 1; \
 	fi
 	bash service/uninstall-service.sh
+	$(MAKE) -C control-panel uninstall
 	$(MAKE) -C hal uninstall
 
 clean:
