@@ -11,7 +11,7 @@ CoreAudio application
         |
 macfw AudioServerPlugIn
         |
-versioned shared-memory audio rings
+versioned shared-memory audio/status ABI
         |
 macfw transport service
         |
@@ -19,6 +19,20 @@ AV/C / CMP / CIP / AMDTP / NuDCL / IOFireWireLib
         |
 M-Audio FireWire 410
 ```
+
+Live controls use the same transport ownership:
+
+```text
+macfw FW410 Control.app / fw410ctl
+        |
+/tmp/macfw-fw410-control.sock
+        |
+active transport engine
+        |
+FW410 AV/C
+```
+
+The HAL and GUI never open FireWire independently.
 
 ## Hardware-validated status
 
@@ -44,7 +58,11 @@ CoreAudio integration is hardware-confirmed for:
 - physical disconnect/reconnect with automatic transport recovery;
 - logical CoreAudio-device continuity while the physical FW410 transport is offline;
 - live headphone source, level and five-pair mixer control through the transport-owned control IPC;
-- a native AppKit control panel for headphone, AUX and system/device information.
+- AUX source/output level controls;
+- physical output source and L/R level controls;
+- the complete 7-source x 5-bus main-mixer routing matrix;
+- multiple simultaneous mixer-bus assignments;
+- native AppKit control-panel operation for Mixer, Outputs, Headphones, AUX and system/device information.
 
 The transport-status ABI explicitly reports `OFFLINE`, `RECOVERING`, and `ONLINE`, plus requested/active rate, native-engine PID, transition sequence and heartbeat. A native engine is not published `ONLINE` until it explicitly reports READY after successful transport startup.
 
@@ -52,15 +70,53 @@ Detailed capture design and evidence: [`analysis/capture-pipeline.md`](analysis/
 
 ## Control panel
 
-The current native macOS control panel is intentionally built with AppKit/Objective-C++ and the standard Command Line Tools rather than requiring full Xcode. It uses the validated control API while audio remains owned by the active transport engine.
+The native macOS control panel is built with AppKit/Objective-C++ and the standard Command Line Tools rather than requiring full Xcode. It uses the validated `fw410ctl -> socket -> transport -> AV/C` path while audio remains owned by the active transport engine.
 
 Current tabs:
 
-- **Headphones** — mixer/AUX source, independent L/R level and five mixer-output pair enables;
+- **Mixer** — seven sources into five mixer buses, with multiple simultaneous route assignments;
+- **Outputs** — five physical stereo output pairs with Mixer/AUX source, independent L/R level and link behavior;
+- **Headphones** — mixer/AUX source, independent L/R level, five mixer-output pair enables and link behavior;
 - **AUX** — software return 1/2 -> AUX and AUX output stereo levels;
 - **Info** — macfw/HAL build information, transport state/rate, macOS/Mac identity, FireWire controller information and FW410 identity.
 
-The planned expansion order is documented in [`analysis/control-panel-roadmap.md`](analysis/control-panel-roadmap.md). In short: Outputs -> Mixer -> Inputs/Monitoring -> Meters -> Device -> Buffer/Latency -> stereo linking -> presets -> optional menu-bar status -> diagnostics refinement.
+The GUI intentionally presents software returns in CoreAudio/Logic order. The FW410's raw AV/C software-return identities are rotated relative to macfw's AMDTP channel order, so the GUI translates them rather than exposing confusing raw names.
+
+The planned expansion order is documented in [`analysis/control-panel-roadmap.md`](analysis/control-panel-roadmap.md).
+
+## Main mixer discovery
+
+The original M-Audio control panel and Linux `snd-firewire-ctl-services` implementation establish the FW410 main mixer as seven sources feeding five independent mixer buses.
+
+The production routing backend follows a hardware-validated rule:
+
+1. initialize all 35 route cells to one known macfw-compatible baseline;
+2. cache that matrix in the transport process;
+3. do not use mixer STATUS polling to reconstruct it;
+4. perform later route changes as differential CONTROL writes.
+
+This is required because a single isolated mixer write against unknown/default state was observed to kill normal playback, while the same differential write is safe after the full coherent initialization.
+
+The original/Linux identity matrix is a useful logical reference, but macfw's AMDTP slot ordering requires this raw baseline:
+
+```text
+raw SW Return 3/4   -> Mixer 1/2
+raw SW Return 5/6   -> Mixer 3/4
+raw SW Return 7/8   -> Mixer 5/6
+raw SW Return 9/10  -> Mixer 7/8
+raw SW Return 1/2   -> Mixer S/PDIF
+```
+
+The GUI translates this back into the expected CoreAudio/Logic names so `SW Return 1/2` controls Logic 1/2, and so on through 9/10.
+
+Hardware validation also confirmed analog direct monitoring, for example:
+
+```text
+Analog In 1/2 -> Mixer 1/2 => Input 1 -> Output 1, Input 2 -> Output 2
+Analog In 1/2 -> Mixer 3/4 => Input 1 -> Output 3, Input 2 -> Output 4
+```
+
+See [`analysis/original-control-panel-mixer-model.md`](analysis/original-control-panel-mixer-model.md).
 
 ## Boot identity
 
@@ -139,13 +195,9 @@ FW410 input
  -> CoreAudio application
 ```
 
-The receive-side breakthrough was to stop treating a global scan of changed DMA slots as one coherent batch. Metadata is published in 32-cycle (~4 ms) groups, and userspace consumes a group only after its terminal receive slot changes, proving that group's update list has completed.
-
-Completion detection is rate-aware: 48 kHz uses timestamp + ISO-header state, while 44.1 kHz uses the stable timestamp token required by its alternating blocking/NODATA packet pattern.
-
 The shared capture ring uses a controlled 4,096-frame prefill (~85 ms at 48 kHz, ~93 ms at 44.1 kHz) before it becomes active so CoreAudio cannot outrun the FireWire producer during startup.
 
-Both native rates are hardware-validated for clear recording and live monitoring. In steady state the expected capture cadence is approximately 96,000 frames per two seconds at 48 kHz and 88,200 at 44.1 kHz.
+Both native rates are hardware-validated for clear recording and live monitoring.
 
 ## Disconnect/reconnect behavior
 
@@ -181,8 +233,10 @@ The logical **M-Audio FireWire 410** CoreAudio device intentionally remains regi
 - [x] M-Audio 44.1 startup quirk
 - [x] guarded bootloader recovery
 - [x] headphone source/level/mixer mapping
-- [x] initial AUX level mapping
-- [ ] complete mixer/output/input control mapping
+- [x] AUX level mapping
+- [x] physical output source/level mapping
+- [x] main-mixer 7x5 route assignment mapping
+- [ ] remaining mixer strip controls
 - [ ] MIDI byte transport validation
 
 ### M4 — Audio DevKit
@@ -205,23 +259,39 @@ The logical **M-Audio FireWire 410** CoreAudio device intentionally remains regi
 - [x] simultaneous playback/capture
 - [x] HAL remains logically present through physical disconnect/reconnect
 - [x] live transport-owned control IPC
-- [x] native AppKit Headphones/AUX/Info control panel
-- [ ] Outputs controls
-- [ ] full mixer controls
-- [ ] input/direct-monitor controls
+- [x] native AppKit control panel
+- [x] Outputs controls
+- [x] main-mixer routing controls
+- [ ] remaining mixer strip controls
+- [ ] input-specific controls
 - [ ] live meters
 - [ ] buffer/latency control after dedicated investigation
 
 ## Current phase
 
-The audio transport and recovery architecture is hardware-validated at both supported native rates. Development is now expanding the production control surface behind the same transport-owned IPC that already allows headphone and AUX controls to coexist with full-duplex audio.
+The audio transport/recovery architecture and the core routing/control surface are hardware-validated. Development is now continuing within the Mixer phase: preserve the proven 35-cell routing initialization/cache model and add the remaining original strip controls one semantic class at a time.
 
-The control-panel roadmap intentionally prioritizes proven hardware controls before latency tuning. Output routing/levels are next, followed by the wider mixer and direct-monitor paths. Metering can then be added from already-decoded PCM without requiring extra FireWire ownership. Buffer/latency controls remain a separate investigation because the stack contains multiple buffering layers and should not expose an ambiguous or unsafe generic buffer slider.
+The control-panel roadmap intentionally keeps latency tuning later. Metering can be derived from already-decoded PCM without requiring extra FireWire ownership. Buffer/latency controls remain a separate investigation because the stack contains multiple buffering layers and should not expose an ambiguous or unsafe generic buffer slider.
+
+## Build/install
+
+From the repository root:
+
+```bash
+make             # HAL + release runtime + GUI
+make runtime     # installed runtime/control binaries only
+make gui         # GUI only
+make all-tools   # all development tools
+sudo make install
+```
+
+`sudo make install` expects the artifacts to have already been built as the normal user. The complete source install now includes `/Applications/macfw FW410 Control.app` as well as the HAL and launchd/runtime tree.
 
 ## Documentation
 
 - [`analysis/current-integration-status.md`](analysis/current-integration-status.md) — current handoff and immediate next work.
-- [`analysis/control-panel-roadmap.md`](analysis/control-panel-roadmap.md) — ordered ten-point GUI/control expansion plan.
+- [`analysis/control-panel-roadmap.md`](analysis/control-panel-roadmap.md) — ordered GUI/control expansion plan.
+- [`analysis/original-control-panel-mixer-model.md`](analysis/original-control-panel-mixer-model.md) — validated main-mixer model, initialization rule and GUI return mapping.
 - [`analysis/headphone-control.md`](analysis/headphone-control.md) — validated headphone/AUX control model and CLI surface.
 - [`analysis/sample-rate-lifecycle.md`](analysis/sample-rate-lifecycle.md) — validated 44.1/48 kHz setup, restart and cleanup policy.
 - [`analysis/capture-pipeline.md`](analysis/capture-pipeline.md) — validated capture architecture and controlled quality evidence.
@@ -231,7 +301,7 @@ The control-panel roadmap intentionally prioritizes proven hardware controls bef
 
 ## Release policy
 
-The project release contract is documented in [`../RELEASES.md`](../RELEASES.md). The agreed version format is `x.yy.zzz`; future tag-driven packages are planned as `lite`, `full`, and exact-source variants.
+The project release contract is documented in [`../RELEASES.md`](../RELEASES.md). The agreed version format is `x.yy.zzz`.
 
 ## Disclaimer
 
