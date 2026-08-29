@@ -2,23 +2,19 @@ PREFIX ?= /Library/Application Support/macfw/fw410
 
 .PHONY: all clean install uninstall hal runtime all-tools gui
 
-all: hal runtime
+all: hal runtime gui
 
 hal:
 	$(MAKE) -C hal
 
-runtime: hal
-	$(MAKE) -C tools transport
-	$(MAKE) -C tools rateprobe
-	$(MAKE) -C tools fw410ctl
-	$(MAKE) -C tools fwboot
-	$(MAKE) -C tools deviceprobe
+runtime:
+	$(MAKE) -C tools runtime
 
 gui:
 	$(MAKE) -C control-panel
 
-all-tools: hal
-	$(MAKE) -C tools
+all-tools:
+	$(MAKE) -C tools all
 
 install:
 	@if [ "$$(id -u)" -ne 0 ]; then \
@@ -34,7 +30,7 @@ install:
 	    [ ! -x tools/control/fw410ctl/fw410ctl ] || \
 	    [ ! -x tools/device/fwboot/fwboot ] || \
 	    [ ! -x tools/device/deviceprobe/deviceprobe ]; then \
-		echo "error: release runtime is not built; run 'make runtime' as a normal user first" >&2; \
+		echo "error: release artifacts are not built; run 'make' as a normal user first" >&2; \
 		exit 1; \
 	fi
 	$(MAKE) -C hal install
