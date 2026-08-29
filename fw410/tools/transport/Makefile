@@ -1,16 +1,16 @@
 TOOLS := amdtp44probe capturebridge48000 captureprobe cmpconnect cmpprobe coreaudiobridge coreaudiodiag formatprobe halbridge44100 halbridge48000 haltransport isocapture isoduplex isoplayback pcm44100playback pcmbufferplayback pcmstreamplayback shmprobe streamprobe transportstatus
-.PHONY: all clean $(TOOLS)
+RUNTIME := halbridge44100 halbridge48000 haltransport transportstatus
+
+.PHONY: all clean runtime transport transport-clean $(TOOLS)
+
 all: $(TOOLS)
+runtime transport: $(RUNTIME)
+
 $(TOOLS):
 	$(MAKE) -C $@
+
 clean:
 	@for tool in $(TOOLS); do $(MAKE) -C $$tool clean || exit $$?; done
 
-transport:
-	$(MAKE) -C halbridge44100 
-	$(MAKE) -C halbridge48000 
-	$(MAKE) -C haltransport 
-	$(MAKE) -C transportstatus 
-
 transport-clean:
-	rm -f halbridge48000/halbridge48000 halbridge44100/halbridge44100  haltransport/haltransport transportstatus/transportstatus
+	rm -f halbridge48000/halbridge48000 halbridge44100/halbridge44100 haltransport/haltransport transportstatus/transportstatus
