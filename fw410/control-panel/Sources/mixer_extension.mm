@@ -4,8 +4,12 @@
 
 static NSString *const kMixerControlTool = @"/Library/Application Support/macfw/fw410/tools/control/fw410ctl/fw410ctl";
 
+// GUI rows are presented in CoreAudio/Logic order. The FW410 AV/C software-return
+// identifiers are rotated relative to macfw's AMDTP channel order, so translate
+// the four analog playback pairs plus S/PDIF here rather than exposing the raw
+// AV/C naming to the user.
 static NSArray<NSString *> *MixerSourceArgs(void) {
-    return @[@"analog", @"spdif-in", @"sw1/2", @"sw3/4", @"sw5/6", @"sw7/8", @"sw9/10"];
+    return @[@"analog", @"spdif-in", @"sw3/4", @"sw5/6", @"sw7/8", @"sw9/10", @"sw1/2"];
 }
 
 static NSArray<NSString *> *MixerSourceNames(void) {
