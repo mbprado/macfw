@@ -27,11 +27,13 @@ GIT_SHA="$(git -C "$REPO_DIR" rev-parse --short=12 HEAD)"
 PKG="$OUTPUT/macfw-fw410-${VERSION}-${GIT_SHA}.pkg"
 
 HAL_BUNDLE="$FW410_DIR/hal/build/macfw-fw410.driver"
+CONTROL_APP="$FW410_DIR/control-panel/build/macfw FW410 Control.app"
 PLIST="$FW410_DIR/service/com.mbprado.macfw.fw410.transport.plist"
 DEVICEPROBE="$FW410_DIR/tools/device/deviceprobe/deviceprobe"
 
 required=(
     "$HAL_BUNDLE/Contents/MacOS/macfw-fw410"
+    "$CONTROL_APP/Contents/MacOS/macfw-fw410-control"
     "$FW410_DIR/tools/transport/haltransport/haltransport"
     "$FW410_DIR/tools/transport/halbridge44100/halbridge44100"
     "$FW410_DIR/tools/transport/halbridge48000/halbridge48000"
@@ -46,19 +48,21 @@ required=(
 for file in "${required[@]}"; do
     if [[ ! -e "$file" ]]; then
         echo "error: required built artifact is missing: $file" >&2
-        echo "run 'make runtime' from the repository root first" >&2
+        echo "run 'make' from the repository root first" >&2
         exit 1
     fi
 done
 
 rm -rf "$WORK"
 mkdir -p \
+    "$ROOT/Applications" \
     "$ROOT/Library/Audio/Plug-Ins/HAL" \
     "$ROOT/Library/Application Support/macfw/fw410" \
     "$ROOT/Library/LaunchDaemons" \
     "$SCRIPTS" "$STAGE" "$OUTPUT"
 
 cp -R "$HAL_BUNDLE" "$ROOT/Library/Audio/Plug-Ins/HAL/"
+cp -R "$CONTROL_APP" "$ROOT/Applications/"
 
 for rel in \
     tools/transport/haltransport/haltransport \
