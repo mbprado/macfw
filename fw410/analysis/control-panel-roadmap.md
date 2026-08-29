@@ -1,8 +1,8 @@
 # FW410 control-panel roadmap
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
-This document defines the ordered expansion plan for the native macfw FW410 control panel after the first hardware-validated Headphones/AUX/Info implementation.
+This document defines the ordered expansion plan for the native macfw FW410 control panel.
 
 ## Design rules
 
@@ -11,6 +11,7 @@ This document defines the ordered expansion plan for the native macfw FW410 cont
 - Preserve full-duplex playback/capture while changing controls.
 - Prefer native macOS/AppKit behavior and a compact modern layout rather than reproducing the legacy M-Audio panel pixel-for-pixel.
 - Keep transport/debug internals out of the normal mixer surface unless they are safe user-facing controls.
+- Use the Linux `snd-firewire-ctl-services` implementation and original M-Audio control panel as protocol/UI references, but verify writes on real FW410 hardware.
 - Treat buffer/latency as a separate engineering problem: CoreAudio buffer size, shared rings, PCM FIFO, FireWire TX geometry and capture prefill are different layers and must not be collapsed into an ambiguous slider.
 
 ## Current GUI baseline
@@ -19,18 +20,19 @@ Implemented and hardware-tested:
 
 - native AppKit application built with Command Line Tools, no full Xcode requirement;
 - application icon and build identity;
-- Headphones tab;
-- Mixer/AUX headphone source selection;
-- independent headphone L/R volume;
-- five headphone mixer source pairs: 1/2, 3/4, 5/6, 7/8, 9/10;
-- AUX software-return 1/2 stereo level;
-- AUX output stereo level;
-- Info tab with component/system/device information;
-- headphone state preserved across 44.1 <-> 48 kHz transitions.
+- **Mixer** tab with the complete 7-source x 5-bus routing matrix;
+- **Outputs** tab with five physical stereo output pairs, Mixer/AUX source selection, independent L/R level and stereo link behavior;
+- **Headphones** tab with Mixer/AUX source, independent L/R volume, five mixer-output pair enables and stereo link behavior;
+- **AUX** tab with software-return 1/2 and AUX output stereo levels;
+- **Info** tab with component/system/device information;
+- control IPC through the active transport, never direct FireWire ownership from the GUI;
+- main-mixer software-return labels translated into CoreAudio/Logic order;
+- multiple simultaneous mixer-bus assignments;
+- analog direct-monitor assignments to multiple output buses.
 
-## 1. Outputs tab — active implementation target
+## 1. Outputs tab — complete baseline
 
-Expose the five physical stereo output pairs:
+The five physical stereo output pairs are exposed:
 
 - Analog 1/2
 - Analog 3/4
@@ -38,70 +40,78 @@ Expose the five physical stereo output pairs:
 - Analog 7/8
 - S/PDIF L/R
 
-Hardware-validated control primitives now include:
+Hardware-validated controls include:
 
-- read-only state for all five output pairs while full-duplex audio remains active;
-- per-pair Mixer/AUX source selection with hardware read-back verification;
-- independent L/R physical output level writes with hardware read-back verification;
+- per-pair Mixer/AUX source selection;
+- independent L/R physical output levels;
 - simultaneous stereo level writes;
-- `-inf` level/mute representation;
-- S/PDIF connector state readback.
+- `-inf` level representation;
+- S/PDIF connector state readback;
+- reusable stereo-link behavior that preserves the existing L/R offset.
 
-The GUI target is therefore:
+The current Outputs GUI has been hardware-tested across all eight analog output channels. S/PDIF-specific physical verification remains useful as an additional compatibility check, but the output-control backend and GUI baseline are complete enough to proceed.
 
-- output source/routing selection;
-- independent L/R output level;
-- linked stereo level;
-- mute;
-- balance through independent L/R levels where appropriate.
+## 2. Mixer tab — routing complete, strip controls next
 
-### Stereo link / lock behavior
+The FW410 main mixer is now confirmed as a **7 x 5 assignment matrix**.
 
-Each stereo output pair should have a small native lock/link button beside the L/R level controls.
+User-facing sources:
 
-- unlocked: L and R move independently;
-- locked: moving either L or R moves both channels together;
-- locking should not itself cause an unexpected level jump;
-- while linked, preserve the existing L/R offset if the pair was unequal when locked, clamping safely at the hardware limits;
-- provide an explicit way to make both channels equal when desired rather than silently doing so when the lock is enabled.
+- Analog In 1/2;
+- S/PDIF In L/R;
+- SW Return 1/2;
+- SW Return 3/4;
+- SW Return 5/6;
+- SW Return 7/8;
+- SW Return 9/10.
 
-The link is GUI behavior built on the already-validated independent AV/C L/R writes; it is not a new hardware control.
+Destination buses:
 
-Protocol work must continue to precede GUI exposure. Existing Linux/legacy-panel mappings are references, but every new write path is to be validated on the real FW410 while audio remains active.
+- 1/2;
+- 3/4;
+- 5/6;
+- 7/8;
+- S/PDIF.
 
-## 2. Mixer tab
+The routing matrix is implemented and hardware-tested, including multiple simultaneous assignments.
 
-Build a modern representation of the FW410 internal mixer using compact stereo channel strips rather than cloning the old panel.
+### Required state-management rule
 
-Expected sources include:
+The FW410 mixer cannot safely be treated as independent unknown cells. A single isolated CONTROL write against unknown state was destructive to normal audio. The validated production sequence is:
 
-- software return 1/2;
-- software return 3/4;
-- software return 5/6;
-- software return 7/8;
-- software return 9/10 / S/PDIF return;
-- analog input;
-- digital input.
+1. establish the complete 35-cell macfw-compatible matrix with CONTROL writes;
+2. cache that state in the transport;
+3. avoid mixer STATUS polling;
+4. issue later changes differentially against the trusted cache.
 
-Candidate strip controls:
+This rule must remain intact as mixer features expand.
 
-- level;
-- stereo link;
-- pan/balance;
-- mute;
-- routing/destination selection where the hardware exposes it.
+### CoreAudio/AV-C return translation
 
-## 3. Inputs / Monitoring tab
+The raw FW410 software-return identities are rotated relative to macfw's CoreAudio/AMDTP presentation. The GUI deliberately translates them:
 
-Separate recording topology from direct hardware monitoring so the UI makes clear that CoreAudio capture and zero/low-latency hardware monitoring are different paths.
+```text
+GUI SW Return 1/2   -> raw sw3/4
+GUI SW Return 3/4   -> raw sw5/6
+GUI SW Return 5/6   -> raw sw7/8
+GUI SW Return 7/8   -> raw sw9/10
+GUI SW Return 9/10  -> raw sw1/2
+```
 
-Targets:
+The next Mixer work is to decode and validate the remaining original strip controls, such as level, pan/balance, mute/solo and AUX sends where supported. Add one semantic control class at a time and keep the proven routing baseline untouched.
 
-- Analog In 1/2 monitoring level;
-- S/PDIF In L/R monitoring level;
+Detailed routing evidence: [`original-control-panel-mixer-model.md`](original-control-panel-mixer-model.md).
+
+## 3. Inputs / Monitoring
+
+The current Mixer routing already provides validated direct-monitor destination assignment for Analog In 1/2 and S/PDIF input. This phase should therefore focus on input-specific controls that are not already represented naturally by the Mixer matrix.
+
+Targets include:
+
+- input monitoring level;
 - pan/balance where supported;
-- monitor destination/routing;
-- clear indication that these controls do not change the CoreAudio input channel assignment.
+- mute/solo semantics where confirmed;
+- clear indication that these controls do not change CoreAudio input channel assignment.
 
 ## 4. Live meters
 
@@ -155,18 +165,16 @@ First question: whether the AudioServerPlugIn should expose a normal CoreAudio b
 
 Only after measurement should the panel expose user choices such as 32/64/128/256/512 frames or named latency profiles. Internal FireWire geometry should remain hidden unless a validated profile genuinely needs to change it.
 
-Success criteria include glitch-free playback/capture, correct reported latency and reliable rate/reconnect lifecycle at every exposed setting.
-
 ## 7. Stereo link controls
 
-Generalize the output lock/link interaction to every stereo level pair for which it is useful.
+The reusable link behavior now exists for headphone and physical-output stereo levels.
 
-- linked: moving either channel updates both while preserving the pre-link L/R offset;
-- unlinked: L/R are independently adjustable and can be used for balance/pan-like behavior;
-- enabling link must not itself change hardware level;
-- explicit equalize/reset behavior may set both channels to the same value when requested.
+Continue applying the same behavior to later stereo controls where useful:
 
-This reuses the already-proven independent AV/C L/R level writes rather than inventing new hardware semantics. Point 1 implements the interaction first for physical outputs; point 7 applies the same UX consistently to the broader mixer/control panel.
+- linked movement preserves the pre-link L/R offset;
+- enabling link does not change hardware state;
+- unlinked channels remain independent;
+- any equalize/reset action must be explicit.
 
 ## 8. Presets / state
 
@@ -175,12 +183,12 @@ Add named macfw mixer/control snapshots after the broader control model is compl
 Candidate saved state:
 
 - output routing/levels;
-- mixer levels/pan/mutes;
+- mixer routing/levels/pan/mutes;
 - input-monitoring state;
 - headphone source/mixer/level;
 - AUX state.
 
-Hardware state persistence is useful but should not be the only persistence mechanism. A macOS-side preset can restore a known complete configuration after reconnecting or replacing an interface.
+A macOS-side preset can restore a known complete configuration after reconnecting or replacing an interface.
 
 ## 9. Optional menu-bar status
 
@@ -197,8 +205,6 @@ Useful quick actions:
 - headphone level;
 - Open Mixer.
 
-The full control panel remains a normal application; menu-bar-only operation is not required.
-
 ## 10. Info / diagnostics refinement
 
 Expand the existing Info tab into a useful support surface.
@@ -211,30 +217,26 @@ Targets:
 - FW410 model/personality/GUID/firmware identity;
 - FireWire controller model and negotiated bus information;
 - transport state, active/requested rate, engine PID and recovery counters;
-- Copy Diagnostics action producing a concise bug-report block;
+- Copy Diagnostics action;
 - optional Open Log action.
-
-The UI must distinguish exact component metadata from inferred/package-level metadata.
 
 ## Ordered execution
 
-The agreed implementation sequence is:
-
 ```text
-1 Outputs
-2 Mixer
+1 Outputs                         COMPLETE BASELINE
+2 Mixer routing                  COMPLETE; strip controls next
 3 Inputs / Monitoring
 4 Meters
 5 Device
-6 Buffer / latency investigation + implementation
-7 Stereo link behavior
+6 Buffer / latency investigation
+7 Stereo link behavior           BASE IMPLEMENTED
 8 Presets / state
 9 Optional menu-bar status
 10 Info / diagnostics refinement
 ```
 
-Some infrastructure can be shared across later items, but this order keeps the first changes on already-understood AV/C control territory and postpones timing-sensitive transport changes until the control surface is mature.
-
 ## Immediate next checkpoint
 
-Finish point 1 by exposing the now-validated physical output controls in the AppKit GUI. Use five compact stereo output strips with source selection, L/R level, mute and a lock/link button. The lock is UI-side behavior and must not alter hardware state merely by being enabled. After the Outputs tab is hardware-tested at 44.1 and 48 kHz, move to the internal Mixer mapping.
+Preserve the current known-good routing implementation and continue point 2 with the remaining original mixer-strip controls. Start from the Linux driver/original-panel definitions, implement software/protocol semantics before GUI exposure, and hardware-test each new write class while audio remains active.
+
+A secondary cleanup target is to replace the GUI's current many-process mixer refresh with a single cached-matrix query once that optimization can be done without changing the proven control semantics.
