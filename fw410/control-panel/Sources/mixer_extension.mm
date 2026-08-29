@@ -35,11 +35,13 @@ static NSString *RunMixerControl(NSArray<NSString *> *args, int *statusOut) {
     NSError *error = nil;
     if (![task launchAndReturnError:&error]) {
         if (statusOut) *statusOut = 126;
-        return error.localizedDescription ?: @"task failed";
+        NSString *description = error.localizedDescription;
+        return description != nil ? description : @"task failed";
     }
     [task waitUntilExit];
     NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
-    NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+    NSString *decoded = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    NSString *text = decoded != nil ? decoded : @"";
     if (statusOut) *statusOut = task.terminationStatus;
     return [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
