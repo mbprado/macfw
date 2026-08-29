@@ -8,7 +8,7 @@ The first supported target is the **M-Audio FireWire 410**. The repository is st
 
 ## Current status
 
-The FW410 implementation has reached its **first installable alpha candidate** on Intel macOS.
+The FW410 implementation has reached its **first installable alpha candidate** on Intel macOS, with the audio transport, recovery lifecycle and a substantial part of the original hardware control surface now validated on real hardware.
 
 Hardware-validated functionality includes:
 
@@ -23,28 +23,60 @@ Hardware-validated functionality includes:
 - persistent CoreAudio endpoint with capture silence while transport is offline;
 - automatic launchd-managed transport startup/restart;
 - reboot recovery and delayed hardware attachment after macOS has already booted;
-- native `.pkg` installation, including a clean-system Monterey 12.7.6 install that became operational as expected.
+- native AppKit control panel using the transport-owned control socket;
+- headphone source, level and five-pair mixer routing controls;
+- AUX source/output level controls;
+- physical output Mixer/AUX source selection and independent stereo output levels;
+- FW410 main-mixer 7x5 routing assignments for analog input, S/PDIF input and all five software-return pairs;
+- simultaneous main-mixer assignments to multiple destination buses;
+- source and `.pkg` installation paths that include the control-panel application.
 
-Current macOS test status:
+Current macOS hardware-test status:
 
-- **Monterey 12.7.6:** validated on a fresh install, with playback/capture and package installation working as expected;
-- **Ventura 13.x:** not yet tested;
-- **Sonoma 14.8.9:** installer, playback and transport behavior functioned, but capture quality was audibly degraded in the quick functional test and needs follow-up.
+- **Monterey 12.7.6:** validated;
+- **Ventura 13.7.8:** validated;
+- **Sonoma 14.8.9:** validated, including sleep/wake recovery.
 
-Apple Silicon is not currently supported. See [`COMPATIBILITY.md`](COMPATIBILITY.md) and [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) for the current evidence-based compatibility status.
+Apple Silicon is not currently supported. See [`COMPATIBILITY.md`](COMPATIBILITY.md) and [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) for the evidence-based compatibility status.
 
 ## Install
 
 For binary releases, use the provided macOS `.pkg` with the M-Audio FireWire 410 connected and powered on.
 
-For a source checkout:
+For a source checkout, build as a normal user and install the already-built artifacts as root:
 
 ```bash
 make
 sudo make install
 ```
 
+The normal build now produces the HAL plug-in, release runtime tools and native control panel. `sudo make install` installs those existing artifacts; it does not intentionally rebuild them as root.
+
+Installed user-facing components include:
+
+```text
+/Applications/macfw FW410 Control.app
+/Library/Audio/Plug-Ins/HAL/macfw-fw410.driver
+/Library/Application Support/macfw/fw410/
+```
+
 Full instructions, status checks, troubleshooting and uninstall information are in [`INSTALL.md`](INSTALL.md).
+
+## Useful build targets
+
+From the repository root:
+
+```bash
+make             # HAL + release runtime + GUI
+make hal         # HAL only
+make runtime     # release runtime/control tools only
+make gui         # control panel only
+make all-tools   # development/reverse-engineering tools
+make package     # complete installer package
+make clean
+```
+
+`make runtime` no longer builds the entire historical transport-tool collection; it builds only the binaries required by the installed service and control path.
 
 ## Build a package
 
@@ -54,7 +86,7 @@ From the repository root:
 make package
 ```
 
-The resulting package is written to:
+The package contains the HAL plug-in, launchd/runtime files and native control panel and is written to:
 
 ```text
 package/dist/
@@ -71,14 +103,43 @@ macfw AudioServerPlugIn
         |
 versioned shared-memory audio/status ABI
         |
-macfw transport supervisor
+macfw transport supervisor / native engine
         |
 AV/C / CMP / CIP / AMDTP / NuDCL / IOFireWireLib
         |
 M-Audio FireWire 410
 ```
 
+Live hardware controls use the same transport ownership model:
+
+```text
+macfw FW410 Control.app / fw410ctl
+        |
+/tmp/macfw-fw410-control.sock
+        |
+active transport process
+        |
+FW410 AV/C controls
+```
+
+The GUI and CLI never open FireWire independently. This avoids competing FireWire owners while playback/capture are active.
+
 The logical CoreAudio device can remain registered while the physical transport is absent. During recovery, playback is discarded and capture supplies silence; when the FW410 returns `ONLINE`, existing CoreAudio clients continue using the same endpoint.
+
+## Main mixer discovery
+
+The original M-Audio panel and the Linux `snd-firewire-ctl-services` implementation established that the FW410 main mixer is a **7-source x 5-destination assignment matrix**:
+
+- sources: Analog In 1/2, S/PDIF In L/R and five software-return pairs;
+- destinations: mixer buses 1/2, 3/4, 5/6, 7/8 and S/PDIF;
+- one source can feed multiple buses simultaneously;
+- enabled cell value is `0x0000`, disabled is `0x8000`.
+
+A crucial hardware quirk is now documented and implemented: isolated mixer writes against an unknown state can disrupt the audio path. macfw therefore first establishes a complete known 35-cell matrix with CONTROL writes, keeps that matrix cached in the transport, and performs later route changes differentially without using mixer STATUS polling.
+
+Because macfw's AMDTP slot ordering differs from the original logical software-return ordering, the control-panel GUI remaps the raw FW410 return identities so the user sees the same channel numbering as CoreAudio/Logic: `SW Return 1/2` really controls Logic 1/2, through `SW Return 9/10` for Logic 9/10.
+
+Detailed evidence is in [`fw410/analysis/original-control-panel-mixer-model.md`](fw410/analysis/original-control-panel-mixer-model.md).
 
 ## Project goals
 
@@ -108,6 +169,7 @@ macfw/
     ├── README.md
     ├── Makefile
     ├── hal/                 # CoreAudio AudioServerPlugIn
+    ├── control-panel/       # native AppKit control application
     ├── lib/                 # reusable FW410/FireWire implementation
     ├── service/             # launchd runtime installation
     ├── tools/               # control/device/transport tools
@@ -151,20 +213,20 @@ The objective is hardware compatibility, not reproducing the architecture of an 
 
 ## Current roadmap
 
-Completed for the first FW410 alpha candidate:
+Major completed areas now include:
 
 1. Device/firmware identification and boot recovery.
 2. User-space FireWire async/FCP/AV/C access.
 3. CMP/IRM and NuDCL isochronous transport.
 4. CIP/AM824 playback and capture.
 5. Native 44.1/48 kHz full-duplex transport.
-6. CoreAudio integration.
-7. Persistent transport-status/offline model.
-8. Automatic disconnect/reconnect recovery.
-9. launchd service lifecycle.
-10. Source and `.pkg` installation paths.
+6. CoreAudio integration and persistent recovery model.
+7. launchd service lifecycle and package/source installation.
+8. Headphone and AUX controls.
+9. Physical output controls and stereo-link UI behavior.
+10. Hardware-validated 7x5 main-mixer routing with CoreAudio-aligned GUI labels.
 
-Next areas include broader hardware/macOS validation, latency tuning, mixer/controls, MIDI, release automation, signing/notarization, and eventually additional FireWire devices.
+Next control-panel work expands the mixer beyond routing assignments into the remaining validated/decoded strip controls, then inputs/monitoring, meters, device controls and measured buffer/latency work. MIDI and broader release hardening remain separate future areas.
 
 ## Release documentation
 
