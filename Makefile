@@ -1,9 +1,12 @@
-.PHONY: all clean install uninstall package fw410 runtime all-tools gui
+.PHONY: all clean fw410 hal runtime gui tools all-tools install uninstall package
 
 all: fw410
 
 fw410:
 	$(MAKE) -C fw410 all
+
+hal:
+	$(MAKE) -C fw410 hal
 
 runtime:
 	$(MAKE) -C fw410 runtime
@@ -11,7 +14,7 @@ runtime:
 gui:
 	$(MAKE) -C fw410 gui
 
-all-tools:
+tools all-tools:
 	$(MAKE) -C fw410 all-tools
 
 install:
@@ -20,7 +23,7 @@ install:
 uninstall:
 	$(MAKE) -C fw410 uninstall
 
-package: runtime
+package: all
 	chmod +x package/build-pkg.sh package/scripts/preinstall package/scripts/postinstall
 	./package/build-pkg.sh
 
