@@ -2,6 +2,7 @@ CXX ?= c++
 GIT_SHA := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 CPPFLAGS += -I.. -DMACFW_GIT_SHA=\"$(GIT_SHA)\"
 APP := build/macfw FW410 Control.app
+INSTALL_APP := /Applications/macfw FW410 Control.app
 CONTENTS := $(APP)/Contents
 MACOS := $(CONTENTS)/MacOS
 RESOURCES := $(CONTENTS)/Resources
@@ -11,7 +12,7 @@ ICON := icon.png
 ICONSET := build/icon.iconset
 ICNS := $(RESOURCES)/icon.icns
 
-.PHONY: all clean run
+.PHONY: all clean run install uninstall
 
 all: $(BINARY)
 
@@ -42,6 +43,26 @@ $(BINARY): $(SOURCES) Sources/stereo_link.h Info.plist $(ICNS) ../version.h
 
 run: all
 	open "$(APP)"
+
+install:
+	@if [ "$$(id -u)" -ne 0 ]; then \
+		echo "error: control-panel install must be run as root" >&2; \
+		exit 1; \
+	fi
+	@if [ ! -x "$(BINARY)" ]; then \
+		echo "error: control panel is not built; run 'make gui' as a normal user first" >&2; \
+		exit 1; \
+	fi
+	rm -rf "$(INSTALL_APP)"
+	cp -R "$(APP)" "$(INSTALL_APP)"
+	chown -R root:wheel "$(INSTALL_APP)"
+
+uninstall:
+	@if [ "$$(id -u)" -ne 0 ]; then \
+		echo "error: control-panel uninstall must be run as root" >&2; \
+		exit 1; \
+	fi
+	rm -rf "$(INSTALL_APP)"
 
 clean:
 	rm -rf build
