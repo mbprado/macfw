@@ -1,5 +1,5 @@
-TOOLS := avcprobe fcpprobe mixerprobe plugprobe topologyprobe headphoneprobe rateprobe fw410ctl
-RUNTIME := rateprobe fw410ctl
+TOOLS := avcprobe fcpprobe mixerprobe plugprobe topologyprobe headphoneprobe rateprobe fw410ctl fw410state
+RUNTIME := rateprobe fw410ctl fw410state
 
 .PHONY: all clean runtime $(TOOLS)
 
