@@ -59,11 +59,13 @@ std::string bridgePath(const std::string& here, unsigned rate) {
     return {};
 }
 std::string fwbootPath(const std::string& here) { return here + "/../../device/fwboot/fwboot"; }
+std::string stateHelperPath(const std::string& here) { return here + "/../../control/fw410state/fw410state"; }
 
 struct BridgeProcess {
     pid_t pid = -1;
     int readyFd = -1;
     bool ready = false;
+    bool stateRestoreAttempted = false;
 };
 
 void closeReadyFd(BridgeProcess& child) {
@@ -107,6 +109,25 @@ bool pollReady(BridgeProcess& child) {
         closeReadyFd(child);
     }
     return child.ready;
+}
+
+bool restoreControlState(const std::string& path) {
+    if (access(path.c_str(), X_OK) != 0) {
+        std::fprintf(stderr, "transport: control-state helper unavailable: %s\n", path.c_str());
+        return false;
+    }
+    const pid_t pid = fork();
+    if (pid < 0) return false;
+    if (pid == 0) {
+        execl(path.c_str(), path.c_str(), "restore", static_cast<char*>(nullptr));
+        _exit(127);
+    }
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno == EINTR) continue;
+        return false;
+    }
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
 int stopBridge(BridgeProcess& child) {
@@ -167,6 +188,7 @@ int main(int argc, char** argv) {
 
     const std::string here = executableDirectory(argc > 0 ? argv[0] : nullptr);
     const std::string bootHelper = fwbootPath(here);
+    const std::string stateHelper = stateHelperPath(here);
     unsigned activeRate = 0;
     BridgeProcess child;
     SupervisorState state = SupervisorState::Idle;
@@ -181,6 +203,7 @@ int main(int argc, char** argv) {
     std::printf("automatic guarded FW410 bootloader recovery: enabled\n");
     std::printf("disconnect/re-enumeration retry backoff: enabled\n");
     std::printf("transport status ABI: explicit native-engine readiness enabled\n");
+    std::printf("persistent control-state restore after engine readiness: enabled\n");
     std::printf("change the device format in Audio MIDI Setup to switch engines\n");
 
     while (!gStopRequested) {
@@ -194,6 +217,13 @@ int main(int argc, char** argv) {
         }
 
         pollReady(child);
+        if (child.ready && !child.stateRestoreAttempted) {
+            child.stateRestoreAttempted = true;
+            if (restoreControlState(stateHelper))
+                std::printf("transport: saved FW410 control state restored\n");
+            else
+                std::fprintf(stderr, "transport: saved FW410 control state restore failed; audio remains online\n");
+        }
 
         int childStatus = 0;
         if (childExited(child, childStatus)) {
@@ -245,6 +275,13 @@ int main(int argc, char** argv) {
         }
 
         pollReady(child);
+        if (child.ready && !child.stateRestoreAttempted) {
+            child.stateRestoreAttempted = true;
+            if (restoreControlState(stateHelper))
+                std::printf("transport: saved FW410 control state restored\n");
+            else
+                std::fprintf(stderr, "transport: saved FW410 control state restore failed; audio remains online\n");
+        }
         if (child.pid > 0 && childStarted != Clock::time_point::min() && now - childStarted >= kStableRun)
             retryDelay = std::chrono::milliseconds(250);
 
