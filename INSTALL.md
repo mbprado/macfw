@@ -28,12 +28,15 @@ Apple Silicon is not currently supported.
 4. The installer validates the connected interface and installs:
    - the CoreAudio HAL plug-in;
    - the transport/control runtime;
+   - the persistent control-state helper;
    - the launchd service;
    - **macfw FW410 Control.app** in `/Applications`.
 5. The installer loads the launchd service and restarts `coreaudiod`.
 6. A reboot is normally **not required**. Hardware validation confirmed that the FW410 can become usable immediately after installation.
 7. Open Audio MIDI Setup and select **M-Audio FireWire 410**. Native 44.1 kHz and 48 kHz are currently supported.
 8. Open `/Applications/macfw FW410 Control.app` for the validated hardware controls.
+
+The complete package path has been hardware-validated through installation, transport startup, control-state persistence, Reset Defaults, reboot and physical disconnect/reconnect recovery.
 
 The installed runtime is managed automatically by launchd. You do not need to run `haltransport` manually.
 
@@ -97,7 +100,7 @@ From the repository root:
 make package
 ```
 
-`make package` builds the complete installable set first and packages the HAL, runtime/service and control panel.
+`make package` builds the complete installable set first and packages the HAL, runtime/service, persistent state helper and control panel.
 
 The generated installer is placed under:
 
@@ -111,6 +114,8 @@ For example:
 package/dist/macfw-fw410-0.01.000-<git-sha>.pkg
 ```
 
+The package disables bundle relocation so the control application is installed at its authoritative `/Applications/macfw FW410 Control.app` path even when another development copy exists elsewhere on the Mac.
+
 ## Installed components
 
 The current installation includes:
@@ -121,6 +126,7 @@ The current installation includes:
 /Library/Application Support/macfw/fw410/
 /Library/LaunchDaemons/com.mbprado.macfw.fw410.transport.plist
 /Library/Logs/macfw-fw410-transport.log
+/Library/Logs/macfw_install.log
 ```
 
 The launchd service is:
@@ -129,13 +135,20 @@ The launchd service is:
 com.mbprado.macfw.fw410.transport
 ```
 
-The installed control CLI is:
+The installed control tools include:
 
 ```text
 /Library/Application Support/macfw/fw410/tools/control/fw410ctl/fw410ctl
+/Library/Application Support/macfw/fw410/tools/control/fw410state/fw410state
 ```
 
-## Control architecture
+Persistent control state is stored in:
+
+```text
+/Library/Application Support/macfw/fw410/control-state.conf
+```
+
+## Control architecture and persistence
 
 The GUI and CLI do not open FireWire directly. Both use the transport-owned control socket:
 
@@ -150,6 +163,12 @@ FW410 AV/C
 ```
 
 This allows hardware controls to coexist with active playback/capture without competing for the FireWire device.
+
+Successful user-facing writable control changes are recorded by `fw410state`. On engine startup/reconnect, saved state is restored after low-level engine readiness and before the supervisor publishes `ONLINE`. Main-mixer routes are restored first through the validated full 35-cell baseline path, then saved differential routes and other controls are replayed.
+
+The control panel's **Reset Defaults** action applies and records the documented macfw baseline. These are macfw defaults, not a claim about undocumented M-Audio factory state.
+
+See [`fw410/analysis/control-state-persistence.md`](fw410/analysis/control-state-persistence.md) for the detailed restore lifecycle and persisted control set.
 
 ## Checking status
 
@@ -179,6 +198,14 @@ Transport logs are written to:
 /Library/Logs/macfw-fw410-transport.log
 ```
 
+Package post-install diagnostics are written to:
+
+```text
+/Library/Logs/macfw_install.log
+```
+
+The installation log is appended across installs and records the postinstall phase, including the failing command/line when the package script exits through its error trap.
+
 ## Disconnect/reconnect behavior
 
 The CoreAudio device intentionally remains registered if the physical FW410 is disconnected. Applications can keep the same selected audio device while the transport recovers.
@@ -189,7 +216,7 @@ While the interface is unavailable:
 - capture returns silence;
 - the CoreAudio endpoint remains present.
 
-When the FW410 returns, the transport supervisor reacquires it and playback/capture resume without requiring the application to reselect the device. This behavior has been hardware-validated in Logic Pro.
+When the FW410 returns, the transport supervisor reacquires it, safely restores saved writable controls and playback/capture resume without requiring the application to reselect the device. This behavior has been hardware-validated, including persistent control restoration.
 
 ## Main mixer initialization note
 
@@ -217,6 +244,20 @@ For packaged alpha builds, use the project-provided uninstall path when one is i
 
 Connect and power on the FW410 and retry. Installation is intentionally blocked when no supported macfw interface is detected.
 
+### Package installation fails
+
+Inspect the dedicated macfw package log first:
+
+```bash
+cat /Library/Logs/macfw_install.log
+```
+
+For Installer-level failures that happen before the macfw postinstall script starts, also inspect macOS Installer's log:
+
+```bash
+tail -n 200 /var/log/install.log
+```
+
 ### Device is present but audio is unavailable
 
 Check the transport state and log:
@@ -238,6 +279,18 @@ Confirm the transport is `ONLINE`, then test the installed CLI through the same 
 ```
 
 If the CLI also fails, inspect the transport log/socket path rather than opening the FireWire device with a standalone probe while the transport is active.
+
+### Persistent controls do not return
+
+Inspect the saved state and transport log:
+
+```bash
+"/Library/Application Support/macfw/fw410/tools/control/fw410state/fw410state" show
+
+tail -n 100 /Library/Logs/macfw-fw410-transport.log
+```
+
+Do not edit `control-state.conf` manually while diagnosing a live system; use `fw410state`/`fw410ctl` so the normal validation and mixer-safety paths remain in effect.
 
 ### 44.1 kHz startup
 
