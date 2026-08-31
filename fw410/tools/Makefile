@@ -1,4 +1,4 @@
-CONTROL := avcprobe fcpprobe mixerprobe plugprobe topologyprobe headphoneprobe rateprobe fw410ctl
+CONTROL := avcprobe fcpprobe mixerprobe plugprobe topologyprobe headphoneprobe rateprobe fw410ctl fw410state
 TRANSPORT := capturebridge48000 captureprobe cmpconnect cmpprobe coreaudiobridge coreaudiodiag formatprobe halbridge44100 halbridge48000 haltransport isocapture isoduplex isoplayback pcm44100playback pcmbufferplayback pcmstreamplayback shmprobe streamprobe amdtp44probe transportstatus
 DEVICE := fwboot fwprobe deviceprobe
 TOOLS := $(CONTROL) $(TRANSPORT) $(DEVICE)
