@@ -14,6 +14,8 @@ Only configurations that have actually been tested on real hardware are marked v
 
 The native control panel and current transport/control architecture have also been exercised on the validated development systems. The key control-path rule is common across releases: the GUI/CLI use the active transport's Unix-socket IPC rather than opening FireWire independently.
 
+For the `0.02.000` candidate, the complete packaged control lifecycle was additionally hardware-validated on the development system: package installation, launchd startup, transport status, normal GUI/CLI control changes, Reset Defaults, saved-state restoration after reboot, and saved-state restoration after physical FW410 disconnect/reconnect all behaved as expected.
+
 ## Monterey 12.7.6
 
 The release package was installed on a freshly installed macOS Monterey 12.7.6 system.
@@ -30,7 +32,7 @@ This remains a clean fully validated installation baseline.
 
 ## Ventura 13.7.8
 
-Ventura 13.7.8 has now been tested on real FW410 hardware.
+Ventura 13.7.8 has been tested on real FW410 hardware.
 
 Observed result:
 
@@ -92,4 +94,5 @@ When adding another compatibility result, record at minimum:
 - disconnect/reconnect result;
 - sleep/wake result where tested;
 - control-panel result where relevant;
-- any transport log anomalies.
+- persistent-control/reset result where relevant;
+- any transport or installer log anomalies.
