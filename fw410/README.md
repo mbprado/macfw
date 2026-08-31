@@ -62,13 +62,16 @@ CoreAudio integration is hardware-confirmed for:
 - physical output source and L/R level controls;
 - the complete 7-source x 5-bus main-mixer routing matrix;
 - multiple simultaneous mixer-bus assignments;
-- native AppKit control-panel operation for Mixer, Outputs, Headphones, AUX and system/device information.
+- native AppKit control-panel operation for Mixer, Outputs, Headphones, AUX and system/device information;
+- persistent writable hardware state across reboot and physical disconnect/reconnect;
+- Reset Defaults to the documented macfw baseline;
+- complete `.pkg` installation and postinstall lifecycle with the interface becoming operational without reboot.
 
-The transport-status ABI explicitly reports `OFFLINE`, `RECOVERING`, and `ONLINE`, plus requested/active rate, native-engine PID, transition sequence and heartbeat. A native engine is not published `ONLINE` until it explicitly reports READY after successful transport startup.
+The transport-status ABI explicitly reports `OFFLINE`, `RECOVERING`, and `ONLINE`, plus requested/active rate, native-engine PID, transition sequence and heartbeat. A native engine is not published `ONLINE` until it explicitly reports READY after successful transport startup and saved control-state restoration has been attempted.
 
 Detailed capture design and evidence: [`analysis/capture-pipeline.md`](analysis/capture-pipeline.md).
 
-## Control panel
+## Control panel and persistence
 
 The native macOS control panel is built with AppKit/Objective-C++ and the standard Command Line Tools rather than requiring full Xcode. It uses the validated `fw410ctl -> socket -> transport -> AV/C` path while audio remains owned by the active transport engine.
 
@@ -82,7 +85,11 @@ Current tabs:
 
 The GUI intentionally presents software returns in CoreAudio/Logic order. The FW410's raw AV/C software-return identities are rotated relative to macfw's AMDTP channel order, so the GUI translates them rather than exposing confusing raw names.
 
-The planned expansion order is documented in [`analysis/control-panel-roadmap.md`](analysis/control-panel-roadmap.md).
+Successful writable GUI/CLI control changes are recorded by the installed `fw410state` helper in `/Library/Application Support/macfw/fw410/control-state.conf`. After a native engine reaches low-level readiness, the supervisor restores saved controls before publishing `ONLINE`. Main-mixer routes are restored first through the validated complete-baseline path, preserving the same mixer-safety rule used during normal operation.
+
+The GUI's **Reset Defaults** action applies and persists the documented macfw baseline. It is deliberately described as a macfw default rather than an undocumented M-Audio factory reset.
+
+See [`analysis/control-state-persistence.md`](analysis/control-state-persistence.md) and [`analysis/control-panel-roadmap.md`](analysis/control-panel-roadmap.md).
 
 ## Main mixer discovery
 
@@ -203,7 +210,7 @@ Both native rates are hardware-validated for clear recording and live monitoring
 
 The logical **M-Audio FireWire 410** CoreAudio device intentionally remains registered when the physical FireWire interface disappears. While transport is unavailable, the HAL can remain logically present and provide silence/empty capture rather than forcing applications such as Logic to lose their selected device.
 
-`haltransport` detects FireWire generation changes, tears down the current native engine, enters recovery/backoff, handles the FW410 bootloader personality through guarded `fwboot`, and launches a fresh native engine after the operational device returns. Hardware tests confirmed playback and capture resume after reconnection without restarting Logic.
+`haltransport` detects FireWire generation changes, tears down the current native engine, enters recovery/backoff, handles the FW410 bootloader personality through guarded `fwboot`, and launches a fresh native engine after the operational device returns. Hardware tests confirmed playback and capture resume after reconnection without restarting Logic, and current writable hardware controls are restored before the recovered engine is published `ONLINE`.
 
 ## Project milestones
 
@@ -236,6 +243,7 @@ The logical **M-Audio FireWire 410** CoreAudio device intentionally remains regi
 - [x] AUX level mapping
 - [x] physical output source/level mapping
 - [x] main-mixer 7x5 route assignment mapping
+- [x] persistent writable control state
 - [ ] remaining mixer strip controls
 - [ ] MIDI byte transport validation
 
@@ -262,6 +270,8 @@ The logical **M-Audio FireWire 410** CoreAudio device intentionally remains regi
 - [x] native AppKit control panel
 - [x] Outputs controls
 - [x] main-mixer routing controls
+- [x] persistent controls + Reset Defaults
+- [x] packaged control panel/runtime installation lifecycle
 - [ ] remaining mixer strip controls
 - [ ] input-specific controls
 - [ ] live meters
@@ -269,7 +279,7 @@ The logical **M-Audio FireWire 410** CoreAudio device intentionally remains regi
 
 ## Current phase
 
-The audio transport/recovery architecture and the core routing/control surface are hardware-validated. Development is now continuing within the Mixer phase: preserve the proven 35-cell routing initialization/cache model and add the remaining original strip controls one semantic class at a time.
+The audio transport/recovery architecture, core routing/control surface, persisted control-state lifecycle and normal package installation path are hardware-validated. Development can now continue with the remaining original control-surface semantics without changing the proven FireWire ownership and mixer initialization architecture.
 
 The control-panel roadmap intentionally keeps latency tuning later. Metering can be derived from already-decoded PCM without requiring extra FireWire ownership. Buffer/latency controls remain a separate investigation because the stack contains multiple buffering layers and should not expose an ambiguous or unsafe generic buffer slider.
 
@@ -282,15 +292,17 @@ make             # HAL + release runtime + GUI
 make runtime     # installed runtime/control binaries only
 make gui         # GUI only
 make all-tools   # all development tools
+make package     # complete installer package
 sudo make install
 ```
 
-`sudo make install` expects the artifacts to have already been built as the normal user. The complete source install now includes `/Applications/macfw FW410 Control.app` as well as the HAL and launchd/runtime tree.
+`sudo make install` expects the artifacts to have already been built as the normal user. The complete source install includes `/Applications/macfw FW410 Control.app`, the persistent state helper, HAL and launchd/runtime tree.
 
 ## Documentation
 
 - [`analysis/current-integration-status.md`](analysis/current-integration-status.md) — current handoff and immediate next work.
 - [`analysis/control-panel-roadmap.md`](analysis/control-panel-roadmap.md) — ordered GUI/control expansion plan.
+- [`analysis/control-state-persistence.md`](analysis/control-state-persistence.md) — persisted writable state, restore ordering and Reset Defaults.
 - [`analysis/original-control-panel-mixer-model.md`](analysis/original-control-panel-mixer-model.md) — validated main-mixer model, initialization rule and GUI return mapping.
 - [`analysis/headphone-control.md`](analysis/headphone-control.md) — validated headphone/AUX control model and CLI surface.
 - [`analysis/sample-rate-lifecycle.md`](analysis/sample-rate-lifecycle.md) — validated 44.1/48 kHz setup, restart and cleanup policy.
