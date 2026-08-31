@@ -29,7 +29,10 @@ Hardware-validated functionality includes:
 - physical output Mixer/AUX source selection and independent stereo output levels;
 - FW410 main-mixer 7x5 routing assignments for analog input, S/PDIF input and all five software-return pairs;
 - simultaneous main-mixer assignments to multiple destination buses;
-- source and `.pkg` installation paths that include the control-panel application.
+- persistent writable control state across reboot and physical interface reconnect;
+- safe **Reset Defaults** action for restoring the documented macfw control baseline;
+- source and `.pkg` installation paths that include the control-panel application;
+- hardware-validated `.pkg` installation, runtime startup, persistence, reset and reconnect lifecycle.
 
 Current macOS hardware-test status:
 
@@ -86,7 +89,7 @@ From the repository root:
 make package
 ```
 
-The package contains the HAL plug-in, launchd/runtime files and native control panel and is written to:
+The package contains the HAL plug-in, launchd/runtime files, persistent control-state helper and native control panel and is written to:
 
 ```text
 package/dist/
@@ -124,6 +127,8 @@ FW410 AV/C controls
 
 The GUI and CLI never open FireWire independently. This avoids competing FireWire owners while playback/capture are active.
 
+Writable controls are recorded in `/Library/Application Support/macfw/fw410/control-state.conf`. After the native engine reaches low-level readiness, the transport supervisor restores saved state before publishing the transport `ONLINE`. Main-mixer routes are restored through the same safe full-baseline-then-differential control path used during normal operation.
+
 The logical CoreAudio device can remain registered while the physical transport is absent. During recovery, playback is discarded and capture supplies silence; when the FW410 returns `ONLINE`, existing CoreAudio clients continue using the same endpoint.
 
 ## Main mixer discovery
@@ -139,7 +144,7 @@ A crucial hardware quirk is now documented and implemented: isolated mixer write
 
 Because macfw's AMDTP slot ordering differs from the original logical software-return ordering, the control-panel GUI remaps the raw FW410 return identities so the user sees the same channel numbering as CoreAudio/Logic: `SW Return 1/2` really controls Logic 1/2, through `SW Return 9/10` for Logic 9/10.
 
-Detailed evidence is in [`fw410/analysis/original-control-panel-mixer-model.md`](fw410/analysis/original-control-panel-mixer-model.md).
+Detailed evidence is in [`fw410/analysis/original-control-panel-mixer-model.md`](fw410/analysis/original-control-panel-mixer-model.md) and [`fw410/analysis/control-state-persistence.md`](fw410/analysis/control-state-persistence.md).
 
 ## Project goals
 
@@ -225,6 +230,8 @@ Major completed areas now include:
 8. Headphone and AUX controls.
 9. Physical output controls and stereo-link UI behavior.
 10. Hardware-validated 7x5 main-mixer routing with CoreAudio-aligned GUI labels.
+11. Persistent hardware/control state, reconnect restore and Reset Defaults.
+12. Hardware-validated end-user `.pkg` installation lifecycle.
 
 Next control-panel work expands the mixer beyond routing assignments into the remaining validated/decoded strip controls, then inputs/monitoring, meters, device controls and measured buffer/latency work. MIDI and broader release hardening remain separate future areas.
 
@@ -242,7 +249,7 @@ Next control-panel work expands the mixer beyond routing assignments into the re
 
 Useful contributions include hardware testing, FireWire captures, protocol/firmware analysis, macOS/CoreAudio development, and testing across different Intel Macs, macOS versions, adapters and FW410 revisions.
 
-When reporting runtime problems, include the system/connection details and relevant transport logs described in [`INSTALL.md`](INSTALL.md).
+When reporting runtime problems, include the system/connection details and relevant transport or installation logs described in [`INSTALL.md`](INSTALL.md).
 
 ## Disclaimer
 
