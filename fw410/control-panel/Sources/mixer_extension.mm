@@ -3,6 +3,7 @@
 #import <objc/runtime.h>
 
 static NSString *const kMixerControlTool = @"/Library/Application Support/macfw/fw410/tools/control/fw410ctl/fw410ctl";
+static NSString *const kMixerStateTool = @"/Library/Application Support/macfw/fw410/tools/control/fw410state/fw410state";
 
 // GUI rows are presented in CoreAudio/Logic order. The FW410 AV/C software-return
 // identifiers are rotated relative to macfw's AMDTP channel order, so translate
@@ -25,10 +26,10 @@ static NSArray<NSString *> *MixerBusNames(void) {
     return @[@"1/2", @"3/4", @"5/6", @"7/8", @"SPD"];
 }
 
-static NSString *RunMixerControl(NSArray<NSString *> *args, int *statusOut) {
+static NSString *RunMixerTool(NSString *path, NSArray<NSString *> *args, int *statusOut) {
     NSTask *task = [[NSTask alloc] init];
     NSPipe *pipe = [NSPipe pipe];
-    task.executableURL = [NSURL fileURLWithPath:kMixerControlTool];
+    task.executableURL = [NSURL fileURLWithPath:path];
     task.arguments = args;
     task.standardOutput = pipe;
     task.standardError = pipe;
@@ -44,6 +45,10 @@ static NSString *RunMixerControl(NSArray<NSString *> *args, int *statusOut) {
     NSString *text = decoded != nil ? decoded : @"";
     if (statusOut) *statusOut = task.terminationStatus;
     return [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+}
+
+static NSString *RunMixerControl(NSArray<NSString *> *args, int *statusOut) {
+    return RunMixerTool(kMixerControlTool, args, statusOut);
 }
 
 @interface AppDelegate : NSObject
@@ -70,6 +75,7 @@ static const void *kMainMixerButtonsKey = &kMainMixerButtonsKey;
 - (void)macfwMixer_applicationDidFinishLaunching:(NSNotification *)notification {
     [self macfwMixer_applicationDidFinishLaunching:notification];
     [self macfwBuildMainMixerTab];
+    [self macfwAddResetDefaultsButton];
     [self macfwRefreshMainMixer];
 }
 
@@ -81,6 +87,43 @@ static const void *kMainMixerButtonsKey = &kMainMixerButtonsKey;
 - (NSTabView *)macfwMixerTabView {
     @try { return [self valueForKey:@"tabView"]; }
     @catch (NSException *exception) { (void)exception; return nil; }
+}
+
+- (NSWindow *)macfwMixerWindow {
+    @try { return [self valueForKey:@"window"]; }
+    @catch (NSException *exception) { (void)exception; return nil; }
+}
+
+- (void)macfwAddResetDefaultsButton {
+    NSWindow *window = [self macfwMixerWindow];
+    if (!window.contentView) return;
+    NSButton *reset = [NSButton buttonWithTitle:@"Reset Defaults" target:self action:@selector(macfwResetDefaults:)];
+    reset.frame = NSMakeRect(430, 530, 105, 28);
+    reset.toolTip = @"Restore the validated macfw routing and level defaults and replace the saved control state.";
+    [window.contentView addSubview:reset];
+}
+
+- (void)macfwResetDefaults:(id)sender {
+    (void)sender;
+    NSAlert *confirm = [[NSAlert alloc] init];
+    confirm.messageText = @"Reset FW410 controls to defaults?";
+    confirm.informativeText = @"This resets mixer routing, output routing and levels, headphone controls, and AUX levels. The defaults will also become the saved state used after reconnect or reboot.";
+    [confirm addButtonWithTitle:@"Reset Defaults"];
+    [confirm addButtonWithTitle:@"Cancel"];
+    confirm.alertStyle = NSAlertStyleWarning;
+    if ([confirm runModal] != NSAlertFirstButtonReturn) return;
+
+    int status = 0;
+    NSString *result = RunMixerTool(kMixerStateTool, @[@"reset"], &status);
+    if (status != 0) {
+        NSAlert *error = [[NSAlert alloc] init];
+        error.messageText = @"Could not reset FW410 controls";
+        error.informativeText = result.length > 0 ? result : @"The persistent state helper returned an error.";
+        error.alertStyle = NSAlertStyleCritical;
+        [error runModal];
+        return;
+    }
+    [self refresh:nil];
 }
 
 - (void)macfwBuildMainMixerTab {
