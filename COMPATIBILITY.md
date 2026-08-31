@@ -11,10 +11,11 @@ Only configurations that have actually been tested on real hardware are marked v
 | Monterey 12.7.6 | validated | validated | validated | validated | validated | validated | not separately recorded | **Validated** |
 | Ventura 13.7.8 | validated | validated | validated | validated | validated | validated | validated | **Validated** |
 | Sonoma 14.8.9 | validated | validated | validated | validated | validated | validated | validated | **Validated** |
+| Sequoia 15.x | validated | validated | validated | validated | validated | validated | not separately recorded | **Validated** |
 
 The native control panel and current transport/control architecture have also been exercised on the validated development systems. The key control-path rule is common across releases: the GUI/CLI use the active transport's Unix-socket IPC rather than opening FireWire independently.
 
-For the `0.02.000` candidate, the complete packaged control lifecycle was additionally hardware-validated on the development system: package installation, launchd startup, transport status, normal GUI/CLI control changes, Reset Defaults, saved-state restoration after reboot, and saved-state restoration after physical FW410 disconnect/reconnect all behaved as expected.
+For the `0.02.000` candidate, the complete packaged control lifecycle was additionally hardware-validated: package installation, launchd startup, transport status, normal GUI/CLI control changes, Reset Defaults, saved-state restoration after reboot, and saved-state restoration after physical FW410 disconnect/reconnect all behaved as expected. Sequoia testing additionally confirmed input/output operation and preservation of the configured controls through the same reset/reconnect lifecycle.
 
 ## Monterey 12.7.6
 
@@ -72,6 +73,26 @@ During the validated Sonoma sleep/wake test, the FW410 remained in its operation
 This differs from the observed behavior of the original vendor driver, where sleep commonly caused the interface to return to bootloader mode and require reinitialization. With macfw, playback and capture resumed after wake without that bootloader transition.
 
 This is a useful behavioral improvement of the current user-space transport/service lifecycle, although additional machines and sleep durations should still be tested before treating the behavior as universal across all hardware configurations.
+
+## Sequoia 15.x
+
+The `0.02.000` release candidate was tested on macOS Sequoia on the Intel development Mac and behaved the same as on the previously validated releases.
+
+Observed result:
+
+- package installation and normal service startup worked;
+- playback/output operation worked;
+- capture/input operation worked;
+- 44.1/48 kHz operation remained functional;
+- the native control panel and hardware controls worked normally;
+- Reset Defaults worked;
+- physical disconnect/reconnect recovery worked;
+- configured input/output and mixer/control state was restored as expected after reconnect;
+- no macfw-specific functional regression was observed compared with Monterey, Ventura or Sonoma.
+
+Logic Pro on this Sequoia installation was noticeably more resource-demanding on the older test MacBook. This was observed as host/application resource pressure rather than a macfw transport or FW410 compatibility failure. Better-performing Intel hardware may provide a more comfortable DAW workload, but broader machine testing is still needed before making performance claims.
+
+With this test, macfw has real-hardware validation across Monterey, Ventura, Sonoma and Sequoia on Intel Macs.
 
 ## Interpretation
 
