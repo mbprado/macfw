@@ -1,18 +1,17 @@
 # Known limitations
 
-This file records limitations and open items for the first macfw M-Audio FireWire 410 alpha release.
+This file records limitations and open items for the current macfw M-Audio FireWire 410 alpha release.
 
 ## Platform scope
 
 - **Intel Macs only.** Apple Silicon is not currently a project target.
-- Hardware validation now includes clean/package tests on **macOS Monterey 12.7.6** and **macOS Sonoma 14.8.9**.
-- **Ventura 13.x remains untested.** Its position between two tested releases is not sufficient evidence to mark it validated.
-- Hardware validation is still concentrated on one development Mac/FW410 combination. A broader Mac / FireWire-adapter / firmware matrix is still needed.
+- Hardware validation includes **macOS Monterey 12.7.6**, **Ventura 13.7.8**, and **Sonoma 14.8.9**.
+- Hardware validation is still concentrated on a small number of Mac/FW410 combinations. A broader Mac / FireWire-adapter / firmware matrix is still needed.
 - See [`COMPATIBILITY.md`](COMPATIBILITY.md) for the current tested matrix.
 
 ## Supported hardware
 
-- The only supported audio interface in the first release is the **M-Audio FireWire 410**.
+- The only supported audio interface is the **M-Audio FireWire 410**.
 - The installer recognizes the known FW410 operational and bootloader personalities.
 - Installation currently requires a supported interface to be connected. This is intentional and provides the foundation for future device-specific installers.
 
@@ -35,9 +34,11 @@ Earlier development testing occasionally produced broken 44.1 kHz audio/capture.
 
 ## Sleep/wake coverage
 
-Sleep/wake has been hardware-validated on macOS Sonoma 14.8.9: playback and capture resumed normally after wake, and the FW410 remained in its operational personality rather than falling back to its bootloader personality.
+Sleep/wake has been hardware-validated on Ventura 13.7.8 and Sonoma 14.8.9. Playback and capture resumed normally after wake in the validated tests.
 
-This is encouraging and improves on the observed behavior of the original vendor driver on the same hardware, but broader testing across different Macs, sleep durations and FireWire adapter chains is still needed before treating the behavior as universally guaranteed.
+On Sonoma, the FW410 remained in its operational personality rather than falling back to its bootloader personality during the validated sleep/wake test.
+
+Broader testing across different Macs, sleep durations and FireWire adapter chains is still needed before treating this behavior as universally guaranteed.
 
 ## Offline behavior
 
@@ -54,7 +55,27 @@ This is intentional behavior, not an indication that macOS still sees the physic
 
 ## Controls and mixer
 
-The complete FW410 mixer/control surface is not yet implemented. Basic control/mixer probing exists, but the first alpha is focused on reliable audio transport and CoreAudio integration.
+A substantial part of the FW410 control surface is implemented and hardware-validated:
+
+- headphone source/level and five-pair mixer routing;
+- AUX levels;
+- physical output Mixer/AUX selection and L/R levels;
+- 7-source x 5-bus main-mixer route assignments;
+- native AppKit GUI for Mixer, Outputs, Headphones, AUX and Info;
+- persistence of currently writable production controls across reboot and interface reconnect;
+- Reset Defaults to the documented macfw baseline.
+
+The full original mixer strip feature set is **not yet complete**. Remaining work includes controls such as strip level, pan/balance, mute/solo and AUX-send behavior where those semantics are confirmed.
+
+The main mixer also has a device-specific state-management limitation: isolated route writes against an unknown matrix are unsafe. macfw must first establish a complete known 35-cell baseline, cache it in the transport process and then apply later route changes differentially. Mixer STATUS polling is intentionally avoided.
+
+Persistent state follows the same safety model: saved main-mixer routes are restored through the full known baseline before differential route replay. The persisted reset baseline is a macfw-defined default, not a claim about undocumented M-Audio factory defaults.
+
+The GUI currently invokes `fw410ctl` subprocesses as its proven backend boundary. This is functional but not the final efficiency target; mixer refresh can later be optimized to fetch the cached matrix in one operation.
+
+## S/PDIF control coverage
+
+The S/PDIF output/control backend is decoded and represented in the GUI, but some S/PDIF-specific physical-output validation remains less extensive than the eight analog output-channel tests. Broader digital-I/O testing is still useful.
 
 ## MIDI
 
@@ -62,11 +83,15 @@ MIDI transport is not yet validated as a supported user-facing feature. The Fire
 
 ## Signing and notarization
 
-The initial alpha packaging work is focused on reproducible installation and hardware validation. Public distribution signing/notarization is a separate release-hardening step. Release notes must clearly identify whether a particular package is signed/notarized.
+The alpha packaging work is focused on reproducible installation and hardware validation. Public distribution signing/notarization remains a separate release-hardening step. Release notes must clearly identify whether a particular package is signed/notarized.
 
 ## Package and compatibility testing
 
-The `.pkg` installer has been validated for immediate operation after installation without reboot. A completely fresh **Monterey 12.7.6** installation worked as expected with the packaged driver. The same installer is also fully functionally validated on **Sonoma 14.8.9**, including playback, capture and sleep/wake recovery.
+The `.pkg` installer has been validated for immediate operation after installation without reboot. A completely fresh **Monterey 12.7.6** installation worked as expected with the packaged driver. Ventura 13.7.8 and Sonoma 14.8.9 are also functionally validated.
+
+The `0.02.000` candidate package path has additionally been hardware-validated through installation, launchd startup, status reporting, normal control operation, Reset Defaults, reboot persistence and physical disconnect/reconnect persistence.
+
+The package/source install paths include the native control-panel application, persistent state helper, HAL and launchd/runtime components.
 
 Reboot recovery, delayed hardware attachment, sample-rate switching, physical disconnect/reconnect, and launchd process restart have also been validated during development testing.
 
@@ -76,6 +101,8 @@ This does not yet constitute a broad compatibility guarantee across all Intel Ma
 
 Transport diagnostics and reverse-engineering tools are primarily developer/tester interfaces. Their output and command-line contracts may change during the 0.x development series.
 
+Package postinstall diagnostics are written to `/Library/Logs/macfw_install.log`; Installer-level failures that occur before the macfw postinstall script starts may still require `/var/log/install.log`.
+
 ## Reporting issues
 
 Useful reports should include:
@@ -84,6 +111,8 @@ Useful reports should include:
 - exact Intel Mac model;
 - FireWire connection/adapters used;
 - FW410 behavior at 44.1 or 48 kHz;
-- whether the problem occurs after install, boot, rate switch, disconnect/reconnect, sleep/wake, or normal streaming;
+- whether the problem occurs after install, boot, rate switch, disconnect/reconnect, sleep/wake, normal streaming, or a control change;
+- whether persistent controls or Reset Defaults are involved;
 - relevant `/Library/Logs/macfw-fw410-transport.log` output;
+- `/Library/Logs/macfw_install.log` for package-install problems;
 - transport status output where available.

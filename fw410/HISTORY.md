@@ -2,6 +2,32 @@
 
 This file records visible project milestones rather than every diagnostic experiment. Detailed protocol and transport findings remain under `fw410/analysis/`.
 
+## 2026-08-31 — Native control panel, persistent controls and installable package validated
+
+The FW410 project reached its first end-user-style control and installation milestone. The native AppKit **macfw FW410 Control** application now exposes the hardware-validated main mixer, physical outputs, headphone and AUX controls through the transport-owned control socket rather than opening FireWire independently.
+
+The main mixer is presented as the original device's 7-source x 5-destination assignment model. Hardware testing validated analog input, S/PDIF input and all five software-return pairs, including simultaneous assignment to multiple mixer buses. Because the raw FW410 software-return identities are rotated relative to macfw's CoreAudio AMDTP ordering, the GUI maps them back into the user-facing CoreAudio/Logic order from `SW Return 1/2` through `SW Return 9/10`.
+
+A critical mixer safety rule was established during this work: an isolated mixer CONTROL write against unknown hardware state can disrupt the audio path. The production backend therefore follows the Linux-driver-derived strategy of establishing all 35 mixer cells with CONTROL writes before accepting differential route updates. Mixer STATUS polling is not used to reconstruct state.
+
+Writable hardware controls are now persistent. Successful GUI/CLI changes are recorded by `fw410state`; after the native engine reaches low-level readiness, the supervisor restores saved state before publishing `ONLINE`. Main-mixer routes are restored through the same safe full-baseline-first path. Hardware validation confirmed persistence across both reboot and physical FW410 disconnect/reconnect.
+
+The control panel also provides **Reset Defaults**, which applies and records the documented macfw baseline without claiming undocumented M-Audio factory-default semantics.
+
+Screenshot: [`pictures/Screenshot4.jpg`](pictures/Screenshot4.jpg)
+
+![macfw FW410 native control panel milestone](pictures/Screenshot4.jpg)
+
+The complete `.pkg` path was then validated on hardware. The package:
+
+- hardware-gates installation to a supported FW410 in operational or bootloader personality;
+- installs the HAL plug-in, runtime/service, persistent state helper and control-panel application;
+- keeps the application at `/Applications/macfw FW410 Control.app` by disabling bundle relocation;
+- starts the launchd transport and restarts CoreAudio without requiring a reboot;
+- records package postinstall diagnostics in `/Library/Logs/macfw_install.log`.
+
+The final validation covered installation, transport status, normal controls, Reset Defaults, reboot persistence, physical reconnect persistence and normal recovery behavior. This establishes the current branch as the first package candidate where the audio path, recovery lifecycle, control surface and persisted device state have all been exercised together through the normal installation path.
+
 ## 2026-08-25 — Transport status ABI and explicit engine readiness validated
 
 A versioned shared-memory transport-status ABI was added between the long-running `haltransport` supervisor and diagnostic consumers. This establishes the availability signal that the CoreAudio HAL will use to remain logically registered while the physical FireWire transport disconnects and recovers.

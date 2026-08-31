@@ -6,13 +6,52 @@ The project uses the `x.yy.zzz` version format described in [`RELEASES.md`](RELE
 
 ## [Unreleased]
 
+No user-visible changes have been recorded after the `0.02.000` release candidate yet.
+
+## [0.02.000] — second alpha
+
+### Added
+
+- Native AppKit FW410 control panel installed as `/Applications/macfw FW410 Control.app`.
+- Outputs tab with five physical stereo output pairs, Mixer/AUX source selection, independent L/R levels and reusable stereo-link behavior.
+- Main Mixer tab exposing the FW410 7-source x 5-bus routing matrix.
+- Hardware-validated main-mixer routing for Analog In 1/2, S/PDIF input and all five software-return pairs.
+- Multiple simultaneous main-mixer destination assignments.
+- CoreAudio/Logic-aligned software-return naming in the GUI despite the FW410 raw AV/C return rotation.
+- Production `fw410ctl` main-mixer route commands using the transport-owned control socket.
+- Persistent writable FW410 control state via `fw410state`, restored across reboot and physical interface reconnect.
+- Control-panel **Reset Defaults** action that applies and records the documented macfw control baseline.
+- Dedicated package postinstall diagnostics at `/Library/Logs/macfw_install.log`.
+- Complete package/source-install inclusion of the native control-panel application and persistent state helper.
+- Explicit narrow `runtime` Makefile target for the binaries required by the installed service/control path.
+
+### Changed
+
+- The FW410 main mixer now establishes a complete known 35-cell macfw-compatible baseline before later differential route writes.
+- Main-mixer state is cached in the active transport and is not reconstructed with AV/C mixer STATUS polling.
+- Saved main-mixer routes are restored through the same safe full-baseline-first path before other persisted controls.
+- Control-state restore runs after native-engine low-level readiness and before the transport is published `ONLINE`.
+- Root/subdirectory Makefile targets are normalized: default `make` builds HAL + release runtime + GUI; `make runtime` no longer builds every historical transport probe.
+- `sudo make install` verifies prebuilt artifacts and installs HAL, runtime/service and GUI without intentionally compiling as root.
+- Package builds include the control-panel application and disable macOS bundle relocation so it remains at `/Applications/macfw FW410 Control.app`.
+- Documentation records validated Monterey 12.7.6, Ventura 13.7.8 and Sonoma 14.8.9 coverage.
+- The complete `.pkg` lifecycle is hardware-validated through installation, service startup, status, persistent controls, reset, reboot and disconnect/reconnect.
+
+### Fixed
+
+- Corrected main-mixer matrix display orientation in `fw410ctl`.
+- Corrected GUI software-return row mapping so Logic/CoreAudio 1/2 through 9/10 correspond to the expected GUI labels.
+- Removed non-standard Objective-C GNU shorthand ternaries that produced `-Wgnu-conditional-omitted-operand` warnings.
+- Prevented Installer from relocating the control-panel bundle to an existing development copy outside `/Applications`.
+- Made package component-plist generation robust when `BundleIsRelocatable` is absent from `pkgbuild --analyze` output.
+
 ### Release infrastructure
 
-- Prepare tag-driven GitHub release automation.
-- Add public release notes and final compatibility checklist for the first alpha.
-- Add signing/notarization when Apple distribution credentials are available.
+- Retained the tag-driven GitHub release pipeline with package checksum generation.
+- Expanded public compatibility, installation, troubleshooting and release documentation for the control-panel release.
+- Signing/notarization remains a future hardening step when Apple distribution credentials are available.
 
-## [0.01.000] — first alpha candidate
+## [0.01.000] — first alpha
 
 ### Added
 

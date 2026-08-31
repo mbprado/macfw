@@ -11,7 +11,7 @@ CoreAudio application
         |
 macfw AudioServerPlugIn
         |
-versioned shared-memory audio rings
+versioned shared-memory audio/status ABI
         |
 macfw transport service
         |
@@ -19,6 +19,20 @@ AV/C / CMP / CIP / AMDTP / NuDCL / IOFireWireLib
         |
 M-Audio FireWire 410
 ```
+
+Live controls use the same transport ownership:
+
+```text
+macfw FW410 Control.app / fw410ctl
+        |
+/tmp/macfw-fw410-control.sock
+        |
+active transport engine
+        |
+FW410 AV/C
+```
+
+The HAL and GUI never open FireWire independently.
 
 ## Hardware-validated status
 
@@ -42,11 +56,74 @@ CoreAudio integration is hardware-confirmed for:
 - simultaneous playback, recording and live monitoring in Logic Pro;
 - runtime 44.1 <-> 48 kHz switching through `haltransport`;
 - physical disconnect/reconnect with automatic transport recovery;
-- logical CoreAudio-device continuity while the physical FW410 transport is offline.
+- logical CoreAudio-device continuity while the physical FW410 transport is offline;
+- live headphone source, level and five-pair mixer control through the transport-owned control IPC;
+- AUX source/output level controls;
+- physical output source and L/R level controls;
+- the complete 7-source x 5-bus main-mixer routing matrix;
+- multiple simultaneous mixer-bus assignments;
+- native AppKit control-panel operation for Mixer, Outputs, Headphones, AUX and system/device information;
+- persistent writable hardware state across reboot and physical disconnect/reconnect;
+- Reset Defaults to the documented macfw baseline;
+- complete `.pkg` installation and postinstall lifecycle with the interface becoming operational without reboot.
 
-The transport-status ABI explicitly reports `OFFLINE`, `RECOVERING`, and `ONLINE`, plus requested/active rate, native-engine PID, transition sequence and heartbeat. A native engine is not published `ONLINE` until it explicitly reports READY after successful transport startup.
+The transport-status ABI explicitly reports `OFFLINE`, `RECOVERING`, and `ONLINE`, plus requested/active rate, native-engine PID, transition sequence and heartbeat. A native engine is not published `ONLINE` until it explicitly reports READY after successful transport startup and saved control-state restoration has been attempted.
 
 Detailed capture design and evidence: [`analysis/capture-pipeline.md`](analysis/capture-pipeline.md).
+
+## Control panel and persistence
+
+The native macOS control panel is built with AppKit/Objective-C++ and the standard Command Line Tools rather than requiring full Xcode. It uses the validated `fw410ctl -> socket -> transport -> AV/C` path while audio remains owned by the active transport engine.
+
+Current tabs:
+
+- **Mixer** — seven sources into five mixer buses, with multiple simultaneous route assignments;
+- **Outputs** — five physical stereo output pairs with Mixer/AUX source, independent L/R level and link behavior;
+- **Headphones** — mixer/AUX source, independent L/R level, five mixer-output pair enables and link behavior;
+- **AUX** — software return 1/2 -> AUX and AUX output stereo levels;
+- **Info** — macfw/HAL build information, transport state/rate, macOS/Mac identity, FireWire controller information and FW410 identity.
+
+The GUI intentionally presents software returns in CoreAudio/Logic order. The FW410's raw AV/C software-return identities are rotated relative to macfw's AMDTP channel order, so the GUI translates them rather than exposing confusing raw names.
+
+Successful writable GUI/CLI control changes are recorded by the installed `fw410state` helper in `/Library/Application Support/macfw/fw410/control-state.conf`. After a native engine reaches low-level readiness, the supervisor restores saved controls before publishing `ONLINE`. Main-mixer routes are restored first through the validated complete-baseline path, preserving the same mixer-safety rule used during normal operation.
+
+The GUI's **Reset Defaults** action applies and persists the documented macfw baseline. It is deliberately described as a macfw default rather than an undocumented M-Audio factory reset.
+
+See [`analysis/control-state-persistence.md`](analysis/control-state-persistence.md) and [`analysis/control-panel-roadmap.md`](analysis/control-panel-roadmap.md).
+
+## Main mixer discovery
+
+The original M-Audio control panel and Linux `snd-firewire-ctl-services` implementation establish the FW410 main mixer as seven sources feeding five independent mixer buses.
+
+The production routing backend follows a hardware-validated rule:
+
+1. initialize all 35 route cells to one known macfw-compatible baseline;
+2. cache that matrix in the transport process;
+3. do not use mixer STATUS polling to reconstruct it;
+4. perform later route changes as differential CONTROL writes.
+
+This is required because a single isolated mixer write against unknown/default state was observed to kill normal playback, while the same differential write is safe after the full coherent initialization.
+
+The original/Linux identity matrix is a useful logical reference, but macfw's AMDTP slot ordering requires this raw baseline:
+
+```text
+raw SW Return 3/4   -> Mixer 1/2
+raw SW Return 5/6   -> Mixer 3/4
+raw SW Return 7/8   -> Mixer 5/6
+raw SW Return 9/10  -> Mixer 7/8
+raw SW Return 1/2   -> Mixer S/PDIF
+```
+
+The GUI translates this back into the expected CoreAudio/Logic names so `SW Return 1/2` controls Logic 1/2, and so on through 9/10.
+
+Hardware validation also confirmed analog direct monitoring, for example:
+
+```text
+Analog In 1/2 -> Mixer 1/2 => Input 1 -> Output 1, Input 2 -> Output 2
+Analog In 1/2 -> Mixer 3/4 => Input 1 -> Output 3, Input 2 -> Output 4
+```
+
+See [`analysis/original-control-panel-mixer-model.md`](analysis/original-control-panel-mixer-model.md).
 
 ## Boot identity
 
@@ -55,7 +132,7 @@ before: FW Bootloader / model 0x00010058
 after:  FW 410        / model 0x00010046
 ```
 
-`haltransport` now handles this personality transition during physical reconnect recovery, reacquiring fresh FireWire generation/node state and issuing the guarded boot cue only when the known FW410 loader preflight matches.
+`haltransport` handles this personality transition during physical reconnect recovery, reacquiring fresh FireWire generation/node state and issuing the guarded boot cue only when the known FW410 loader preflight matches.
 
 ## Playback
 
@@ -72,7 +149,7 @@ Native 44.1 playback is hardware-confirmed. The FW410 requires an M-Audio-specif
 
 If both directions are already at 44100, the initial redundant AV/C CONTROL is skipped, but the proven post-start reassert remains mandatory.
 
-A clean 44.1 kHz supervisor stop now leaves the FW410 at 44.1 kHz instead of forcing the development-era 48 kHz restore. Repeated hardware validation showed faster, consistent restarts with the expected `OFFLINE -> RECOVERING -> ONLINE` sequence and one successful native-engine PID per restart. Abnormal 44.1 engine failure retains the conservative best-effort 48 kHz recovery restore.
+A clean 44.1 kHz supervisor stop leaves the FW410 at 44.1 kHz instead of forcing the development-era 48 kHz restore. Repeated hardware validation showed faster, consistent restarts with the expected `OFFLINE -> RECOVERING -> ONLINE` sequence and one successful native-engine PID per restart. Abnormal 44.1 engine failure retains the conservative best-effort 48 kHz recovery restore.
 
 Detailed rate lifecycle: [`analysis/sample-rate-lifecycle.md`](analysis/sample-rate-lifecycle.md).
 
@@ -125,19 +202,15 @@ FW410 input
  -> CoreAudio application
 ```
 
-The receive-side breakthrough was to stop treating a global scan of changed DMA slots as one coherent batch. Metadata is published in 32-cycle (~4 ms) groups, and userspace consumes a group only after its terminal receive slot changes, proving that group's update list has completed.
-
-Completion detection is rate-aware: 48 kHz uses timestamp + ISO-header state, while 44.1 kHz uses the stable timestamp token required by its alternating blocking/NODATA packet pattern.
-
 The shared capture ring uses a controlled 4,096-frame prefill (~85 ms at 48 kHz, ~93 ms at 44.1 kHz) before it becomes active so CoreAudio cannot outrun the FireWire producer during startup.
 
-Both native rates are hardware-validated for clear recording and live monitoring. In steady state the expected capture cadence is approximately 96,000 frames per two seconds at 48 kHz and 88,200 at 44.1 kHz.
+Both native rates are hardware-validated for clear recording and live monitoring.
 
 ## Disconnect/reconnect behavior
 
 The logical **M-Audio FireWire 410** CoreAudio device intentionally remains registered when the physical FireWire interface disappears. While transport is unavailable, the HAL can remain logically present and provide silence/empty capture rather than forcing applications such as Logic to lose their selected device.
 
-`haltransport` detects FireWire generation changes, tears down the current native engine, enters recovery/backoff, handles the FW410 bootloader personality through guarded `fwboot`, and launches a fresh native engine after the operational device returns. Hardware tests confirmed playback and capture resume after reconnection without restarting Logic.
+`haltransport` detects FireWire generation changes, tears down the current native engine, enters recovery/backoff, handles the FW410 bootloader personality through guarded `fwboot`, and launches a fresh native engine after the operational device returns. Hardware tests confirmed playback and capture resume after reconnection without restarting Logic, and current writable hardware controls are restored before the recovered engine is published `ONLINE`.
 
 ## Project milestones
 
@@ -166,8 +239,12 @@ The logical **M-Audio FireWire 410** CoreAudio device intentionally remains regi
 - [x] 44.1/48 rate control
 - [x] M-Audio 44.1 startup quirk
 - [x] guarded bootloader recovery
-- [x] basic mixer/selector probing
-- [ ] complete mixer/control mapping
+- [x] headphone source/level/mixer mapping
+- [x] AUX level mapping
+- [x] physical output source/level mapping
+- [x] main-mixer 7x5 route assignment mapping
+- [x] persistent writable control state
+- [ ] remaining mixer strip controls
 - [ ] MIDI byte transport validation
 
 ### M4 — Audio DevKit
@@ -180,7 +257,7 @@ The logical **M-Audio FireWire 410** CoreAudio device intentionally remains regi
 - [x] transport availability/status ABI
 - [x] automatic supervisor lifecycle/recovery
 
-### M5 — CoreAudio integration
+### M5 — CoreAudio integration and control panel
 
 - [x] FW410 appears as a normal CoreAudio device
 - [x] native 44.1/48 playback
@@ -189,20 +266,45 @@ The logical **M-Audio FireWire 410** CoreAudio device intentionally remains regi
 - [x] native 44.1/48 recording in Logic Pro
 - [x] simultaneous playback/capture
 - [x] HAL remains logically present through physical disconnect/reconnect
-- [ ] complete offline-state behavior/telemetry in the HAL
-- [ ] controls
+- [x] live transport-owned control IPC
+- [x] native AppKit control panel
+- [x] Outputs controls
+- [x] main-mixer routing controls
+- [x] persistent controls + Reset Defaults
+- [x] packaged control panel/runtime installation lifecycle
+- [ ] remaining mixer strip controls
+- [ ] input-specific controls
+- [ ] live meters
+- [ ] buffer/latency control after dedicated investigation
 
 ## Current phase
 
-The project has moved beyond basic full-duplex integration. Both supported native rates, rate switching, transport readiness reporting, supervisor restart, and physical disconnect/reconnect recovery are hardware-validated.
+The audio transport/recovery architecture, core routing/control surface, persisted control-state lifecycle and normal package installation path are hardware-validated. Development can now continue with the remaining original control-surface semantics without changing the proven FireWire ownership and mixer initialization architecture.
 
-The current integration direction is to finish the separation between the persistent CoreAudio endpoint and the recoverable physical transport. The HAL should remain registered, observe the versioned transport-status ABI, return silence/empty capture while transport is offline, and resume transparently when the native engine returns `ONLINE`.
+The control-panel roadmap intentionally keeps latency tuning later. Metering can be derived from already-decoded PCM without requiring extra FireWire ownership. Buffer/latency controls remain a separate investigation because the stack contains multiple buffering layers and should not expose an ambiguous or unsafe generic buffer slider.
 
-Latency tuning remains a later optimization. The intentionally conservative capture prefill is useful for correctness validation but makes software monitoring noticeably latent.
+## Build/install
+
+From the repository root:
+
+```bash
+make             # HAL + release runtime + GUI
+make runtime     # installed runtime/control binaries only
+make gui         # GUI only
+make all-tools   # all development tools
+make package     # complete installer package
+sudo make install
+```
+
+`sudo make install` expects the artifacts to have already been built as the normal user. The complete source install includes `/Applications/macfw FW410 Control.app`, the persistent state helper, HAL and launchd/runtime tree.
 
 ## Documentation
 
 - [`analysis/current-integration-status.md`](analysis/current-integration-status.md) — current handoff and immediate next work.
+- [`analysis/control-panel-roadmap.md`](analysis/control-panel-roadmap.md) — ordered GUI/control expansion plan.
+- [`analysis/control-state-persistence.md`](analysis/control-state-persistence.md) — persisted writable state, restore ordering and Reset Defaults.
+- [`analysis/original-control-panel-mixer-model.md`](analysis/original-control-panel-mixer-model.md) — validated main-mixer model, initialization rule and GUI return mapping.
+- [`analysis/headphone-control.md`](analysis/headphone-control.md) — validated headphone/AUX control model and CLI surface.
 - [`analysis/sample-rate-lifecycle.md`](analysis/sample-rate-lifecycle.md) — validated 44.1/48 kHz setup, restart and cleanup policy.
 - [`analysis/capture-pipeline.md`](analysis/capture-pipeline.md) — validated capture architecture and controlled quality evidence.
 - [`analysis/stream-topology.md`](analysis/stream-topology.md) — raw and CoreAudio channel mapping.
@@ -211,7 +313,7 @@ Latency tuning remains a later optimization. The intentionally conservative capt
 
 ## Release policy
 
-The project release contract is documented in [`../RELEASES.md`](../RELEASES.md). The agreed version format is `x.yy.zzz`; future tag-driven packages are planned as `lite`, `full`, and exact-source variants.
+The project release contract is documented in [`../RELEASES.md`](../RELEASES.md). The agreed version format is `x.yy.zzz`.
 
 ## Disclaimer
 

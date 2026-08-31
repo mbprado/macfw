@@ -1,20 +1,20 @@
 PREFIX ?= /Library/Application Support/macfw/fw410
 
-.PHONY: all clean install uninstall hal runtime all-tools
+.PHONY: all clean install uninstall hal runtime all-tools gui
 
-all: hal runtime
+all: hal runtime gui
 
 hal:
 	$(MAKE) -C hal
 
-runtime: hal
-	$(MAKE) -C tools transport
-	$(MAKE) -C tools rateprobe
-	$(MAKE) -C tools fwboot
-	$(MAKE) -C tools deviceprobe
+runtime:
+	$(MAKE) -C tools runtime
 
-all-tools: hal
-	$(MAKE) -C tools
+gui:
+	$(MAKE) -C control-panel
+
+all-tools:
+	$(MAKE) -C tools all
 
 install:
 	@if [ "$$(id -u)" -ne 0 ]; then \
@@ -27,13 +27,17 @@ install:
 	    [ ! -x tools/transport/halbridge48000/halbridge48000 ] || \
 	    [ ! -x tools/transport/transportstatus/transportstatus ] || \
 	    [ ! -x tools/control/rateprobe/rateprobe ] || \
+	    [ ! -x tools/control/fw410ctl/fw410ctl ] || \
+	    [ ! -x tools/control/fw410state/fw410state ] || \
 	    [ ! -x tools/device/fwboot/fwboot ] || \
-	    [ ! -x tools/device/deviceprobe/deviceprobe ]; then \
-		echo "error: release runtime is not built; run 'make runtime' as a normal user first" >&2; \
+	    [ ! -x tools/device/deviceprobe/deviceprobe ] || \
+	    [ ! -x "control-panel/build/macfw FW410 Control.app/Contents/MacOS/macfw-fw410-control" ]; then \
+		echo "error: installable artifacts are not built; run 'make' as a normal user first" >&2; \
 		exit 1; \
 	fi
 	$(MAKE) -C hal install
 	bash service/install-service.sh
+	$(MAKE) -C control-panel install
 
 uninstall:
 	@if [ "$$(id -u)" -ne 0 ]; then \
@@ -41,9 +45,11 @@ uninstall:
 		exit 1; \
 	fi
 	bash service/uninstall-service.sh
+	$(MAKE) -C control-panel uninstall
 	$(MAKE) -C hal uninstall
 
 clean:
 	$(MAKE) -C lib clean
 	$(MAKE) -C hal clean
 	$(MAKE) -C tools clean
+	$(MAKE) -C control-panel clean

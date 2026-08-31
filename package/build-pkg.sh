@@ -27,16 +27,20 @@ GIT_SHA="$(git -C "$REPO_DIR" rev-parse --short=12 HEAD)"
 PKG="$OUTPUT/macfw-fw410-${VERSION}-${GIT_SHA}.pkg"
 
 HAL_BUNDLE="$FW410_DIR/hal/build/macfw-fw410.driver"
+CONTROL_APP="$FW410_DIR/control-panel/build/macfw FW410 Control.app"
 PLIST="$FW410_DIR/service/com.mbprado.macfw.fw410.transport.plist"
 DEVICEPROBE="$FW410_DIR/tools/device/deviceprobe/deviceprobe"
 
 required=(
     "$HAL_BUNDLE/Contents/MacOS/macfw-fw410"
+    "$CONTROL_APP/Contents/MacOS/macfw-fw410-control"
     "$FW410_DIR/tools/transport/haltransport/haltransport"
     "$FW410_DIR/tools/transport/halbridge44100/halbridge44100"
     "$FW410_DIR/tools/transport/halbridge48000/halbridge48000"
     "$FW410_DIR/tools/transport/transportstatus/transportstatus"
     "$FW410_DIR/tools/control/rateprobe/rateprobe"
+    "$FW410_DIR/tools/control/fw410ctl/fw410ctl"
+    "$FW410_DIR/tools/control/fw410state/fw410state"
     "$FW410_DIR/tools/device/fwboot/fwboot"
     "$DEVICEPROBE"
     "$PLIST"
@@ -45,19 +49,21 @@ required=(
 for file in "${required[@]}"; do
     if [[ ! -e "$file" ]]; then
         echo "error: required built artifact is missing: $file" >&2
-        echo "run 'make runtime' from the repository root first" >&2
+        echo "run 'make' from the repository root first" >&2
         exit 1
     fi
 done
 
 rm -rf "$WORK"
 mkdir -p \
+    "$ROOT/Applications" \
     "$ROOT/Library/Audio/Plug-Ins/HAL" \
     "$ROOT/Library/Application Support/macfw/fw410" \
     "$ROOT/Library/LaunchDaemons" \
     "$SCRIPTS" "$STAGE" "$OUTPUT"
 
 cp -R "$HAL_BUNDLE" "$ROOT/Library/Audio/Plug-Ins/HAL/"
+cp -R "$CONTROL_APP" "$ROOT/Applications/"
 
 for rel in \
     tools/transport/haltransport/haltransport \
@@ -65,6 +71,8 @@ for rel in \
     tools/transport/halbridge48000/halbridge48000 \
     tools/transport/transportstatus/transportstatus \
     tools/control/rateprobe/rateprobe \
+    tools/control/fw410ctl/fw410ctl \
+    tools/control/fw410state/fw410state \
     tools/device/fwboot/fwboot \
     tools/device/deviceprobe/deviceprobe; do
     mkdir -p "$ROOT/Library/Application Support/macfw/fw410/$(dirname "$rel")"
@@ -89,9 +97,27 @@ pkgbuild \
     --install-location / \
     "$STAGE/hardware-gate.pkg"
 
+# pkgbuild marks discovered bundles relocatable by default. That lets Installer
+# redirect the control app to another existing copy (for example the source
+# build directory) instead of /Applications. Disable relocation for every
+# bundle in the payload so the package layout is authoritative.
+COMPONENT_PLIST="$STAGE/components.plist"
+pkgbuild --analyze --root "$ROOT" "$COMPONENT_PLIST"
+for ((index=0; ; ++index)); do
+    if ! /usr/libexec/PlistBuddy -c "Print :${index}:RootRelativeBundlePath" "$COMPONENT_PLIST" >/dev/null 2>&1; then
+        break
+    fi
+    if /usr/libexec/PlistBuddy -c "Print :${index}:BundleIsRelocatable" "$COMPONENT_PLIST" >/dev/null 2>&1; then
+        /usr/libexec/PlistBuddy -c "Set :${index}:BundleIsRelocatable false" "$COMPONENT_PLIST"
+    else
+        /usr/libexec/PlistBuddy -c "Add :${index}:BundleIsRelocatable bool false" "$COMPONENT_PLIST"
+    fi
+done
+
 pkgbuild \
     --root "$ROOT" \
     --scripts "$SCRIPTS" \
+    --component-plist "$COMPONENT_PLIST" \
     --identifier "$IDENTIFIER" \
     --version "$VERSION" \
     --install-location / \
@@ -110,6 +136,13 @@ ul { margin-top: 6px; }
 </head>
 <body>
 <p>You will be guided through the installation of the macfw FireWire Audio Driver ${VERSION}.</p>
+
+<h2>Included components</h2>
+<ul>
+    <li>M-Audio FireWire 410 CoreAudio driver and transport service</li>
+    <li>macfw FW410 Control application</li>
+    <li>Persistent control-state restore across reboot and reconnect</li>
+</ul>
 
 <h2>Supported audio interfaces</h2>
 <ul>
