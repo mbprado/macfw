@@ -9,6 +9,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FW410_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_ROOT="/Library/Application Support/macfw/fw410"
+STATE_FILE="$INSTALL_ROOT/control-state.conf"
 LAUNCHD_PLIST="/Library/LaunchDaemons/com.mbprado.macfw.fw410.transport.plist"
 LABEL="com.mbprado.macfw.fw410.transport"
 
@@ -17,11 +18,12 @@ BRIDGE44100="$FW410_DIR/tools/transport/halbridge44100/halbridge44100"
 BRIDGE48000="$FW410_DIR/tools/transport/halbridge48000/halbridge48000"
 RATEPROBE="$FW410_DIR/tools/control/rateprobe/rateprobe"
 FW410CTL="$FW410_DIR/tools/control/fw410ctl/fw410ctl"
+FW410STATE="$FW410_DIR/tools/control/fw410state/fw410state"
 FWBOOT="$FW410_DIR/tools/device/fwboot/fwboot"
 DEVICEPROBE="$FW410_DIR/tools/device/deviceprobe/deviceprobe"
 TRANSPORTSTATUS="$FW410_DIR/tools/transport/transportstatus/transportstatus"
 
-for file in "$HALTRANSPORT" "$BRIDGE44100" "$BRIDGE48000" "$RATEPROBE" "$FW410CTL" "$FWBOOT" "$DEVICEPROBE" "$TRANSPORTSTATUS"; do
+for file in "$HALTRANSPORT" "$BRIDGE44100" "$BRIDGE48000" "$RATEPROBE" "$FW410CTL" "$FW410STATE" "$FWBOOT" "$DEVICEPROBE" "$TRANSPORTSTATUS"; do
     if [[ ! -x "$file" ]]; then
         echo "error: required runtime binary is missing or not executable: $file" >&2
         echo "build the FW410 tools before installing the service" >&2
@@ -52,6 +54,7 @@ install -d -o root -g wheel -m 0755 \
     "$INSTALL_ROOT/tools/transport/transportstatus" \
     "$INSTALL_ROOT/tools/control/rateprobe" \
     "$INSTALL_ROOT/tools/control/fw410ctl" \
+    "$INSTALL_ROOT/tools/control/fw410state" \
     "$INSTALL_ROOT/tools/device/fwboot" \
     "$INSTALL_ROOT/tools/device/deviceprobe"
 
@@ -67,10 +70,18 @@ install -o root -g wheel -m 0755 "$RATEPROBE" \
     "$INSTALL_ROOT/tools/control/rateprobe/rateprobe"
 install -o root -g wheel -m 0755 "$FW410CTL" \
     "$INSTALL_ROOT/tools/control/fw410ctl/fw410ctl"
+install -o root -g wheel -m 0755 "$FW410STATE" \
+    "$INSTALL_ROOT/tools/control/fw410state/fw410state"
 install -o root -g wheel -m 0755 "$FWBOOT" \
     "$INSTALL_ROOT/tools/device/fwboot/fwboot"
 install -o root -g wheel -m 0755 "$DEVICEPROBE" \
     "$INSTALL_ROOT/tools/device/deviceprobe/deviceprobe"
+
+if [[ ! -e "$STATE_FILE" ]]; then
+    : > "$STATE_FILE"
+fi
+chown root:wheel "$STATE_FILE"
+chmod 0666 "$STATE_FILE"
 
 install -o root -g wheel -m 0644 \
     "$SCRIPT_DIR/com.mbprado.macfw.fw410.transport.plist" "$LAUNCHD_PLIST"
@@ -86,4 +97,5 @@ launchctl kickstart -k system/$LABEL
 echo "installed macfw FW410 transport runtime: $INSTALL_ROOT"
 echo "loaded launchd service: $LABEL"
 echo "control client: $INSTALL_ROOT/tools/control/fw410ctl/fw410ctl"
+echo "saved control state: $STATE_FILE"
 echo "log: /Library/Logs/macfw-fw410-transport.log"
