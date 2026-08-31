@@ -4,13 +4,22 @@ set -euo pipefail
 LABEL="com.mbprado.macfw.fw410.transport"
 PLIST="/Library/LaunchDaemons/${LABEL}.plist"
 LOG="/Library/Logs/macfw-fw410-transport.log"
+STATE_FILE="/Library/Application Support/macfw/fw410/control-state.conf"
 
 chown -R root:wheel "/Library/Application Support/macfw/fw410"
 chmod -R go-w "/Library/Application Support/macfw/fw410"
 chown -R root:wheel "/Library/Audio/Plug-Ins/HAL/macfw-fw410.driver"
 chmod -R go-w "/Library/Audio/Plug-Ins/HAL/macfw-fw410.driver"
+chown -R root:wheel "/Applications/macfw FW410 Control.app"
+chmod -R go-w "/Applications/macfw FW410 Control.app"
 chown root:wheel "$PLIST"
 chmod 0644 "$PLIST"
+
+if [[ ! -e "$STATE_FILE" ]]; then
+    : > "$STATE_FILE"
+fi
+chown root:wheel "$STATE_FILE"
+chmod 0666 "$STATE_FILE"
 
 if [[ ! -e "$LOG" ]]; then
     : > "$LOG"
