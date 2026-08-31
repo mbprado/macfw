@@ -97,9 +97,23 @@ pkgbuild \
     --install-location / \
     "$STAGE/hardware-gate.pkg"
 
+# pkgbuild marks discovered bundles relocatable by default. That lets Installer
+# redirect the control app to another existing copy (for example the source
+# build directory) instead of /Applications. Disable relocation for every
+# bundle in the payload so the package layout is authoritative.
+COMPONENT_PLIST="$STAGE/components.plist"
+pkgbuild --analyze --root "$ROOT" "$COMPONENT_PLIST"
+for ((index=0; ; ++index)); do
+    if ! /usr/libexec/PlistBuddy -c "Print :${index}:RootRelativeBundlePath" "$COMPONENT_PLIST" >/dev/null 2>&1; then
+        break
+    fi
+    /usr/libexec/PlistBuddy -c "Set :${index}:BundleIsRelocatable false" "$COMPONENT_PLIST"
+done
+
 pkgbuild \
     --root "$ROOT" \
     --scripts "$SCRIPTS" \
+    --component-plist "$COMPONENT_PLIST" \
     --identifier "$IDENTIFIER" \
     --version "$VERSION" \
     --install-location / \
