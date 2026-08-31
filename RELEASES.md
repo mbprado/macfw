@@ -27,10 +27,10 @@ Examples:
 
 The numeric fields are zero-padded as shown. `yy` is two digits and `zzz` is three digits.
 
-Release tags use the exact version string:
+Release tags use the exact version string, with no `v` prefix:
 
 ```text
-0.01.000
+0.02.000
 ```
 
 A release workflow should reject tags that do not match:
@@ -46,19 +46,21 @@ Pre-release status such as **alpha** or **beta** is represented by the GitHub Re
 The intended release flow is:
 
 1. Validate the candidate on real supported hardware.
-2. Update `CHANGELOG.md`, `KNOWN-LIMITATIONS.md`, and `RELEASE-NOTES.md`.
-3. Confirm the version embedded by the build matches the intended release.
-4. Create and push the `x.yy.zzz` tag.
-5. GitHub Actions validates the tag and builds on the supported macOS runner.
-6. The workflow runs the release build and package path.
-7. It calculates SHA-256 checksums.
-8. It creates the GitHub Release and attaches the package/checksum artifacts.
+2. Update `CHANGELOG.md`, `KNOWN-LIMITATIONS.md`, `COMPATIBILITY.md`, `INSTALL.md`, and `RELEASE-NOTES.md`.
+3. Merge the validated release-candidate work into `main`.
+4. Confirm the version embedded by the build on `main` matches the intended release.
+5. Build/check the package from `main`.
+6. Create and push the exact `x.yy.zzz` tag on the release commit.
+7. GitHub Actions validates the tag and builds on the supported macOS runner.
+8. The workflow runs the release build and package path.
+9. It calculates SHA-256 checksums.
+10. It creates the GitHub Release and attaches the package/checksum artifacts.
 
-The tag identifies the exact source revision used for the package.
+The tag identifies the exact source revision used for the published package. Release tags must be created from the intended `main` release commit, not from an experiment/development branch.
 
 ## Primary release artifact
 
-The first practical macfw binary distribution is the native macOS installer package:
+The primary macfw binary distribution is the native macOS installer package:
 
 ```text
 macfw-fw410-x.yy.zzz-<build>.pkg
@@ -76,7 +78,7 @@ and appears under:
 package/dist/
 ```
 
-The package contains the FW410 CoreAudio HAL plug-in, self-contained transport runtime, launchd service definition, and installation scripts. Installation is gated by `deviceprobe --require-supported`, so a known supported interface must be connected in either operational or bootloader personality.
+The package contains the FW410 CoreAudio HAL plug-in, self-contained transport/control runtime, persistent control-state helper, launchd service definition, native control-panel application, and installation scripts. Installation is gated by `deviceprobe --require-supported`, so a known supported interface must be connected in either operational or bootloader personality.
 
 ## Source installation
 
@@ -95,13 +97,13 @@ GitHub automatically exposes source archives for tags/releases. If an explicit p
 
 ## Optional future developer bundle
 
-A separate full developer/diagnostic bundle may be introduced later for compiled reverse-engineering and diagnostic tools. It is not required for the first alpha release and must not block the normal driver package.
+A separate full developer/diagnostic bundle may be introduced later for compiled reverse-engineering and diagnostic tools. It is not required for normal releases and must not block the normal driver package.
 
 Experimental/destructive tools must remain clearly identified and must not silently become part of a normal end-user installation.
 
 ## Checksums
 
-Release automation should publish SHA-256 checksums for distributable binary artifacts, preferably in:
+Release automation publishes SHA-256 checksums for distributable binary artifacts in:
 
 ```text
 SHA256SUMS
@@ -113,7 +115,7 @@ At minimum it must cover the published `.pkg`.
 
 Apple signing credentials must never be committed to the repository.
 
-The current first-alpha milestone separates **functional package validation** from Apple distribution signing/notarization. Until signing/notarization is implemented, the GitHub Release must explicitly state the artifact's status and must not imply that an unsigned/unnotarized build is signed.
+Current alpha releases separate **functional package validation** from Apple distribution signing/notarization. Until signing/notarization is implemented, the GitHub Release must explicitly state the artifact's status and must not imply that an unsigned/unnotarized build is signed.
 
 When enabled, certificates and notarization credentials must be supplied through protected GitHub Actions secrets or another appropriate secret mechanism. The release workflow should then fail rather than silently publish an artifact that was expected to be signed/notarized but was not.
 
@@ -121,7 +123,9 @@ When enabled, certificates and notarization credentials must be supplied through
 
 Release package names, embedded version metadata, release notes, and checksums must correspond to the triggering tag and commit.
 
-The build should record the Git commit SHA in its logs and embedded metadata. The existing runtime and HAL build metadata provide the basis for this provenance.
+The build records the Git commit SHA in its logs and embedded metadata. The runtime and HAL build metadata provide the basis for this provenance.
+
+The tag version must equal `MACFW_VERSION` in `fw410/version.h`; the release workflow enforces this before building.
 
 ## Release documentation
 
@@ -130,16 +134,18 @@ Every release candidate should review/update:
 - [`CHANGELOG.md`](CHANGELOG.md) — accumulated user-visible changes;
 - [`RELEASE-NOTES.md`](RELEASE-NOTES.md) — release-facing summary for the current candidate;
 - [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) — current limitations and unsupported behavior;
-- [`INSTALL.md`](INSTALL.md) — installation, status, troubleshooting, and source-build instructions.
+- [`COMPATIBILITY.md`](COMPATIBILITY.md) — exact hardware-tested operating-system matrix;
+- [`INSTALL.md`](INSTALL.md) — installation, status, troubleshooting, persistence and source-build instructions.
 
-## Current first-alpha gate
+## Current `0.02.000` release gate
 
-Before tagging `0.01.000`, verify at minimum:
+Before tagging `0.02.000`, verify at minimum:
 
 - clean source build with `make`;
 - source installation with `sudo make install`;
 - root `make package` produces the expected `.pkg`;
-- fresh `.pkg` installation succeeds with a supported FW410 attached;
+- fresh/current `.pkg` installation succeeds with a supported FW410 attached;
+- control application is installed at `/Applications/macfw FW410 Control.app`;
 - launchd runtime reaches `ONLINE`;
 - 44.1 kHz playback/capture;
 - 48 kHz playback/capture;
@@ -148,6 +154,13 @@ Before tagging `0.01.000`, verify at minimum:
 - reboot recovery;
 - boot without interface followed by delayed attachment;
 - launchd process restart;
-- known limitations and signing status are accurately stated.
+- main-mixer route controls;
+- physical output, headphone and AUX controls;
+- writable control-state persistence across reboot;
+- writable control-state persistence across physical disconnect/reconnect;
+- Reset Defaults behavior;
+- package postinstall diagnostics at `/Library/Logs/macfw_install.log`;
+- known limitations and signing status are accurately stated;
+- release candidate is merged into `main` before tagging.
 
-The development machine has already hardware-validated these functional behaviors; the final release pass exists to ensure the exact tagged/package artifact preserves them.
+The development machine has hardware-validated the `0.02.000` control/package lifecycle through installation, status, Reset Defaults, reboot persistence and physical reconnect persistence. The final release pass exists to ensure the exact `main`/tagged package preserves those behaviors.
