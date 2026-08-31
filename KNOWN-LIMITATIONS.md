@@ -11,7 +11,7 @@ This file records limitations and open items for the current macfw M-Audio FireW
 
 ## Supported hardware
 
-- The only supported audio interface in the first release is the **M-Audio FireWire 410**.
+- The only supported audio interface is the **M-Audio FireWire 410**.
 - The installer recognizes the known FW410 operational and bootloader personalities.
 - Installation currently requires a supported interface to be connected. This is intentional and provides the foundation for future device-specific installers.
 
@@ -55,17 +55,21 @@ This is intentional behavior, not an indication that macOS still sees the physic
 
 ## Controls and mixer
 
-A substantial part of the FW410 control surface is now implemented and hardware-validated:
+A substantial part of the FW410 control surface is implemented and hardware-validated:
 
 - headphone source/level and five-pair mixer routing;
 - AUX levels;
 - physical output Mixer/AUX selection and L/R levels;
 - 7-source x 5-bus main-mixer route assignments;
-- native AppKit GUI for Mixer, Outputs, Headphones, AUX and Info.
+- native AppKit GUI for Mixer, Outputs, Headphones, AUX and Info;
+- persistence of currently writable production controls across reboot and interface reconnect;
+- Reset Defaults to the documented macfw baseline.
 
 The full original mixer strip feature set is **not yet complete**. Remaining work includes controls such as strip level, pan/balance, mute/solo and AUX-send behavior where those semantics are confirmed.
 
 The main mixer also has a device-specific state-management limitation: isolated route writes against an unknown matrix are unsafe. macfw must first establish a complete known 35-cell baseline, cache it in the transport process and then apply later route changes differentially. Mixer STATUS polling is intentionally avoided.
+
+Persistent state follows the same safety model: saved main-mixer routes are restored through the full known baseline before differential route replay. The persisted reset baseline is a macfw-defined default, not a claim about undocumented M-Audio factory defaults.
 
 The GUI currently invokes `fw410ctl` subprocesses as its proven backend boundary. This is functional but not the final efficiency target; mixer refresh can later be optimized to fetch the cached matrix in one operation.
 
@@ -79,13 +83,15 @@ MIDI transport is not yet validated as a supported user-facing feature. The Fire
 
 ## Signing and notarization
 
-The initial alpha packaging work is focused on reproducible installation and hardware validation. Public distribution signing/notarization is a separate release-hardening step. Release notes must clearly identify whether a particular package is signed/notarized.
+The alpha packaging work is focused on reproducible installation and hardware validation. Public distribution signing/notarization remains a separate release-hardening step. Release notes must clearly identify whether a particular package is signed/notarized.
 
 ## Package and compatibility testing
 
 The `.pkg` installer has been validated for immediate operation after installation without reboot. A completely fresh **Monterey 12.7.6** installation worked as expected with the packaged driver. Ventura 13.7.8 and Sonoma 14.8.9 are also functionally validated.
 
-The package/source install paths now include the native control-panel application in addition to the HAL and launchd/runtime components.
+The `0.02.000` candidate package path has additionally been hardware-validated through installation, launchd startup, status reporting, normal control operation, Reset Defaults, reboot persistence and physical disconnect/reconnect persistence.
+
+The package/source install paths include the native control-panel application, persistent state helper, HAL and launchd/runtime components.
 
 Reboot recovery, delayed hardware attachment, sample-rate switching, physical disconnect/reconnect, and launchd process restart have also been validated during development testing.
 
@@ -94,6 +100,8 @@ This does not yet constitute a broad compatibility guarantee across all Intel Ma
 ## Diagnostics
 
 Transport diagnostics and reverse-engineering tools are primarily developer/tester interfaces. Their output and command-line contracts may change during the 0.x development series.
+
+Package postinstall diagnostics are written to `/Library/Logs/macfw_install.log`; Installer-level failures that occur before the macfw postinstall script starts may still require `/var/log/install.log`.
 
 ## Reporting issues
 
@@ -104,5 +112,7 @@ Useful reports should include:
 - FireWire connection/adapters used;
 - FW410 behavior at 44.1 or 48 kHz;
 - whether the problem occurs after install, boot, rate switch, disconnect/reconnect, sleep/wake, normal streaming, or a control change;
+- whether persistent controls or Reset Defaults are involved;
 - relevant `/Library/Logs/macfw-fw410-transport.log` output;
+- `/Library/Logs/macfw_install.log` for package-install problems;
 - transport status output where available.
