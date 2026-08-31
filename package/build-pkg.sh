@@ -107,7 +107,11 @@ for ((index=0; ; ++index)); do
     if ! /usr/libexec/PlistBuddy -c "Print :${index}:RootRelativeBundlePath" "$COMPONENT_PLIST" >/dev/null 2>&1; then
         break
     fi
-    /usr/libexec/PlistBuddy -c "Set :${index}:BundleIsRelocatable false" "$COMPONENT_PLIST"
+    if /usr/libexec/PlistBuddy -c "Print :${index}:BundleIsRelocatable" "$COMPONENT_PLIST" >/dev/null 2>&1; then
+        /usr/libexec/PlistBuddy -c "Set :${index}:BundleIsRelocatable false" "$COMPONENT_PLIST"
+    else
+        /usr/libexec/PlistBuddy -c "Add :${index}:BundleIsRelocatable bool false" "$COMPONENT_PLIST"
+    fi
 done
 
 pkgbuild \
