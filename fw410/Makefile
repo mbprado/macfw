@@ -28,6 +28,7 @@ install:
 	    [ ! -x tools/transport/transportstatus/transportstatus ] || \
 	    [ ! -x tools/control/rateprobe/rateprobe ] || \
 	    [ ! -x tools/control/fw410ctl/fw410ctl ] || \
+	    [ ! -x tools/control/fw410state/fw410state ] || \
 	    [ ! -x tools/device/fwboot/fwboot ] || \
 	    [ ! -x tools/device/deviceprobe/deviceprobe ] || \
 	    [ ! -x "control-panel/build/macfw FW410 Control.app/Contents/MacOS/macfw-fw410-control" ]; then \
