@@ -5,11 +5,13 @@
 #include <fcntl.h>
 #include <fstream>
 #include <libgen.h>
+#include <limits.h>
 #include <sstream>
 #include <string>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -111,6 +113,7 @@ int runControl(const std::string& tool, const Entry& entry) {
     const pid_t pid = fork();
     if (pid < 0) return 126;
     if (pid == 0) {
+        setenv("MACFW_STATE_RESTORE", "1", 1);
         execv(tool.c_str(), argv.data());
         _exit(127);
     }
