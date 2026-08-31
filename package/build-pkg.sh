@@ -40,6 +40,7 @@ required=(
     "$FW410_DIR/tools/transport/transportstatus/transportstatus"
     "$FW410_DIR/tools/control/rateprobe/rateprobe"
     "$FW410_DIR/tools/control/fw410ctl/fw410ctl"
+    "$FW410_DIR/tools/control/fw410state/fw410state"
     "$FW410_DIR/tools/device/fwboot/fwboot"
     "$DEVICEPROBE"
     "$PLIST"
@@ -71,6 +72,7 @@ for rel in \
     tools/transport/transportstatus/transportstatus \
     tools/control/rateprobe/rateprobe \
     tools/control/fw410ctl/fw410ctl \
+    tools/control/fw410state/fw410state \
     tools/device/fwboot/fwboot \
     tools/device/deviceprobe/deviceprobe; do
     mkdir -p "$ROOT/Library/Application Support/macfw/fw410/$(dirname "$rel")"
@@ -116,6 +118,13 @@ ul { margin-top: 6px; }
 </head>
 <body>
 <p>You will be guided through the installation of the macfw FireWire Audio Driver ${VERSION}.</p>
+
+<h2>Included components</h2>
+<ul>
+    <li>M-Audio FireWire 410 CoreAudio driver and transport service</li>
+    <li>macfw FW410 Control application</li>
+    <li>Persistent control-state restore across reboot and reconnect</li>
+</ul>
 
 <h2>Supported audio interfaces</h2>
 <ul>
