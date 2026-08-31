@@ -6,6 +6,10 @@ The project uses the `x.yy.zzz` version format described in [`RELEASES.md`](RELE
 
 ## [Unreleased]
 
+No user-visible changes have been recorded after the `0.02.000` release candidate yet.
+
+## [0.02.000] — second alpha
+
 ### Added
 
 - Native AppKit FW410 control panel installed as `/Applications/macfw FW410 Control.app`.
@@ -43,11 +47,11 @@ The project uses the `x.yy.zzz` version format described in [`RELEASES.md`](RELE
 
 ### Release infrastructure
 
-- Prepare tag-driven GitHub release automation.
-- Add public release notes and final compatibility checklist for the first alpha.
-- Add signing/notarization when Apple distribution credentials are available.
+- Retained the tag-driven GitHub release pipeline with package checksum generation.
+- Expanded public compatibility, installation, troubleshooting and release documentation for the control-panel release.
+- Signing/notarization remains a future hardening step when Apple distribution credentials are available.
 
-## [0.01.000] — first alpha candidate
+## [0.01.000] — first alpha
 
 ### Added
 
