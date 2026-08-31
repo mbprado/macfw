@@ -44,11 +44,22 @@ Apple Silicon is not currently supported. See [`COMPATIBILITY.md`](COMPATIBILITY
 
 ## Install
 
-For binary releases, use the provided macOS `.pkg` with the M-Audio FireWire 410 connected and powered on.
+For binary [`releases`](https://github.com/mbprado/macfw/releases), use the provided macOS `.pkg` with the M-Audio FireWire 410 connected and powered on.
 
 For a source checkout, build as a normal user and install the already-built artifacts as root:
 
+- Install xcode tools:
 ```bash
+sudo xcode-select --install
+``` 
+Folow the setup instruction on screen
+
+
+- Clone and compile:
+
+
+```bash
+git clone https://github.com/mbprado/macfw.git  
 make
 sudo make install
 ```
