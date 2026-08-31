@@ -60,6 +60,7 @@ Folow the setup instruction on screen
 
 ```bash
 git clone https://github.com/mbprado/macfw.git  
+cd macfw
 make
 sudo make install
 ```
