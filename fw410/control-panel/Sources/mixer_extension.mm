@@ -51,6 +51,40 @@ static NSString *RunMixerControl(NSArray<NSString *> *args, int *statusOut) {
     return RunMixerTool(kMixerControlTool, args, statusOut);
 }
 
+// `fw410ctl mixer get` obtains the complete matrix from the transport's cached
+// MAIN_MIXER state in one socket transaction. Keep the GUI's CoreAudio-facing
+// row order separate from the raw AV/C source order printed by fw410ctl.
+static BOOL ParseMainMixerState(NSString *text, BOOL routes[7][5]) {
+    NSArray<NSString *> *lines = [text componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+    NSMutableArray<NSArray<NSNumber *> *> *rawRows = [NSMutableArray arrayWithCapacity:7];
+    for (NSString *line in lines) {
+        NSRange colon = [line rangeOfString:@":"];
+        if (colon.location == NSNotFound || [line containsString:@"FW410 main mixer"]) continue;
+        NSString *values = [line substringFromIndex:colon.location + 1];
+        NSArray<NSString *> *parts = [values componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        NSMutableArray<NSNumber *> *row = [NSMutableArray arrayWithCapacity:5];
+        for (NSString *part in parts) {
+            if (part.length == 0) continue;
+            NSRange equals = [part rangeOfString:@"="];
+            if (equals.location == NSNotFound) continue;
+            NSString *state = [part substringFromIndex:equals.location + 1];
+            if (![state isEqualToString:@"on"] && ![state isEqualToString:@"off"]) return NO;
+            [row addObject:@([state isEqualToString:@"on"] )];
+        }
+        if (row.count != 5) return NO;
+        [rawRows addObject:row];
+    }
+    if (rawRows.count != 7) return NO;
+
+    // fw410ctl raw order: analog, spdif-in, sw1/2, sw3/4, sw5/6, sw7/8, sw9/10.
+    // GUI/CoreAudio order: analog, spdif-in, sw3/4, sw5/6, sw7/8, sw9/10, sw1/2.
+    static const NSUInteger guiToRaw[7] = {0, 1, 3, 4, 5, 6, 2};
+    for (NSUInteger guiSrc = 0; guiSrc < 7; ++guiSrc)
+        for (NSUInteger dst = 0; dst < 5; ++dst)
+            routes[guiSrc][dst] = rawRows[guiToRaw[guiSrc]][dst].boolValue;
+    return YES;
+}
+
 @interface AppDelegate : NSObject
 - (void)applicationDidFinishLaunching:(NSNotification *)notification;
 - (void)refresh:(id)sender;
@@ -178,17 +212,14 @@ static const void *kMainMixerButtonsKey = &kMainMixerButtonsKey;
     NSArray<NSButton *> *buttons = objc_getAssociatedObject(self, kMainMixerButtonsKey);
     if (buttons.count != 35) return;
 
-    NSArray<NSString *> *sources = MixerSourceArgs();
-    NSArray<NSString *> *buses = MixerBusArgs();
-    for (NSUInteger src = 0; src < sources.count; ++src) {
-        for (NSUInteger dst = 0; dst < buses.count; ++dst) {
-            int status = 0;
-            NSString *text = RunMixerControl(@[@"mixer-route", @"get", sources[src], buses[dst]], &status);
-            if (status != 0) continue;
-            NSButton *button = buttons[src * buses.count + dst];
-            button.state = [text containsString:@": on (1)"] ? NSControlStateValueOn : NSControlStateValueOff;
-        }
-    }
+    int status = 0;
+    NSString *text = RunMixerControl(@[@"mixer", @"get"], &status);
+    BOOL routes[7][5] = {};
+    if (status != 0 || !ParseMainMixerState(text, routes)) return;
+
+    for (NSUInteger src = 0; src < 7; ++src)
+        for (NSUInteger dst = 0; dst < 5; ++dst)
+            buttons[src * 5 + dst].state = routes[src][dst] ? NSControlStateValueOn : NSControlStateValueOff;
 }
 
 - (void)macfwMainMixerChanged:(NSButton *)sender {
