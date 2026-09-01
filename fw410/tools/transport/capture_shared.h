@@ -298,6 +298,7 @@ private:
         haveTimestamp_ = true;
 
         constexpr std::size_t kMaxEvents = 8;
+        constexpr float kMeterDecay = 0.92f;
         std::array<float, kMaxEvents * macfw::hal::capture::kChannels> decoded{};
         std::array<float, macfw::hal::capture::kChannels> peaks{};
         const std::uint8_t* p = candidate.packet.data();
@@ -319,7 +320,8 @@ private:
                 peaks[ch] = std::max(peaks[ch], std::fabs(decoded[b + ch]));
             p += 20;
         }
-        meterPeaks_ = peaks;
+        for (std::size_t ch = 0; ch < meterPeaks_.size(); ++ch)
+            meterPeaks_[ch] = std::max(peaks[ch], meterPeaks_[ch] * kMeterDecay);
 
         if (invalid) out.invalidLabels.fetch_add(invalid, std::memory_order_relaxed);
         out.decodedPackets.fetch_add(1, std::memory_order_relaxed);
