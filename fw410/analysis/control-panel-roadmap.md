@@ -1,6 +1,6 @@
 # FW410 control-panel roadmap
 
-Last updated: 2026-08-29
+Last updated: 2026-09-01
 
 This document defines the ordered expansion plan for the native macfw FW410 control panel.
 
@@ -51,7 +51,7 @@ Hardware-validated controls include:
 
 The current Outputs GUI has been hardware-tested across all eight analog output channels. S/PDIF-specific physical verification remains useful as an additional compatibility check, but the output-control backend and GUI baseline are complete enough to proceed.
 
-## 2. Mixer tab — routing complete, strip controls next
+## 2. Mixer tab — routing complete; strip level parked
 
 The FW410 main mixer is now confirmed as a **7 x 5 assignment matrix**.
 
@@ -98,7 +98,17 @@ GUI SW Return 7/8   -> raw sw9/10
 GUI SW Return 9/10  -> raw sw1/2
 ```
 
-The next Mixer work is to decode and validate the remaining original strip controls, such as level, pan/balance, mute/solo and AUX sends where supported. Add one semantic control class at a time and keep the proven routing baseline untouched.
+### Strip-level investigation — parked
+
+FFADO identifies seven ordinary AV/C Feature Volume controls corresponding to the source strips. Hardware probing confirmed that all fourteen mapped channels respond to STATUS and that the SW Return 1/2 feature accepts level writes and returns the written values correctly, including `-inf`.
+
+However, values from `-6 dB` through `-inf` produced no audible level change in the tested software-return or analog-monitoring paths. Tests also crossed CoreAudio output pairs and raw software-return identities, so the result cannot currently be explained by the known AMDTP return rotation alone.
+
+Therefore these Feature Volume controls are **not considered validated main-mixer faders** and must not be exposed in the GUI. Further strip-level work is intentionally parked until the enhanced-mixer semantics and complete signal topology are better understood.
+
+Detailed evidence and hardware results: [`main-mixer-strip-level-investigation.md`](main-mixer-strip-level-investigation.md).
+
+Other original strip controls such as pan/balance, mute/solo and AUX sends remain future research items and should follow the same rule: protocol evidence first, then narrow hardware validation before GUI exposure.
 
 Detailed routing evidence: [`original-control-panel-mixer-model.md`](original-control-panel-mixer-model.md).
 
@@ -224,7 +234,7 @@ Targets:
 
 ```text
 1 Outputs                         COMPLETE BASELINE
-2 Mixer routing                  COMPLETE; strip controls next
+2 Mixer routing                  COMPLETE; strip level PARKED
 3 Inputs / Monitoring
 4 Meters
 5 Device
@@ -237,6 +247,6 @@ Targets:
 
 ## Immediate next checkpoint
 
-Preserve the current known-good routing implementation and continue point 2 with the remaining original mixer-strip controls. Start from the Linux driver/original-panel definitions, implement software/protocol semantics before GUI exposure, and hardware-test each new write class while audio remains active.
+Preserve the current known-good mixer routing implementation and leave unresolved source-strip level controls out of the production GUI. Resume the roadmap with a separate feature whose protocol semantics can be established without disturbing the validated routing/audio baseline.
 
-A secondary cleanup target is to replace the GUI's current many-process mixer refresh with a single cached-matrix query once that optimization can be done without changing the proven control semantics.
+When strip-level research resumes, start by investigating FFADO's enhanced-mixer implementation and the FW410 signal topology rather than performing additional blind Feature Volume writes.
