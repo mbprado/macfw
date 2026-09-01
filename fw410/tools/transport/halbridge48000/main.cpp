@@ -4,6 +4,7 @@
 #include "macfw/pcm_ring_buffer.h"
 #include "macfw_hal_shm.h"
 #include "../capture_shared.h"
+#include "../capture_meter_server.h"
 #include "../engine_ready.h"
 #include "../full_duplex_shared.h"
 #include "../full_duplex_engine_setup.h"
@@ -59,11 +60,14 @@ bool run() {
 
     Fw410FcpControl fcp;
     Fw410ControlServer control;
+    macfw::transport::CaptureMeterServer meterServer;
     if (!fcp.arm(setup.device)) {
         std::cerr << "warning: FW410 FCP control unavailable; audio will continue\n";
     } else if (!control.start(fcp)) {
         std::cerr << "warning: FW410 control socket unavailable; audio will continue\n";
     }
+    if (!meterServer.start(capturePump))
+        std::cerr << "warning: FW410 meter socket unavailable; audio will continue\n";
 
     if (!lifecycle.startIsoch()) return false;
 
@@ -83,10 +87,12 @@ bool run() {
         streamer, runtimeConfig,
         [&](std::vector<float>& audio, std::vector<std::int32_t>& mapped) {
             control.service();
+            meterServer.service();
             drainPlayback(*setup.input.ring(), pcm, audio, mapped);
         });
 
     std::cout << "stop requested; restoring ISO/CMP resources\n";
+    meterServer.reset();
     control.reset();
     fcp.reset();
     lifecycle.stop();
