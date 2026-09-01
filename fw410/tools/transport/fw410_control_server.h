@@ -34,8 +34,8 @@ public:
     static constexpr std::uint8_t kSpdifConnectorSelector = 0x01;
 
     // FFADO's FW410 mixer model maps the seven main source-strip faders to
-    // these feature blocks/channels.  Keep this probe read-only until the
-    // hardware values have been compared with the original control panel.
+    // these feature blocks/channels.  Keep writes constrained to the single
+    // SW Return 1/2 experiment until hardware behavior is validated.
     struct MainStripLevelAddress { std::uint8_t functionBlock; std::uint8_t leftChannel; std::uint8_t rightChannel; };
     static constexpr std::array<MainStripLevelAddress, 7> kMainStripLevelAddresses = {{
         {0x03,0x01,0x02}, // Analog 1/2
@@ -59,7 +59,13 @@ private:
     bool writeStereoLevel(std::uint8_t fb,std::int16_t l,std::int16_t r){if(!fcp_->writeLevel(fb,1,l)||!fcp_->writeLevel(fb,2,r))return false;std::int16_t vl=0,vr=0;return readStereoLevel(fb,vl,vr)&&vl==l&&vr==r;}
     static bool parseRawLevel(const std::string&s,std::int16_t&v){char*e=nullptr;errno=0;long p=std::strtol(s.c_str(),&e,10);if(errno||!e||*e!='\0')return false;if(p==-32768){v=static_cast<std::int16_t>(p);return true;}if(p<-32768||p>0||(p%0x100)!=0)return false;v=static_cast<std::int16_t>(p);return true;}
     void handleLevel(const std::string&c,const std::string&p,std::uint8_t fb){if(c==p+" GET"){std::int16_t l=0,r=0;if(!readStereoLevel(fb,l,r)){reply("ERR fcp-read-failed\n");return;}reply("OK "+std::to_string(l)+" "+std::to_string(r)+"\n");return;}std::string sp=p+" SET ";if(c.rfind(sp,0)!=0)return;std::istringstream in(c.substr(sp.size()));std::string ls,rs,x;if(!(in>>ls>>rs)||(in>>x)){reply("ERR invalid-level\n");return;}std::int16_t l=0,r=0;if(!parseRawLevel(ls,l)||!parseRawLevel(rs,r)){reply("ERR invalid-level\n");return;}if(!writeStereoLevel(fb,l,r)){reply("ERR fcp-write-or-verify-failed\n");return;}reply("OK "+std::to_string(l)+" "+std::to_string(r)+"\n");}
-    void handleMainStripLevel(const std::string&c){const std::string p="MAIN_STRIP_LEVEL GET ";if(c.rfind(p,0)!=0){reply("ERR read-only-control\n");return;}std::istringstream in(c.substr(p.size()));unsigned i=0;std::string x;if(!(in>>i)||(in>>x)||i>=kMainStripLevelAddresses.size()){reply("ERR invalid-main-strip\n");return;}std::int16_t l=0,r=0;if(!readMainStripLevel(i,l,r)){reply("ERR fcp-read-failed\n");return;}reply("OK "+std::to_string(i)+" "+std::to_string(l)+" "+std::to_string(r)+"\n");}
+    void handleMainStripLevel(const std::string&c){
+        const std::string gp="MAIN_STRIP_LEVEL GET ";
+        if(c.rfind(gp,0)==0){std::istringstream in(c.substr(gp.size()));unsigned i=0;std::string x;if(!(in>>i)||(in>>x)||i>=kMainStripLevelAddresses.size()){reply("ERR invalid-main-strip\n");return;}std::int16_t l=0,r=0;if(!readMainStripLevel(i,l,r)){reply("ERR fcp-read-failed\n");return;}reply("OK "+std::to_string(i)+" "+std::to_string(l)+" "+std::to_string(r)+"\n");return;}
+        const std::string sp="MAIN_STRIP_LEVEL SET ";
+        if(c.rfind(sp,0)==0){std::istringstream in(c.substr(sp.size()));unsigned i=0;std::string ls,rs,x;if(!(in>>i>>ls>>rs)||(in>>x)||i!=2){reply("ERR experimental-write-limited-to-sw1/2\n");return;}std::int16_t l=0,r=0;if(!parseRawLevel(ls,l)||!parseRawLevel(rs,r)){reply("ERR invalid-level\n");return;}const auto&a=kMainStripLevelAddresses[i];if(!fcp_->writeLevel(a.functionBlock,a.leftChannel,l)||!fcp_->writeLevel(a.functionBlock,a.rightChannel,r)){reply("ERR fcp-write-failed\n");return;}std::int16_t vl=0,vr=0;if(!readMainStripLevel(i,vl,vr)||vl!=l||vr!=r){reply("ERR verify-failed\n");return;}reply("OK "+std::to_string(i)+" "+std::to_string(vl)+" "+std::to_string(vr)+"\n");return;}
+        reply("ERR unknown-command\n");
+    }
     bool readHeadphoneMixer(std::array<bool,5>&s){for(std::size_t i=0;i<s.size();++i)if(!fcp_->readProcessingMixer(kHeadphoneMixerBlock,kHeadphoneMixerInputPlug,kHeadphoneMixerInputChannels[i],kHeadphoneMixerOutputChannel,s[i]))return false;return true;}
     bool writeHeadphoneMixer(std::size_t i,bool e){if(i>=5||!fcp_->writeProcessingMixer(kHeadphoneMixerBlock,kHeadphoneMixerInputPlug,kHeadphoneMixerInputChannels[i],kHeadphoneMixerOutputChannel,e))return false;bool v=false;return fcp_->readProcessingMixer(kHeadphoneMixerBlock,kHeadphoneMixerInputPlug,kHeadphoneMixerInputChannels[i],kHeadphoneMixerOutputChannel,v)&&v==e;}
     void handleHeadphoneMixer(const std::string&c){if(c=="HEADPHONE_MIXER GET"){std::array<bool,5>s{};if(!readHeadphoneMixer(s)){reply("ERR fcp-read-failed\n");return;}std::string o="OK";for(bool e:s)o+=e?" 1":" 0";reply(o+"\n");return;}std::string p="HEADPHONE_MIXER SET ";if(c.rfind(p,0)!=0){reply("ERR unknown-command\n");return;}std::istringstream in(c.substr(p.size()));unsigned i=0,v=0;std::string x;if(!(in>>i>>v)||(in>>x)||i>=5||v>1){reply("ERR invalid-headphone-mixer\n");return;}if(!writeHeadphoneMixer(i,v!=0)){reply("ERR fcp-write-or-verify-failed\n");return;}reply("OK "+std::to_string(i)+" "+std::to_string(v)+"\n");}
