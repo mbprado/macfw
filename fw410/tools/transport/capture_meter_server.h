@@ -3,6 +3,7 @@
 #include "capture_shared.h"
 
 #include <cerrno>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
@@ -86,6 +87,13 @@ public:
     }
 
 private:
+    static double toDbfs(float peak) {
+        constexpr double kFloorDb = -120.0;
+        if (!(peak > 0.0f)) return kFloorDb;
+        const double db = 20.0 * std::log10(static_cast<double>(peak));
+        return db < kFloorDb ? kFloorDb : (db > 0.0 ? 0.0 : db);
+    }
+
     void finishClient() {
         if (clientFd_ >= 0) close(clientFd_);
         clientFd_ = -1;
@@ -104,9 +112,8 @@ private:
         }
         const auto& p = pump_->meterPeaks();
         char out[256] = {};
-        std::snprintf(out, sizeof(out), "OK %.8f %.8f %.8f %.8f\n",
-                      static_cast<double>(p[0]), static_cast<double>(p[1]),
-                      static_cast<double>(p[2]), static_cast<double>(p[3]));
+        std::snprintf(out, sizeof(out), "OK %.2f %.2f %.2f %.2f\n",
+                      toDbfs(p[0]), toDbfs(p[1]), toDbfs(p[2]), toDbfs(p[3]));
         reply(out);
     }
 
