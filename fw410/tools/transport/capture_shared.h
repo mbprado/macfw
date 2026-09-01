@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -133,18 +134,7 @@ public:
                 ? begin + kChunkSlots : rx.packetCount();
             const std::size_t terminalIndex = end - 1;
 
-            // SetDCLUpdateList() is attached to this terminal receive DCL. Its
-            // metadata changes only when the complete preceding 32-slot group
-            // has been published by NuDCL, so use it as the receive-only batch
-            // completion token. This avoids mixing slots from different DMA
-            // generations while preserving the proven receive program.
             const auto& terminal = rx.slot(terminalIndex);
-            // At native 44.1 kHz the terminal slot can alternate between
-            // 8-event and NODATA packets. isoHeader and timestamp are separate
-            // DMA-updated words, so combining both can transiently create two
-            // distinct signatures for one completion if userspace observes the
-            // fields between updates. For that mode, the DCL completion
-            // timestamp alone is the stable generation token.
             const std::uint64_t terminalSignature = timestampOnlyChunkToken_
                 ? static_cast<std::uint64_t>(terminal.timestamp)
                 : ((static_cast<std::uint64_t>(terminal.timestamp) << 32) |
@@ -162,6 +152,9 @@ public:
     }
 
     const Stats& stats() const { return stats_; }
+    const std::array<float, macfw::hal::capture::kChannels>& meterPeaks() const {
+        return meterPeaks_;
+    }
 
 private:
     struct Candidate {
@@ -304,6 +297,7 @@ private:
 
         constexpr std::size_t kMaxEvents = 8;
         std::array<float, kMaxEvents * macfw::hal::capture::kChannels> decoded{};
+        std::array<float, macfw::hal::capture::kChannels> peaks{};
         const std::uint8_t* p = candidate.packet.data();
         std::uint64_t invalid = 0;
         for (std::size_t event = 0; event < candidate.events; ++event) {
@@ -319,8 +313,11 @@ private:
             decoded[b + 1] = static_cast<float>(raw[3] / 8388608.0);
             decoded[b + 2] = static_cast<float>(raw[0] / 8388608.0);
             decoded[b + 3] = static_cast<float>(raw[2] / 8388608.0);
+            for (std::size_t ch = 0; ch < peaks.size(); ++ch)
+                peaks[ch] = std::max(peaks[ch], std::fabs(decoded[b + ch]));
             p += 20;
         }
+        meterPeaks_ = peaks;
 
         if (invalid) out.invalidLabels.fetch_add(invalid, std::memory_order_relaxed);
         out.decodedPackets.fetch_add(1, std::memory_order_relaxed);
@@ -332,6 +329,7 @@ private:
     bool timestampOnlyChunkToken_ = false;
     std::array<std::uint64_t, 8> lastChunkSignature_{};
     Stats stats_{};
+    std::array<float, macfw::hal::capture::kChannels> meterPeaks_{};
     bool haveExpectedDbc_ = false;
     std::uint8_t expectedDbc_ = 0;
     bool haveTimestamp_ = false;
