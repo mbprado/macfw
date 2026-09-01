@@ -3,6 +3,7 @@
 #import <objc/runtime.h>
 
 #include "stereo_link.h"
+#include "slider_commit.h"
 #include <cmath>
 
 static NSString *const kMacfwControlTool = @"/Library/Application Support/macfw/fw410/tools/control/fw410ctl/fw410ctl";
@@ -194,11 +195,12 @@ static const void *kPreviousSliderKey = &kPreviousSliderKey;
     objc_setAssociatedObject(sender,kPreviousSliderKey,@(sender.doubleValue),OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     lvs[(NSUInteger)pair].stringValue=DbText(left.doubleValue); rvs[(NSUInteger)pair].stringValue=DbText(right.doubleValue);
     if(![self macfwIsDragging]){
-        int status=0;
-        RunControl(@[@"output-volume",@"set",OutputArgs()[(NSUInteger)pair],
-                     [NSString stringWithFormat:@"%d",(int)llround(left.doubleValue)],
-                     [NSString stringWithFormat:@"%d",(int)llround(right.doubleValue)]],&status);
-        [self macfwRefreshOutputs];
+        NSString *pairArg=OutputArgs()[(NSUInteger)pair];
+        MacfwQueueControlWrite(kMacfwControlTool,
+            [@"output-volume:" stringByAppendingString:pairArg],
+            @[@"output-volume",@"set",pairArg,
+              [NSString stringWithFormat:@"%d",(int)llround(left.doubleValue)],
+              [NSString stringWithFormat:@"%d",(int)llround(right.doubleValue)]]);
     }
 }
 
