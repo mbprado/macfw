@@ -33,6 +33,20 @@ public:
     static constexpr std::array<std::uint8_t, 5> kOutputLevelBlocks = {0x0a,0x0b,0x0c,0x0d,0x0e};
     static constexpr std::uint8_t kSpdifConnectorSelector = 0x01;
 
+    // FFADO's FW410 mixer model maps the seven main source-strip faders to
+    // these feature blocks/channels.  Keep this probe read-only until the
+    // hardware values have been compared with the original control panel.
+    struct MainStripLevelAddress { std::uint8_t functionBlock; std::uint8_t leftChannel; std::uint8_t rightChannel; };
+    static constexpr std::array<MainStripLevelAddress, 7> kMainStripLevelAddresses = {{
+        {0x03,0x01,0x02}, // Analog 1/2
+        {0x04,0x01,0x02}, // S/PDIF 1/2
+        {0x02,0x01,0x02}, // SW return 1/2
+        {0x01,0x01,0x02}, // SW return 3/4
+        {0x01,0x03,0x04}, // SW return 5/6
+        {0x01,0x05,0x06}, // SW return 7/8
+        {0x01,0x07,0x08}, // SW return 9/10
+    }};
+
     ~Fw410ControlServer(){reset();}
     bool start(Fw410FcpControl& fcp){reset();fcp_=&fcp;listenFd_=socket(AF_UNIX,SOCK_STREAM,0);if(listenFd_<0)return false;int flags=fcntl(listenFd_,F_GETFL,0);if(flags>=0)fcntl(listenFd_,F_SETFL,flags|O_NONBLOCK);sockaddr_un a{};a.sun_family=AF_UNIX;if(std::strlen(kSocketPath)>=sizeof(a.sun_path)){reset();return false;}std::strncpy(a.sun_path,kSocketPath,sizeof(a.sun_path)-1);unlink(kSocketPath);if(bind(listenFd_,reinterpret_cast<sockaddr*>(&a),sizeof(a))!=0){reset();return false;}chmod(kSocketPath,0666);if(listen(listenFd_,4)!=0){reset();return false;}std::printf("FW410 control socket: %s\n",kSocketPath);return true;}
     void reset(){if(clientFd_>=0)close(clientFd_);clientFd_=-1;request_.clear();if(listenFd_>=0)close(listenFd_);listenFd_=-1;unlink(kSocketPath);fcp_=nullptr;mainMixerHardwareInitialized_=false;}
@@ -41,9 +55,11 @@ private:
     void finishClient(){if(clientFd_>=0)close(clientFd_);clientFd_=-1;request_.clear();}
     void reply(const std::string&t){if(clientFd_<0)return;const char*p=t.data();std::size_t left=t.size();while(left){ssize_t n=send(clientFd_,p,left,0);if(n<=0)break;p+=n;left-=static_cast<std::size_t>(n);}}
     bool readStereoLevel(std::uint8_t fb,std::int16_t&l,std::int16_t&r){return fcp_->readLevel(fb,1,l)&&fcp_->readLevel(fb,2,r);}
+    bool readMainStripLevel(std::size_t i,std::int16_t&l,std::int16_t&r){if(i>=kMainStripLevelAddresses.size())return false;const auto&a=kMainStripLevelAddresses[i];return fcp_->readLevel(a.functionBlock,a.leftChannel,l)&&fcp_->readLevel(a.functionBlock,a.rightChannel,r);}
     bool writeStereoLevel(std::uint8_t fb,std::int16_t l,std::int16_t r){if(!fcp_->writeLevel(fb,1,l)||!fcp_->writeLevel(fb,2,r))return false;std::int16_t vl=0,vr=0;return readStereoLevel(fb,vl,vr)&&vl==l&&vr==r;}
     static bool parseRawLevel(const std::string&s,std::int16_t&v){char*e=nullptr;errno=0;long p=std::strtol(s.c_str(),&e,10);if(errno||!e||*e!='\0')return false;if(p==-32768){v=static_cast<std::int16_t>(p);return true;}if(p<-32768||p>0||(p%0x100)!=0)return false;v=static_cast<std::int16_t>(p);return true;}
     void handleLevel(const std::string&c,const std::string&p,std::uint8_t fb){if(c==p+" GET"){std::int16_t l=0,r=0;if(!readStereoLevel(fb,l,r)){reply("ERR fcp-read-failed\n");return;}reply("OK "+std::to_string(l)+" "+std::to_string(r)+"\n");return;}std::string sp=p+" SET ";if(c.rfind(sp,0)!=0)return;std::istringstream in(c.substr(sp.size()));std::string ls,rs,x;if(!(in>>ls>>rs)||(in>>x)){reply("ERR invalid-level\n");return;}std::int16_t l=0,r=0;if(!parseRawLevel(ls,l)||!parseRawLevel(rs,r)){reply("ERR invalid-level\n");return;}if(!writeStereoLevel(fb,l,r)){reply("ERR fcp-write-or-verify-failed\n");return;}reply("OK "+std::to_string(l)+" "+std::to_string(r)+"\n");}
+    void handleMainStripLevel(const std::string&c){const std::string p="MAIN_STRIP_LEVEL GET ";if(c.rfind(p,0)!=0){reply("ERR read-only-control\n");return;}std::istringstream in(c.substr(p.size()));unsigned i=0;std::string x;if(!(in>>i)||(in>>x)||i>=kMainStripLevelAddresses.size()){reply("ERR invalid-main-strip\n");return;}std::int16_t l=0,r=0;if(!readMainStripLevel(i,l,r)){reply("ERR fcp-read-failed\n");return;}reply("OK "+std::to_string(i)+" "+std::to_string(l)+" "+std::to_string(r)+"\n");}
     bool readHeadphoneMixer(std::array<bool,5>&s){for(std::size_t i=0;i<s.size();++i)if(!fcp_->readProcessingMixer(kHeadphoneMixerBlock,kHeadphoneMixerInputPlug,kHeadphoneMixerInputChannels[i],kHeadphoneMixerOutputChannel,s[i]))return false;return true;}
     bool writeHeadphoneMixer(std::size_t i,bool e){if(i>=5||!fcp_->writeProcessingMixer(kHeadphoneMixerBlock,kHeadphoneMixerInputPlug,kHeadphoneMixerInputChannels[i],kHeadphoneMixerOutputChannel,e))return false;bool v=false;return fcp_->readProcessingMixer(kHeadphoneMixerBlock,kHeadphoneMixerInputPlug,kHeadphoneMixerInputChannels[i],kHeadphoneMixerOutputChannel,v)&&v==e;}
     void handleHeadphoneMixer(const std::string&c){if(c=="HEADPHONE_MIXER GET"){std::array<bool,5>s{};if(!readHeadphoneMixer(s)){reply("ERR fcp-read-failed\n");return;}std::string o="OK";for(bool e:s)o+=e?" 1":" 0";reply(o+"\n");return;}std::string p="HEADPHONE_MIXER SET ";if(c.rfind(p,0)!=0){reply("ERR unknown-command\n");return;}std::istringstream in(c.substr(p.size()));unsigned i=0,v=0;std::string x;if(!(in>>i>>v)||(in>>x)||i>=5||v>1){reply("ERR invalid-headphone-mixer\n");return;}if(!writeHeadphoneMixer(i,v!=0)){reply("ERR fcp-write-or-verify-failed\n");return;}reply("OK "+std::to_string(i)+" "+std::to_string(v)+"\n");}
@@ -72,7 +88,7 @@ private:
         const std::string rs="MAIN_MIXER_MODEL ROUTE SET ";
         if(c.rfind(rs,0)==0){std::istringstream in(c.substr(rs.size()));unsigned src=0,dst=0,value=0;std::string x;if(!(in>>src>>dst>>value)||(in>>x)||src>=Fw410MainMixerModel::kSourceCount||dst>=Fw410MainMixerModel::kDestinationCount||value>1){reply("ERR invalid-main-mixer-route\n");return;}const auto source=static_cast<Fw410MainMixerModel::Source>(src);const auto destination=static_cast<Fw410MainMixerModel::Destination>(dst);mainMixerModel_.setRoute(source,destination,value!=0);mainMixerHardwareInitialized_=false;reply("OK software-only "+std::to_string(src)+" "+std::to_string(dst)+" "+std::to_string(value)+"\n");return;}
         if(c=="MAIN_MIXER_MODEL PLAN"){std::string o="OK software-only 35\n";for(std::size_t dst=0;dst<Fw410MainMixerModel::kDestinationCount;++dst){const auto destination=static_cast<Fw410MainMixerModel::Destination>(dst);const auto outCh=Fw410MainMixerModel::kAvcDestinationChannels[dst];for(std::size_t src=0;src<Fw410MainMixerModel::kSourceCount;++src){const auto source=static_cast<Fw410MainMixerModel::Source>(src);const auto& avc=Fw410MainMixerModel::kAvcSources[src];const bool enabled=mainMixerModel_.route(source,destination);o+="src="+std::to_string(src)+" dst="+std::to_string(dst)+" fb="+std::to_string(Fw410MainMixerModel::kDestinationFunctionBlock)+" inputPlug="+std::to_string(avc.functionBlock)+" inputCh="+std::to_string(avc.channel)+" outputCh="+std::to_string(outCh)+" raw="+(enabled?std::string("0x0000"):std::string("0x8000"))+"\n";}}reply(o);return;}
-        if(c=="MAIN_MIXER_MODEL TOPOLOGY"){std::string o="OK";for(const auto& src:Fw410MainMixerModel::kAvcSources)o+=" "+std::to_string(src.functionBlock)+":"+std::to_string(src.channel);o+=" -> "+std::to_string(Fw410MainMixerModel::kDestinationFunctionBlock)+":";for(std::size_t i=0;i<Fw410MainMixerModel::kAvcDestinationChannels.size();++i){if(i)o+=",";o+=std::to_string(Fw410MainMixerModel::kAvcDestinationChannels[i]);}reply(o+"\n");return;}
+        if(c=="MAIN_MIXER_MODEL TOPOLOGY"){std::string o="OK topology\n";for(std::size_t src=0;src<Fw410MainMixerModel::kSourceCount;++src){const auto& avc=Fw410MainMixerModel::kAvcSources[src];o+="src="+std::to_string(src)+" fb="+std::to_string(avc.functionBlock)+" ch="+std::to_string(avc.channel)+"\n";}reply(o);return;}
         reply("ERR unknown-command\n");
     }
     void handleMainMixerHardware(const std::string&c){
@@ -93,6 +109,7 @@ private:
         if(c.rfind("MAIN_MIXER ",0)==0){handleMainMixer(c);return;}
         if(c.rfind("MAIN_MIXER_HW ",0)==0){handleMainMixerHardware(c);return;}
         if(c.rfind("MAIN_MIXER_MODEL ",0)==0){handleMainMixerModel(c);return;}
+        if(c.rfind("MAIN_STRIP_LEVEL ",0)==0){handleMainStripLevel(c);return;}
         if(c.rfind("OUTPUT_PAIR ",0)==0){handleOutputPair(c);return;}
         if(c.rfind("HEADPHONE_VOLUME ",0)==0){handleLevel(c,"HEADPHONE_VOLUME",kHeadphoneLevel);return;}
         if(c.rfind("AUX_STREAM12_VOLUME ",0)==0){handleLevel(c,"AUX_STREAM12_VOLUME",kAuxStream12Level);return;}
@@ -103,4 +120,4 @@ private:
     Fw410FcpControl*fcp_=nullptr;int listenFd_=-1;int clientFd_=-1;std::string request_;Fw410MainMixerModel mainMixerModel_{};bool mainMixerHardwareInitialized_=false;
 };
 
-} // namespace macfw::transport::duplex
+} // namespace macfw::transport::duplex {
