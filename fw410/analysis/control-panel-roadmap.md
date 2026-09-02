@@ -1,6 +1,6 @@
 # FW410 control-panel roadmap
 
-Last updated: 2026-08-29
+Last updated: 2026-09-02
 
 This document defines the ordered expansion plan for the native macfw FW410 control panel.
 
@@ -24,11 +24,13 @@ Implemented and hardware-tested:
 - **Outputs** tab with five physical stereo output pairs, Mixer/AUX source selection, independent L/R level and stereo link behavior;
 - **Headphones** tab with Mixer/AUX source, independent L/R volume, five mixer-output pair enables and stereo link behavior;
 - **AUX** tab with software-return 1/2 and AUX output stereo levels;
+- **Meters** tab with live Analog Input 1/2 and S/PDIF L/R capture meters;
 - **Info** tab with component/system/device information;
 - control IPC through the active transport, never direct FireWire ownership from the GUI;
 - main-mixer software-return labels translated into CoreAudio/Logic order;
 - multiple simultaneous mixer-bus assignments;
-- analog direct-monitor assignments to multiple output buses.
+- analog direct-monitor assignments to multiple output buses;
+- asynchronous/coalesced GUI control writes for responsive sliders and headphone controls.
 
 ## 1. Outputs tab — complete baseline
 
@@ -51,7 +53,7 @@ Hardware-validated controls include:
 
 The current Outputs GUI has been hardware-tested across all eight analog output channels. S/PDIF-specific physical verification remains useful as an additional compatibility check, but the output-control backend and GUI baseline are complete enough to proceed.
 
-## 2. Mixer tab — routing complete, strip controls next
+## 2. Mixer tab — routing complete; strip level parked
 
 The FW410 main mixer is now confirmed as a **7 x 5 assignment matrix**.
 
@@ -98,9 +100,9 @@ GUI SW Return 7/8   -> raw sw9/10
 GUI SW Return 9/10  -> raw sw1/2
 ```
 
-The next Mixer work is to decode and validate the remaining original strip controls, such as level, pan/balance, mute/solo and AUX sends where supported. Add one semantic control class at a time and keep the proven routing baseline untouched.
+Main strip-level research is currently **parked**. FFADO Feature Volume addresses respond to reads and accept verified writes/readback, but the tested controls did not audibly affect the active main-mixer paths, including an Analog 1/2 direct-monitor test. They must not be exposed as production faders until the enhanced-mixer/signal topology is understood. Pan/balance, mute/solo and AUX-send semantics remain future research as well.
 
-Detailed routing evidence: [`original-control-panel-mixer-model.md`](original-control-panel-mixer-model.md).
+Detailed routing evidence: [`original-control-panel-mixer-model.md`](original-control-panel-mixer-model.md). The parked strip-level investigation is documented separately on its research branch.
 
 ## 3. Inputs / Monitoring
 
@@ -108,34 +110,45 @@ The current Mixer routing already provides validated direct-monitor destination 
 
 Targets include:
 
-- input monitoring level;
+- input monitoring level, once its effective signal path is confirmed;
 - pan/balance where supported;
 - mute/solo semantics where confirmed;
 - clear indication that these controls do not change CoreAudio input channel assignment.
 
-## 4. Live meters
+Do not resume blind Feature Volume writes. When this work resumes, use the Linux driver and FFADO enhanced-mixer topology to establish semantics before GUI exposure.
 
-Add lightweight peak/RMS metering after the control mappings are stable.
+## 4. Live meters — input baseline complete
 
-Preferred architecture:
+The first live-meter implementation is complete and hardware-validated.
+
+Architecture:
 
 ```text
-already-decoded playback/capture PCM
-        -> transport-side peak/RMS accumulator
-        -> lightweight shared status / control IPC
-        -> GUI meters
+FW410 FireWire capture stream
+        -> existing AMDTP decode
+        -> transport-side peak/decay accumulator
+        -> /tmp/macfw-fw410-meter.sock
+        -> asynchronous GUI polling
+        -> AppKit meter display
 ```
 
-This avoids a second FireWire client and avoids polling hardware for information already present in the transport.
+Properties of the validated implementation:
 
-Initial useful meters:
+- no additional FireWire owner;
+- no AV/C/FCP meter commands;
+- no change to the existing capture shared-memory ABI;
+- four capture channels in the existing CoreAudio order: Analog Input 1, Analog Input 2, S/PDIF Input L, S/PDIF Input R;
+- transport-side peak accumulation with decay, so GUI polling does not need to catch individual FireWire packets;
+- diagnostic `METERS GET` values reported in dBFS with a `-120 dBFS` backend floor;
+- GUI polling runs asynchronously at 100 ms intervals and does not block normal controls;
+- GUI visual range is currently clamped to `-70..0 dBFS` while the numeric value retains the backend reading;
+- Analog Input 1 signal and decay were positively hardware-validated;
+- Analog Input 1/2 idle readings around the measured analog noise floor were observed;
+- S/PDIF fields were observed at the backend floor during the current tests, but an injected S/PDIF signal remains a useful explicit channel-mapping validation.
 
-- Analog In 1/2;
-- S/PDIF In L/R;
-- software playback/output pairs;
-- AUX where practical.
+The standalone **Meters** tab is intentionally retained as the current clean validation surface. A later UI pass should place meters contextually beside the corresponding input/volume controls rather than treating the standalone tab as the final layout.
 
-Metering must not compromise the transport scheduling margins that currently keep full-duplex audio stable.
+Future meter extensions may include software playback/output pairs and AUX where practical, provided transport scheduling remains unaffected.
 
 ## 5. Device tab
 
@@ -178,12 +191,12 @@ Continue applying the same behavior to later stereo controls where useful:
 
 ## 8. Presets / state
 
-Add named macfw mixer/control snapshots after the broader control model is complete.
+Persistent control state for the currently implemented controls is already working across reconnect/reboot. Named user presets remain a later enhancement after the broader control model is complete.
 
-Candidate saved state:
+Candidate named-preset state:
 
 - output routing/levels;
-- mixer routing/levels/pan/mutes;
+- mixer routing and any future validated strip controls;
 - input-monitoring state;
 - headphone source/mixer/level;
 - AUX state.
@@ -224,19 +237,21 @@ Targets:
 
 ```text
 1 Outputs                         COMPLETE BASELINE
-2 Mixer routing                  COMPLETE; strip controls next
-3 Inputs / Monitoring
-4 Meters
-5 Device
+2 Mixer routing                  COMPLETE; strip level PARKED
+3 Inputs / Monitoring            PARTLY BLOCKED by unresolved strip semantics
+4 Live input meters              COMPLETE BASELINE
+5 Device                         NEXT
 6 Buffer / latency investigation
 7 Stereo link behavior           BASE IMPLEMENTED
-8 Presets / state
+8 Persistent state               BASE IMPLEMENTED; named presets later
 9 Optional menu-bar status
 10 Info / diagnostics refinement
 ```
 
 ## Immediate next checkpoint
 
-Preserve the current known-good routing implementation and continue point 2 with the remaining original mixer-strip controls. Start from the Linux driver/original-panel definitions, implement software/protocol semantics before GUI exposure, and hardware-test each new write class while audio remains active.
+Preserve the validated mixer routing, responsive GUI control path and live input-meter implementation. Leave unresolved mixer strip-level controls out of the production GUI.
 
-A secondary cleanup target is to replace the GUI's current many-process mixer refresh with a single cached-matrix query once that optimization can be done without changing the proven control semantics.
+Proceed with point 5, **Device**, beginning with read-only state that can be obtained safely from the existing HAL/transport lifecycle: current native sample rate and connection/transport state. Investigate clock/source semantics from the Linux driver before adding any clock-source write control. Sample-rate changes must continue through the normal CoreAudio/HAL lifecycle rather than direct FireWire control writes.
+
+The standalone Meters tab is a temporary validation layout; reorganize meters beside their related controls during a later dedicated UI pass rather than mixing that layout work into protocol development.
