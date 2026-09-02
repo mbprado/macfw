@@ -1,8 +1,10 @@
 #import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
+#import <CoreAudio/CoreAudio.h>
 #import <objc/runtime.h>
 
 static NSString *const kMacfwDeviceStatusTool = @"/Library/Application Support/macfw/fw410/tools/transport/transportstatus/transportstatus";
+static CFStringRef const kMacfwDeviceUID = CFSTR("com.mbprado.macfw.fw410.device");
 
 @interface AppDelegate : NSObject
 - (void)applicationDidFinishLaunching:(NSNotification *)notification;
@@ -13,8 +15,10 @@ static const void *kMacfwDeviceStateKey = &kMacfwDeviceStateKey;
 static const void *kMacfwDeviceActiveRateKey = &kMacfwDeviceActiveRateKey;
 static const void *kMacfwDeviceRequestedRateKey = &kMacfwDeviceRequestedRateKey;
 static const void *kMacfwDevicePidKey = &kMacfwDevicePidKey;
-static const void *kMacfwDeviceTransitionsKey = &kMacfwDeviceTransitionsKey;
-static const void *kMacfwDeviceHeartbeatKey = &kMacfwDeviceHeartbeatKey;
+static const void *kMacfwDeviceBufferKey = &kMacfwDeviceBufferKey;
+static const void *kMacfwDeviceOutputLatencyKey = &kMacfwDeviceOutputLatencyKey;
+static const void *kMacfwDeviceInputLatencyKey = &kMacfwDeviceInputLatencyKey;
+static const void *kMacfwDeviceSafetyKey = &kMacfwDeviceSafetyKey;
 
 static NSString *MacfwDeviceRunStatus(int *statusOut) {
     if (![[NSFileManager defaultManager] isExecutableFileAtPath:kMacfwDeviceStatusTool]) {
@@ -51,14 +55,65 @@ static NSString *MacfwDeviceValue(NSString *prefix, NSString *text) {
 static NSTextField *MacfwDeviceValueLabel(NSView *view, NSString *title, CGFloat y) {
     NSTextField *name = [NSTextField labelWithString:title];
     name.textColor = NSColor.secondaryLabelColor;
-    name.frame = NSMakeRect(28, y, 150, 20);
+    name.frame = NSMakeRect(28, y, 160, 20);
     [view addSubview:name];
 
     NSTextField *value = [NSTextField labelWithString:@"—"];
     value.font = [NSFont monospacedDigitSystemFontOfSize:13 weight:NSFontWeightMedium];
-    value.frame = NSMakeRect(190, y, 360, 20);
+    value.frame = NSMakeRect(200, y, 355, 20);
     [view addSubview:value];
     return value;
+}
+
+static AudioObjectID MacfwFindCoreAudioDevice(void) {
+    AudioObjectPropertyAddress address{
+        kAudioHardwarePropertyDevices,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+    UInt32 size = 0;
+    if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &address, 0, nullptr, &size) != noErr ||
+        size < sizeof(AudioObjectID)) return kAudioObjectUnknown;
+
+    const UInt32 count = size / sizeof(AudioObjectID);
+    NSMutableData *storage = [NSMutableData dataWithLength:size];
+    auto *devices = static_cast<AudioObjectID *>(storage.mutableBytes);
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &address, 0, nullptr, &size, devices) != noErr)
+        return kAudioObjectUnknown;
+
+    AudioObjectPropertyAddress uidAddress{
+        kAudioDevicePropertyDeviceUID,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+    for (UInt32 i = 0; i < count; ++i) {
+        CFStringRef uid = nullptr;
+        UInt32 uidSize = sizeof(uid);
+        if (AudioObjectGetPropertyData(devices[i], &uidAddress, 0, nullptr, &uidSize, &uid) != noErr || !uid)
+            continue;
+        const bool match = CFEqual(uid, kMacfwDeviceUID);
+        CFRelease(uid);
+        if (match) return devices[i];
+    }
+    return kAudioObjectUnknown;
+}
+
+static BOOL MacfwReadUInt32(AudioObjectID device, AudioObjectPropertySelector selector,
+                            AudioObjectPropertyScope scope, UInt32 *valueOut) {
+    AudioObjectPropertyAddress address{selector, scope, kAudioObjectPropertyElementMain};
+    if (!AudioObjectHasProperty(device, &address)) return NO;
+    UInt32 value = 0;
+    UInt32 size = sizeof(value);
+    if (AudioObjectGetPropertyData(device, &address, 0, nullptr, &size, &value) != noErr || size != sizeof(value))
+        return NO;
+    if (valueOut) *valueOut = value;
+    return YES;
+}
+
+static NSString *MacfwFramesAndMs(UInt32 frames, double sampleRate) {
+    if (!(sampleRate > 0.0)) return [NSString stringWithFormat:@"%u frames", frames];
+    return [NSString stringWithFormat:@"%u frames (%.2f ms)", frames,
+            (1000.0 * static_cast<double>(frames)) / sampleRate];
 }
 
 @implementation AppDelegate (MacfwDevice)
@@ -110,67 +165,113 @@ static NSTextField *MacfwDeviceValueLabel(NSView *view, NSString *title, CGFloat
     }
     [tabs insertTabViewItem:item atIndex:infoIndex];
 
-    NSTextField *title = [NSTextField labelWithString:@"Transport / Device State"];
+    NSTextField *title = [NSTextField labelWithString:@"Transport / CoreAudio State"];
     title.font = [NSFont systemFontOfSize:15 weight:NSFontWeightSemibold];
-    title.frame = NSMakeRect(28, 386, 300, 22);
+    title.frame = NSMakeRect(28, 390, 300, 22);
     [view addSubview:title];
 
-    NSTextField *description = [NSTextField labelWithString:@"Read-only state from the active macfw transport. Sample-rate changes remain under CoreAudio control."];
+    NSTextField *description = [NSTextField labelWithString:@"Read-only transport and CoreAudio timing diagnostics. No latency/buffer writes are made here."];
     description.textColor = NSColor.secondaryLabelColor;
-    description.frame = NSMakeRect(28, 358, 540, 20);
+    description.frame = NSMakeRect(28, 364, 540, 20);
     [view addSubview:description];
 
-    NSTextField *state = MacfwDeviceValueLabel(view, @"Connection state", 306);
-    NSTextField *active = MacfwDeviceValueLabel(view, @"Active sample rate", 270);
-    NSTextField *requested = MacfwDeviceValueLabel(view, @"Requested rate", 234);
-    NSTextField *pid = MacfwDeviceValueLabel(view, @"Engine PID", 198);
-    NSTextField *transitions = MacfwDeviceValueLabel(view, @"State transitions", 162);
-    NSTextField *heartbeat = MacfwDeviceValueLabel(view, @"Heartbeat", 126);
+    NSTextField *state = MacfwDeviceValueLabel(view, @"Connection state", 326);
+    NSTextField *active = MacfwDeviceValueLabel(view, @"Active sample rate", 294);
+    NSTextField *requested = MacfwDeviceValueLabel(view, @"Requested rate", 262);
+    NSTextField *pid = MacfwDeviceValueLabel(view, @"Engine PID", 230);
+    NSTextField *buffer = MacfwDeviceValueLabel(view, @"CoreAudio buffer", 188);
+    NSTextField *outputLatency = MacfwDeviceValueLabel(view, @"Output latency", 156);
+    NSTextField *inputLatency = MacfwDeviceValueLabel(view, @"Input latency", 124);
+    NSTextField *safety = MacfwDeviceValueLabel(view, @"Safety offsets", 92);
 
     objc_setAssociatedObject(self, kMacfwDeviceStateKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self, kMacfwDeviceActiveRateKey, active, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self, kMacfwDeviceRequestedRateKey, requested, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self, kMacfwDevicePidKey, pid, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(self, kMacfwDeviceTransitionsKey, transitions, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(self, kMacfwDeviceHeartbeatKey, heartbeat, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kMacfwDeviceBufferKey, buffer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kMacfwDeviceOutputLatencyKey, outputLatency, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kMacfwDeviceInputLatencyKey, inputLatency, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kMacfwDeviceSafetyKey, safety, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-    NSTextField *note = [NSTextField wrappingLabelWithString:@"Clock-source selection is intentionally not exposed yet. Its FW410 semantics will be established from the Linux/FFADO references and hardware-tested before any write control is added."];
+    NSTextField *note = [NSTextField wrappingLabelWithString:@"If the buffer field says “Not exposed”, that confirms the current HAL does not yet publish the standard CoreAudio buffer-frame-size property. Reported latency values are diagnostics only; they are not yet calibrated end-to-end FW410 latency measurements."];
     note.textColor = NSColor.secondaryLabelColor;
-    note.frame = NSMakeRect(28, 55, 535, 48);
+    note.font = [NSFont systemFontOfSize:11];
+    note.frame = NSMakeRect(28, 28, 535, 48);
     [view addSubview:note];
 }
 
 - (void)macfwRefreshDevice {
-    NSArray<NSTextField *> *fields = @[
-        objc_getAssociatedObject(self, kMacfwDeviceStateKey) ?: [NSNull null],
-        objc_getAssociatedObject(self, kMacfwDeviceActiveRateKey) ?: [NSNull null],
-        objc_getAssociatedObject(self, kMacfwDeviceRequestedRateKey) ?: [NSNull null],
-        objc_getAssociatedObject(self, kMacfwDevicePidKey) ?: [NSNull null],
-        objc_getAssociatedObject(self, kMacfwDeviceTransitionsKey) ?: [NSNull null],
-        objc_getAssociatedObject(self, kMacfwDeviceHeartbeatKey) ?: [NSNull null]
-    ];
-    if ([fields[0] isKindOfClass:[NSNull class]]) return;
+    NSTextField *stateField = objc_getAssociatedObject(self, kMacfwDeviceStateKey);
+    NSTextField *activeField = objc_getAssociatedObject(self, kMacfwDeviceActiveRateKey);
+    NSTextField *requestedField = objc_getAssociatedObject(self, kMacfwDeviceRequestedRateKey);
+    NSTextField *pidField = objc_getAssociatedObject(self, kMacfwDevicePidKey);
+    NSTextField *bufferField = objc_getAssociatedObject(self, kMacfwDeviceBufferKey);
+    NSTextField *outputLatencyField = objc_getAssociatedObject(self, kMacfwDeviceOutputLatencyKey);
+    NSTextField *inputLatencyField = objc_getAssociatedObject(self, kMacfwDeviceInputLatencyKey);
+    NSTextField *safetyField = objc_getAssociatedObject(self, kMacfwDeviceSafetyKey);
+    if (!stateField || !activeField || !requestedField || !pidField || !bufferField ||
+        !outputLatencyField || !inputLatencyField || !safetyField) return;
 
     int status = 0;
     NSString *text = MacfwDeviceRunStatus(&status);
-    if (status != 0) {
-        for (id field in fields) if ([field isKindOfClass:[NSTextField class]]) ((NSTextField *)field).stringValue = @"Unavailable";
+    double sampleRate = 0.0;
+    if (status == 0) {
+        NSString *state = MacfwDeviceValue(@"transport state:", text);
+        NSString *active = MacfwDeviceValue(@"active rate:", text);
+        NSString *requested = MacfwDeviceValue(@"requested rate:", text);
+        NSString *pid = MacfwDeviceValue(@"engine pid:", text);
+
+        stateField.stringValue = state.length ? state : @"Unknown";
+        activeField.stringValue = active.length ? active : @"Unknown";
+        requestedField.stringValue = requested.length ? requested : @"Unknown";
+        pidField.stringValue = pid.length ? pid : @"Unknown";
+
+        NSScanner *scanner = [NSScanner scannerWithString:active ?: @""];
+        [scanner scanDouble:&sampleRate];
+    } else {
+        stateField.stringValue = @"Unavailable";
+        activeField.stringValue = @"Unavailable";
+        requestedField.stringValue = @"Unavailable";
+        pidField.stringValue = @"Unavailable";
+    }
+
+    AudioObjectID device = MacfwFindCoreAudioDevice();
+    if (device == kAudioObjectUnknown) {
+        bufferField.stringValue = @"CoreAudio device unavailable";
+        outputLatencyField.stringValue = @"—";
+        inputLatencyField.stringValue = @"—";
+        safetyField.stringValue = @"—";
         return;
     }
 
-    NSString *state = MacfwDeviceValue(@"transport state:", text);
-    NSString *active = MacfwDeviceValue(@"active rate:", text);
-    NSString *requested = MacfwDeviceValue(@"requested rate:", text);
-    NSString *pid = MacfwDeviceValue(@"engine pid:", text);
-    NSString *transitions = MacfwDeviceValue(@"transitions:", text);
-    NSString *heartbeat = MacfwDeviceValue(@"heartbeat:", text);
+    UInt32 frames = 0;
+    if (MacfwReadUInt32(device, kAudioDevicePropertyBufferFrameSize,
+                        kAudioObjectPropertyScopeGlobal, &frames)) {
+        bufferField.stringValue = MacfwFramesAndMs(frames, sampleRate);
+    } else {
+        bufferField.stringValue = @"Not exposed by current HAL";
+    }
 
-    ((NSTextField *)fields[0]).stringValue = state.length ? state : @"Unknown";
-    ((NSTextField *)fields[1]).stringValue = active.length ? active : @"Unknown";
-    ((NSTextField *)fields[2]).stringValue = requested.length ? requested : @"Unknown";
-    ((NSTextField *)fields[3]).stringValue = pid.length ? pid : @"Unknown";
-    ((NSTextField *)fields[4]).stringValue = transitions.length ? transitions : @"Unknown";
-    ((NSTextField *)fields[5]).stringValue = heartbeat.length ? heartbeat : @"Unknown";
+    UInt32 outputLatency = 0;
+    UInt32 inputLatency = 0;
+    UInt32 outputSafety = 0;
+    UInt32 inputSafety = 0;
+    const BOOL hasOutputLatency = MacfwReadUInt32(device, kAudioDevicePropertyLatency,
+                                                  kAudioObjectPropertyScopeOutput, &outputLatency);
+    const BOOL hasInputLatency = MacfwReadUInt32(device, kAudioDevicePropertyLatency,
+                                                 kAudioObjectPropertyScopeInput, &inputLatency);
+    const BOOL hasOutputSafety = MacfwReadUInt32(device, kAudioDevicePropertySafetyOffset,
+                                                 kAudioObjectPropertyScopeOutput, &outputSafety);
+    const BOOL hasInputSafety = MacfwReadUInt32(device, kAudioDevicePropertySafetyOffset,
+                                                kAudioObjectPropertyScopeInput, &inputSafety);
+
+    outputLatencyField.stringValue = hasOutputLatency ? MacfwFramesAndMs(outputLatency, sampleRate) : @"Not exposed";
+    inputLatencyField.stringValue = hasInputLatency ? MacfwFramesAndMs(inputLatency, sampleRate) : @"Not exposed";
+    safetyField.stringValue = (hasOutputSafety || hasInputSafety)
+        ? [NSString stringWithFormat:@"out %u / in %u frames",
+           hasOutputSafety ? outputSafety : 0,
+           hasInputSafety ? inputSafety : 0]
+        : @"Not exposed";
 }
 
 @end
