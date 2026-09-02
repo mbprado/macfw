@@ -38,7 +38,7 @@ $(BINARY): $(SOURCES) Sources/stereo_link.h Sources/slider_commit.h Info.plist $
 	/usr/libexec/PlistBuddy -c "Delete :MacFWGitCommit" "$(CONTENTS)/Info.plist" >/dev/null 2>&1 || true
 	/usr/libexec/PlistBuddy -c "Add :MacFWGitCommit string $(GIT_SHA)" "$(CONTENTS)/Info.plist"
 	$(CXX) $(CPPFLAGS) -std=c++17 -Wall -Wextra -Wpedantic -fobjc-arc \
-		-framework AppKit -framework Foundation \
+		-framework AppKit -framework Foundation -framework CoreAudio \
 		-o "$(BINARY)" $(SOURCES)
 
 run: all
