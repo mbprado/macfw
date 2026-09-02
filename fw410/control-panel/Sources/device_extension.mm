@@ -16,6 +16,7 @@ static const void *kMacfwDeviceActiveRateKey = &kMacfwDeviceActiveRateKey;
 static const void *kMacfwDeviceRequestedRateKey = &kMacfwDeviceRequestedRateKey;
 static const void *kMacfwDevicePidKey = &kMacfwDevicePidKey;
 static const void *kMacfwDeviceBufferKey = &kMacfwDeviceBufferKey;
+static const void *kMacfwDeviceBufferControlKey = &kMacfwDeviceBufferControlKey;
 static const void *kMacfwDeviceOutputLatencyKey = &kMacfwDeviceOutputLatencyKey;
 static const void *kMacfwDeviceInputLatencyKey = &kMacfwDeviceInputLatencyKey;
 static const void *kMacfwDeviceSafetyKey = &kMacfwDeviceSafetyKey;
@@ -110,6 +111,31 @@ static BOOL MacfwReadUInt32(AudioObjectID device, AudioObjectPropertySelector se
     return YES;
 }
 
+static BOOL MacfwReadBufferRange(AudioObjectID device, AudioValueRange *rangeOut) {
+    AudioObjectPropertyAddress address{
+        kAudioDevicePropertyBufferFrameSizeRange,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+    if (!AudioObjectHasProperty(device, &address)) return NO;
+    AudioValueRange range{};
+    UInt32 size = sizeof(range);
+    if (AudioObjectGetPropertyData(device, &address, 0, nullptr, &size, &range) != noErr || size != sizeof(range))
+        return NO;
+    if (rangeOut) *rangeOut = range;
+    return YES;
+}
+
+static BOOL MacfwPropertySettable(AudioObjectID device, AudioObjectPropertySelector selector,
+                                  AudioObjectPropertyScope scope, BOOL *settableOut) {
+    AudioObjectPropertyAddress address{selector, scope, kAudioObjectPropertyElementMain};
+    if (!AudioObjectHasProperty(device, &address)) return NO;
+    Boolean settable = false;
+    if (AudioObjectIsPropertySettable(device, &address, &settable) != noErr) return NO;
+    if (settableOut) *settableOut = settable ? YES : NO;
+    return YES;
+}
+
 static NSString *MacfwFramesAndMs(UInt32 frames, double sampleRate) {
     if (!(sampleRate > 0.0)) return [NSString stringWithFormat:@"%u frames", frames];
     return [NSString stringWithFormat:@"%u frames (%.2f ms)", frames,
@@ -176,27 +202,29 @@ static NSString *MacfwFramesAndMs(UInt32 frames, double sampleRate) {
     [view addSubview:description];
 
     NSTextField *state = MacfwDeviceValueLabel(view, @"Connection state", 326);
-    NSTextField *active = MacfwDeviceValueLabel(view, @"Active sample rate", 294);
-    NSTextField *requested = MacfwDeviceValueLabel(view, @"Requested rate", 262);
-    NSTextField *pid = MacfwDeviceValueLabel(view, @"Engine PID", 230);
-    NSTextField *buffer = MacfwDeviceValueLabel(view, @"CoreAudio buffer", 188);
-    NSTextField *outputLatency = MacfwDeviceValueLabel(view, @"Output latency", 156);
-    NSTextField *inputLatency = MacfwDeviceValueLabel(view, @"Input latency", 124);
-    NSTextField *safety = MacfwDeviceValueLabel(view, @"Safety offsets", 92);
+    NSTextField *active = MacfwDeviceValueLabel(view, @"Active sample rate", 296);
+    NSTextField *requested = MacfwDeviceValueLabel(view, @"Requested rate", 266);
+    NSTextField *pid = MacfwDeviceValueLabel(view, @"Engine PID", 236);
+    NSTextField *buffer = MacfwDeviceValueLabel(view, @"CoreAudio buffer", 194);
+    NSTextField *bufferControl = MacfwDeviceValueLabel(view, @"Buffer capability", 164);
+    NSTextField *outputLatency = MacfwDeviceValueLabel(view, @"Output latency", 128);
+    NSTextField *inputLatency = MacfwDeviceValueLabel(view, @"Input latency", 98);
+    NSTextField *safety = MacfwDeviceValueLabel(view, @"Safety offsets", 68);
 
     objc_setAssociatedObject(self, kMacfwDeviceStateKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self, kMacfwDeviceActiveRateKey, active, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self, kMacfwDeviceRequestedRateKey, requested, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self, kMacfwDevicePidKey, pid, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self, kMacfwDeviceBufferKey, buffer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kMacfwDeviceBufferControlKey, bufferControl, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self, kMacfwDeviceOutputLatencyKey, outputLatency, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self, kMacfwDeviceInputLatencyKey, inputLatency, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self, kMacfwDeviceSafetyKey, safety, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-    NSTextField *note = [NSTextField wrappingLabelWithString:@"If the buffer field says “Not exposed”, that confirms the current HAL does not yet publish the standard CoreAudio buffer-frame-size property. Reported latency values are diagnostics only; they are not yet calibrated end-to-end FW410 latency measurements."];
-    note.textColor = NSColor.secondaryLabelColor;
-    note.font = [NSFont systemFontOfSize:11];
-    note.frame = NSMakeRect(28, 28, 535, 48);
+    NSTextField *note = [NSTextField labelWithString:@"Latency values are currently HAL-reported diagnostics, not calibrated end-to-end measurements."];
+    note.textColor = NSColor.tertiaryLabelColor;
+    note.font = [NSFont systemFontOfSize:10];
+    note.frame = NSMakeRect(28, 30, 535, 18);
     [view addSubview:note];
 }
 
@@ -206,11 +234,12 @@ static NSString *MacfwFramesAndMs(UInt32 frames, double sampleRate) {
     NSTextField *requestedField = objc_getAssociatedObject(self, kMacfwDeviceRequestedRateKey);
     NSTextField *pidField = objc_getAssociatedObject(self, kMacfwDevicePidKey);
     NSTextField *bufferField = objc_getAssociatedObject(self, kMacfwDeviceBufferKey);
+    NSTextField *bufferControlField = objc_getAssociatedObject(self, kMacfwDeviceBufferControlKey);
     NSTextField *outputLatencyField = objc_getAssociatedObject(self, kMacfwDeviceOutputLatencyKey);
     NSTextField *inputLatencyField = objc_getAssociatedObject(self, kMacfwDeviceInputLatencyKey);
     NSTextField *safetyField = objc_getAssociatedObject(self, kMacfwDeviceSafetyKey);
     if (!stateField || !activeField || !requestedField || !pidField || !bufferField ||
-        !outputLatencyField || !inputLatencyField || !safetyField) return;
+        !bufferControlField || !outputLatencyField || !inputLatencyField || !safetyField) return;
 
     int status = 0;
     NSString *text = MacfwDeviceRunStatus(&status);
@@ -238,6 +267,7 @@ static NSString *MacfwFramesAndMs(UInt32 frames, double sampleRate) {
     AudioObjectID device = MacfwFindCoreAudioDevice();
     if (device == kAudioObjectUnknown) {
         bufferField.stringValue = @"CoreAudio device unavailable";
+        bufferControlField.stringValue = @"—";
         outputLatencyField.stringValue = @"—";
         inputLatencyField.stringValue = @"—";
         safetyField.stringValue = @"—";
@@ -245,11 +275,21 @@ static NSString *MacfwFramesAndMs(UInt32 frames, double sampleRate) {
     }
 
     UInt32 frames = 0;
-    if (MacfwReadUInt32(device, kAudioDevicePropertyBufferFrameSize,
-                        kAudioObjectPropertyScopeGlobal, &frames)) {
-        bufferField.stringValue = MacfwFramesAndMs(frames, sampleRate);
+    const BOOL hasBuffer = MacfwReadUInt32(device, kAudioDevicePropertyBufferFrameSize,
+                                           kAudioObjectPropertyScopeGlobal, &frames);
+    bufferField.stringValue = hasBuffer ? MacfwFramesAndMs(frames, sampleRate) : @"Not exposed";
+
+    BOOL settable = NO;
+    const BOOL hasSettableInfo = MacfwPropertySettable(device, kAudioDevicePropertyBufferFrameSize,
+                                                       kAudioObjectPropertyScopeGlobal, &settable);
+    AudioValueRange range{};
+    const BOOL hasRange = MacfwReadBufferRange(device, &range);
+    NSString *mode = hasSettableInfo ? (settable ? @"settable" : @"read-only") : @"settable unknown";
+    if (hasRange) {
+        bufferControlField.stringValue = [NSString stringWithFormat:@"%@ • %.0f–%.0f frames",
+                                          mode, range.mMinimum, range.mMaximum];
     } else {
-        bufferField.stringValue = @"Not exposed by current HAL";
+        bufferControlField.stringValue = [NSString stringWithFormat:@"%@ • range not exposed", mode];
     }
 
     UInt32 outputLatency = 0;
