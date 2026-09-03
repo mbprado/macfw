@@ -17,7 +17,7 @@ namespace macfw::transport::duplex {
 
 constexpr std::size_t kPcmChannels = 10;
 constexpr std::size_t kPcmCapacityFrames = 16384;
-constexpr std::size_t kCapturePrefillFrames = 2048;
+constexpr std::size_t kCapturePrefillFrames = 1024;
 constexpr std::size_t kPlaybackSlots = 640;
 constexpr std::size_t kHalfPackets = 320;
 constexpr std::size_t kCaptureSlots = 256;
