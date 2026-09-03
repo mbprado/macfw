@@ -59,12 +59,12 @@ AmdtpReceiveRing AmdtpReceiveRing::create(FireWireDevice& device, std::size_t pa
         CFUUIDGetUUIDBytes(kIOFireWireNuDCLPoolInterfaceID));
     if (!ring.pool_) { ring.reset(); return ring; }
 
-    // Publish receive metadata in 16-cycle groups. Each group's terminal receive
+    // Publish receive metadata in 32-cycle groups. Each group's terminal receive
     // DCL publishes the whole group's metadata update after that group completes.
     // Userspace can therefore use the terminal slot's changing signature as a
     // receive-only completion token for that exact group; no mixed send/receive
     // DCL program is needed.
-    constexpr std::size_t kUpdateChunkSlots = 16;
+    constexpr std::size_t kUpdateChunkSlots = 32;
 
     NuDCLRef first = nullptr, last = nullptr;
     CFMutableSetRef updateSet = nullptr;
