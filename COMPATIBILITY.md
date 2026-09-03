@@ -6,12 +6,12 @@ Only configurations that have actually been tested on real hardware are marked v
 
 ## M-Audio FireWire 410
 
-| macOS version | Intel Mac | Installer | Playback | Capture | 44.1/48 kHz switching | Disconnect/reconnect | Sleep/wake | Status |
-|---|---|---|---|---|---|---|---|---|
-| Monterey 12.7.6 | validated | validated | validated | validated | validated | validated | not separately recorded | **Validated** |
-| Ventura 13.7.8 | validated | validated | validated | validated | validated | validated | validated | **Validated** |
-| Sonoma 14.8.9 | validated | validated | validated | validated | validated | validated | validated | **Validated** |
-| Sequoia 15.x | validated | validated | validated | validated | validated | validated | not separately recorded | **Validated** |
+| macOS version | Intel Mac | Installer | Playback | Capture | 44.1/48 kHz switching | Disconnect/reconnect | Sleep/wake | Status | UEFI
+|---|---|---|---|---|---|---|---|---|---|
+| Monterey 12.7.6 | validated | validated | validated | validated | validated | validated | not separately recorded | **Validated** | Stock |
+| Ventura 13.7.8 | validated | validated | validated | validated | validated | validated | validated | **Validated** | Stock/OpenCore LP |
+| Sonoma 14.8.9 | validated | validated | validated | validated | validated | validated | validated | **Validated** | OpenCore LP | 
+| Sequoia 15.x | validated | validated | validated | validated | validated | validated | validated | **Validated** | OpenCore LP |
 
 The native control panel and current transport/control architecture have also been exercised on the validated development systems. The key control-path rule is common across releases: the GUI/CLI use the active transport's Unix-socket IPC rather than opening FireWire independently.
 
