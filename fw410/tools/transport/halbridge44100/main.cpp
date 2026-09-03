@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <pthread.h>
 
 namespace {
 using namespace macfw::transport::duplex;
@@ -27,6 +28,14 @@ constexpr UInt32 kCycleLead = 2048;
 
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
+
+void requestInteractiveQos() {
+    const int rc = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+    if (rc == 0)
+        std::cout << "transport thread QoS: user-interactive\n";
+    else
+        std::cout << "transport thread QoS: request failed (" << rc << ")\n";
+}
 
 bool run() {
     FullDuplexEngineSetup setup;
@@ -59,6 +68,8 @@ bool run() {
     if (!meterServer.start(capturePump))
         std::cerr << "warning: FW410 meter socket unavailable; audio will continue\n";
     if (!lifecycle.startIsoch()) goto cleanup;
+
+    requestInteractiveQos();
 
     {
         UInt32 nowCt = 0;
