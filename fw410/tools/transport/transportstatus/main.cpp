@@ -38,6 +38,9 @@ struct CaptureSnapshot {
     std::uint64_t halRequestedFrames = 0;
     std::uint64_t halFramesFromRing = 0;
     std::uint64_t halZeroFilledFrames = 0;
+    std::uint64_t halMinQueuedFrames = macfw::hal::capture::kQueueMinUnset;
+    std::uint64_t halMaxQueuedFrames = 0;
+    std::uint64_t halUnderrunEvents = 0;
 };
 
 struct CaptureBaseline {
@@ -46,6 +49,7 @@ struct CaptureBaseline {
     std::uint64_t halRequestedFrames = 0;
     std::uint64_t halFramesFromRing = 0;
     std::uint64_t halZeroFilledFrames = 0;
+    std::uint64_t halUnderrunEvents = 0;
 };
 
 Snapshot snapshot(const SharedStatus& s) {
@@ -74,6 +78,9 @@ CaptureSnapshot captureSnapshot(const SharedCaptureRing* ring) {
     out.halRequestedFrames = ring->halRequestedFrames.load(std::memory_order_acquire);
     out.halFramesFromRing = ring->halFramesFromRing.load(std::memory_order_acquire);
     out.halZeroFilledFrames = ring->halZeroFilledFrames.load(std::memory_order_acquire);
+    out.halMinQueuedFrames = ring->halMinQueuedFrames.load(std::memory_order_acquire);
+    out.halMaxQueuedFrames = ring->halMaxQueuedFrames.load(std::memory_order_acquire);
+    out.halUnderrunEvents = ring->halUnderrunEvents.load(std::memory_order_acquire);
     return out;
 }
 
@@ -84,6 +91,7 @@ CaptureBaseline baselineFrom(const CaptureSnapshot& s) {
     out.halRequestedFrames = s.halRequestedFrames;
     out.halFramesFromRing = s.halFramesFromRing;
     out.halZeroFilledFrames = s.halZeroFilledFrames;
+    out.halUnderrunEvents = s.halUnderrunEvents;
     return out;
 }
 
@@ -113,6 +121,17 @@ void printCapture(const CaptureSnapshot& s, const CaptureBaseline* baseline = nu
     std::printf("    capture rate:   %u Hz\n", s.sampleRate);
     std::printf("    queued frames:  %llu (%.2f ms)\n",
                 static_cast<unsigned long long>(s.queuedFrames), queueMs);
+    if (s.halMinQueuedFrames == macfw::hal::capture::kQueueMinUnset) {
+        std::printf("    queue min/max:  n/a\n");
+    } else {
+        const double minMs = s.sampleRate != 0
+            ? 1000.0 * static_cast<double>(s.halMinQueuedFrames) / s.sampleRate : 0.0;
+        const double maxMs = s.sampleRate != 0
+            ? 1000.0 * static_cast<double>(s.halMaxQueuedFrames) / s.sampleRate : 0.0;
+        std::printf("    queue min/max:  %llu / %llu (%.2f / %.2f ms)\n",
+                    static_cast<unsigned long long>(s.halMinQueuedFrames),
+                    static_cast<unsigned long long>(s.halMaxQueuedFrames), minMs, maxMs);
+    }
     std::printf("    write frame:    %llu\n", static_cast<unsigned long long>(s.writeFrame));
     std::printf("    read frame:     %llu\n", static_cast<unsigned long long>(s.readFrame));
     if (baseline) {
@@ -131,12 +150,16 @@ void printCapture(const CaptureSnapshot& s, const CaptureBaseline* baseline = nu
         std::printf("    hal zero fill:  %llu (+%llu)\n",
                     static_cast<unsigned long long>(s.halZeroFilledFrames),
                     static_cast<unsigned long long>(delta(s.halZeroFilledFrames, baseline->halZeroFilledFrames)));
+        std::printf("    underrun events:%llu (+%llu)\n",
+                    static_cast<unsigned long long>(s.halUnderrunEvents),
+                    static_cast<unsigned long long>(delta(s.halUnderrunEvents, baseline->halUnderrunEvents)));
     } else {
         std::printf("    dropped frames: %llu\n", static_cast<unsigned long long>(s.droppedFrames));
         std::printf("    hal read calls: %llu\n", static_cast<unsigned long long>(s.halReadCalls));
         std::printf("    hal requested:  %llu\n", static_cast<unsigned long long>(s.halRequestedFrames));
         std::printf("    hal from ring:  %llu\n", static_cast<unsigned long long>(s.halFramesFromRing));
         std::printf("    hal zero fill:  %llu\n", static_cast<unsigned long long>(s.halZeroFilledFrames));
+        std::printf("    underrun events:%llu\n", static_cast<unsigned long long>(s.halUnderrunEvents));
     }
 }
 
@@ -165,6 +188,9 @@ void clearCaptureCounters(SharedCaptureRing& ring) {
     ring.halRequestedFrames.store(0, std::memory_order_release);
     ring.halFramesFromRing.store(0, std::memory_order_release);
     ring.halZeroFilledFrames.store(0, std::memory_order_release);
+    ring.halMinQueuedFrames.store(macfw::hal::capture::kQueueMinUnset, std::memory_order_release);
+    ring.halMaxQueuedFrames.store(0, std::memory_order_release);
+    ring.halUnderrunEvents.store(0, std::memory_order_release);
 }
 
 void usage(const char* argv0) {
@@ -172,7 +198,7 @@ void usage(const char* argv0) {
         "usage: %s [--watch] [--baseline] [--clear-counters]\n"
         "  --watch           print status every 500 ms\n"
         "  --baseline        show capture counter deltas from command start\n"
-        "  --clear-counters  zero capture diagnostic counters only\n",
+        "  --clear-counters  zero capture diagnostic counters and queue extrema\n",
         argv0);
 }
 
