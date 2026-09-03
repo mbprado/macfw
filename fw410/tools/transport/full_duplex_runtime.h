@@ -57,7 +57,7 @@ bool runFullDuplexServiceLoop(
               << "CoreAudio inputs: Analog In 1-2, S/PDIF In L/R (4 channels)\n"
               << "capture prefill: " << kCapturePrefillFrames << " frames (~"
               << config.prefillMilliseconds << " ms)\n"
-              << "capture receive: terminal-slot completed 32-cycle chunks\n"
+              << "capture receive: terminal-slot completed 16-cycle chunks\n"
               << "HAL bridge active: full-duplex " << config.rateLabel
               << " kHz playback + capture; Ctrl-C to stop\n";
 

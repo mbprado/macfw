@@ -124,7 +124,7 @@ public:
 
     std::size_t service(const macfw::AmdtpReceiveRing& rx,
                         macfw::hal::capture::SharedCaptureRing& out) {
-        constexpr std::size_t kChunkSlots = 32;
+        constexpr std::size_t kChunkSlots = 16;
         if (rx.packetCount() == 0 || rx.packetCount() > 256) return 0;
 
         std::size_t totalFrames = 0;
@@ -331,7 +331,7 @@ private:
 
     std::uint8_t expectedFdf_ = 0;
     bool timestampOnlyChunkToken_ = false;
-    std::array<std::uint64_t, 8> lastChunkSignature_{};
+    std::array<std::uint64_t, 16> lastChunkSignature_{};
     Stats stats_{};
     std::array<float, macfw::hal::capture::kChannels> meterPeaks_{};
     bool haveExpectedDbc_ = false;
