@@ -42,10 +42,10 @@ struct SharedCaptureRing {
     std::atomic<std::uint64_t> halFramesFromRing;
     std::atomic<std::uint64_t> halZeroFilledFrames;
 
-    // Queue depth immediately before each active HAL ReadInput. Min/max expose
-    // short scheduling excursions that transportstatus's 500 ms snapshots can
-    // miss. halUnderrunEvents counts ReadInput calls that could not be fully
-    // satisfied from the capture ring.
+    // Queue depth immediately before each active capture-ring read. Min/max
+    // expose short scheduling excursions that transportstatus's 500 ms
+    // snapshots can miss. halUnderrunEvents counts reads that could not be
+    // fully satisfied from the ring.
     std::atomic<std::uint64_t> halMinQueuedFrames;
     std::atomic<std::uint64_t> halMaxQueuedFrames;
     std::atomic<std::uint64_t> halUnderrunEvents;
@@ -87,6 +87,18 @@ inline std::size_t availableFrames(const SharedCaptureRing& ring) {
     return static_cast<std::size_t>(w - r);
 }
 
+inline void observeQueueDepth(SharedCaptureRing& ring, std::uint64_t queued) {
+    auto minQueued = ring.halMinQueuedFrames.load(std::memory_order_relaxed);
+    while (queued < minQueued &&
+           !ring.halMinQueuedFrames.compare_exchange_weak(
+               minQueued, queued, std::memory_order_relaxed, std::memory_order_relaxed)) {}
+
+    auto maxQueued = ring.halMaxQueuedFrames.load(std::memory_order_relaxed);
+    while (queued > maxQueued &&
+           !ring.halMaxQueuedFrames.compare_exchange_weak(
+               maxQueued, queued, std::memory_order_relaxed, std::memory_order_relaxed)) {}
+}
+
 inline std::size_t write(SharedCaptureRing& ring, const float* interleaved, std::size_t frames) {
     if (!interleaved || !frames) return 0;
     const auto w = ring.writeFrame.load(std::memory_order_relaxed);
@@ -110,7 +122,9 @@ inline std::size_t read(SharedCaptureRing& ring, float* interleaved, std::size_t
     const auto r = ring.readFrame.load(std::memory_order_relaxed);
     const auto w = ring.writeFrame.load(std::memory_order_acquire);
     const std::size_t available = static_cast<std::size_t>(w - r);
+    observeQueueDepth(ring, available);
     const std::size_t n = frames < available ? frames : available;
+    if (n < frames) ring.halUnderrunEvents.fetch_add(1, std::memory_order_relaxed);
     for (std::size_t i = 0; i < n; ++i) {
         const std::size_t src = static_cast<std::size_t>((r + i) % kCapacityFrames) * kChannels;
         const std::size_t dst = i * kChannels;
