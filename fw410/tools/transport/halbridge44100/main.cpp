@@ -90,7 +90,7 @@ bool run() {
         FullDuplexRuntimeConfig runtimeConfig;
         runtimeConfig.rateLabel = "44.1";
         runtimeConfig.prefillMilliseconds = 93;
-        runtimeConfig.runLoopSliceSeconds = 0.001;
+        runtimeConfig.runLoopSliceSeconds = 0.00025;
         runtimeConfig.expectedGeneration = setup.device.generation();
 
         ok = runFullDuplexServiceLoop(
