@@ -40,6 +40,14 @@ struct CaptureSnapshot {
     std::uint64_t halZeroFilledFrames = 0;
 };
 
+struct CaptureBaseline {
+    std::uint64_t droppedFrames = 0;
+    std::uint64_t halReadCalls = 0;
+    std::uint64_t halRequestedFrames = 0;
+    std::uint64_t halFramesFromRing = 0;
+    std::uint64_t halZeroFilledFrames = 0;
+};
+
 Snapshot snapshot(const SharedStatus& s) {
     Snapshot out;
     out.state = static_cast<State>(s.state.load(std::memory_order_acquire));
@@ -69,6 +77,20 @@ CaptureSnapshot captureSnapshot(const SharedCaptureRing* ring) {
     return out;
 }
 
+CaptureBaseline baselineFrom(const CaptureSnapshot& s) {
+    CaptureBaseline out;
+    out.droppedFrames = s.droppedFrames;
+    out.halReadCalls = s.halReadCalls;
+    out.halRequestedFrames = s.halRequestedFrames;
+    out.halFramesFromRing = s.halFramesFromRing;
+    out.halZeroFilledFrames = s.halZeroFilledFrames;
+    return out;
+}
+
+std::uint64_t delta(std::uint64_t value, std::uint64_t base) {
+    return value >= base ? value - base : value;
+}
+
 void print(const Snapshot& s) {
     std::printf("transport state: %s\n", macfw::hal::transport::stateName(s.state));
     std::printf("    requested rate: %u Hz\n", s.requestedRate);
@@ -78,7 +100,7 @@ void print(const Snapshot& s) {
     std::printf("    heartbeat:      %llu\n", static_cast<unsigned long long>(s.heartbeat));
 }
 
-void printCapture(const CaptureSnapshot& s) {
+void printCapture(const CaptureSnapshot& s, const CaptureBaseline* baseline = nullptr) {
     if (!s.available) {
         std::printf("capture state: unavailable\n");
         return;
@@ -93,35 +115,82 @@ void printCapture(const CaptureSnapshot& s) {
                 static_cast<unsigned long long>(s.queuedFrames), queueMs);
     std::printf("    write frame:    %llu\n", static_cast<unsigned long long>(s.writeFrame));
     std::printf("    read frame:     %llu\n", static_cast<unsigned long long>(s.readFrame));
-    std::printf("    dropped frames: %llu\n", static_cast<unsigned long long>(s.droppedFrames));
-    std::printf("    hal read calls: %llu\n", static_cast<unsigned long long>(s.halReadCalls));
-    std::printf("    hal requested:  %llu\n", static_cast<unsigned long long>(s.halRequestedFrames));
-    std::printf("    hal from ring:  %llu\n", static_cast<unsigned long long>(s.halFramesFromRing));
-    std::printf("    hal zero fill:  %llu\n", static_cast<unsigned long long>(s.halZeroFilledFrames));
+    if (baseline) {
+        std::printf("    dropped frames: %llu (+%llu)\n",
+                    static_cast<unsigned long long>(s.droppedFrames),
+                    static_cast<unsigned long long>(delta(s.droppedFrames, baseline->droppedFrames)));
+        std::printf("    hal read calls: %llu (+%llu)\n",
+                    static_cast<unsigned long long>(s.halReadCalls),
+                    static_cast<unsigned long long>(delta(s.halReadCalls, baseline->halReadCalls)));
+        std::printf("    hal requested:  %llu (+%llu)\n",
+                    static_cast<unsigned long long>(s.halRequestedFrames),
+                    static_cast<unsigned long long>(delta(s.halRequestedFrames, baseline->halRequestedFrames)));
+        std::printf("    hal from ring:  %llu (+%llu)\n",
+                    static_cast<unsigned long long>(s.halFramesFromRing),
+                    static_cast<unsigned long long>(delta(s.halFramesFromRing, baseline->halFramesFromRing)));
+        std::printf("    hal zero fill:  %llu (+%llu)\n",
+                    static_cast<unsigned long long>(s.halZeroFilledFrames),
+                    static_cast<unsigned long long>(delta(s.halZeroFilledFrames, baseline->halZeroFilledFrames)));
+    } else {
+        std::printf("    dropped frames: %llu\n", static_cast<unsigned long long>(s.droppedFrames));
+        std::printf("    hal read calls: %llu\n", static_cast<unsigned long long>(s.halReadCalls));
+        std::printf("    hal requested:  %llu\n", static_cast<unsigned long long>(s.halRequestedFrames));
+        std::printf("    hal from ring:  %llu\n", static_cast<unsigned long long>(s.halFramesFromRing));
+        std::printf("    hal zero fill:  %llu\n", static_cast<unsigned long long>(s.halZeroFilledFrames));
+    }
 }
 
-const SharedCaptureRing* mapCapture(int& fdOut) {
-    fdOut = shm_open(macfw::hal::capture::kShmName, O_RDONLY, 0);
-    if (fdOut < 0) return nullptr;
+SharedCaptureRing* mapCapture(int prot) {
+    const int flags = prot & PROT_WRITE ? O_RDWR : O_RDONLY;
+    const int fd = shm_open(macfw::hal::capture::kShmName, flags, 0);
+    if (fd < 0) return nullptr;
 
     struct stat st = {};
-    if (fstat(fdOut, &st) != 0 || st.st_size < static_cast<off_t>(sizeof(SharedCaptureRing))) {
-        close(fdOut);
-        fdOut = -1;
+    if (fstat(fd, &st) != 0 || st.st_size < static_cast<off_t>(sizeof(SharedCaptureRing))) {
+        close(fd);
         return nullptr;
     }
 
-    void* p = mmap(nullptr, sizeof(SharedCaptureRing), PROT_READ, MAP_SHARED, fdOut, 0);
-    close(fdOut);
-    fdOut = -1;
+    void* p = mmap(nullptr, sizeof(SharedCaptureRing), prot, MAP_SHARED, fd, 0);
+    close(fd);
     if (p == MAP_FAILED) return nullptr;
-    return static_cast<const SharedCaptureRing*>(p);
+    return static_cast<SharedCaptureRing*>(p);
+}
+
+void clearCaptureCounters(SharedCaptureRing& ring) {
+    // Diagnostic counters only. Do not touch producer/consumer cursors, sample
+    // rate, active state, decoded packet counters, or audio samples.
+    ring.droppedFrames.store(0, std::memory_order_release);
+    ring.halReadCalls.store(0, std::memory_order_release);
+    ring.halRequestedFrames.store(0, std::memory_order_release);
+    ring.halFramesFromRing.store(0, std::memory_order_release);
+    ring.halZeroFilledFrames.store(0, std::memory_order_release);
+}
+
+void usage(const char* argv0) {
+    std::fprintf(stderr,
+        "usage: %s [--watch] [--baseline] [--clear-counters]\n"
+        "  --watch           print status every 500 ms\n"
+        "  --baseline        show capture counter deltas from command start\n"
+        "  --clear-counters  zero capture diagnostic counters only\n",
+        argv0);
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
-    const bool watch = argc > 1 && std::strcmp(argv[1], "--watch") == 0;
+    bool watch = false;
+    bool baseline = false;
+    bool clearCounters = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--watch") == 0) watch = true;
+        else if (std::strcmp(argv[i], "--baseline") == 0) baseline = true;
+        else if (std::strcmp(argv[i], "--clear-counters") == 0) clearCounters = true;
+        else {
+            usage(argv[0]);
+            return 2;
+        }
+    }
 
     const int fd = shm_open(macfw::hal::transport::kShmName, O_RDONLY, 0);
     if (fd < 0) {
@@ -151,20 +220,33 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    int captureFd = -1;
-    const SharedCaptureRing* capture = mapCapture(captureFd);
+    SharedCaptureRing* capture = mapCapture(clearCounters ? (PROT_READ | PROT_WRITE) : PROT_READ);
+    if (clearCounters) {
+        if (!capture || !macfw::hal::capture::valid(*capture)) {
+            std::fprintf(stderr, "capture shared memory unavailable or ABI mismatch\n");
+            if (capture) munmap(capture, sizeof(SharedCaptureRing));
+            munmap(p, sizeof(SharedStatus));
+            return 1;
+        }
+        clearCaptureCounters(*capture);
+        std::printf("capture diagnostic counters cleared\n");
+        std::fflush(stdout);
+    }
+
+    CaptureBaseline captureBaseline{};
+    if (baseline && capture) captureBaseline = baselineFrom(captureSnapshot(capture));
 
     if (!watch) {
         print(snapshot(*status));
-        printCapture(captureSnapshot(capture));
-        if (capture) munmap(const_cast<SharedCaptureRing*>(capture), sizeof(SharedCaptureRing));
+        printCapture(captureSnapshot(capture), baseline ? &captureBaseline : nullptr);
+        if (capture) munmap(capture, sizeof(SharedCaptureRing));
         munmap(p, sizeof(SharedStatus));
         return 0;
     }
 
     while (true) {
         print(snapshot(*status));
-        printCapture(captureSnapshot(capture));
+        printCapture(captureSnapshot(capture), baseline ? &captureBaseline : nullptr);
         std::printf("\n");
         std::fflush(stdout);
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
