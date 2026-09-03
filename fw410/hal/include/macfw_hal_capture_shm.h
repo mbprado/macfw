@@ -3,14 +3,16 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 namespace macfw::hal::capture {
 
 constexpr const char* kShmName = "/macfw_fw410_capture_v2";
 constexpr std::uint32_t kMagic = 0x4d464349; // MFCI
-constexpr std::uint32_t kVersion = 2;
+constexpr std::uint32_t kVersion = 3;
 constexpr std::uint32_t kChannels = 4;
 constexpr std::uint32_t kCapacityFrames = 32768;
+constexpr std::uint64_t kQueueMinUnset = std::numeric_limits<std::uint64_t>::max();
 
 // CoreAudio-facing input order:
 //   0 Analog Input 1
@@ -40,6 +42,14 @@ struct SharedCaptureRing {
     std::atomic<std::uint64_t> halFramesFromRing;
     std::atomic<std::uint64_t> halZeroFilledFrames;
 
+    // Queue depth immediately before each active HAL ReadInput. Min/max expose
+    // short scheduling excursions that transportstatus's 500 ms snapshots can
+    // miss. halUnderrunEvents counts ReadInput calls that could not be fully
+    // satisfied from the capture ring.
+    std::atomic<std::uint64_t> halMinQueuedFrames;
+    std::atomic<std::uint64_t> halMaxQueuedFrames;
+    std::atomic<std::uint64_t> halUnderrunEvents;
+
     float samples[kCapacityFrames * kChannels];
 };
 
@@ -61,6 +71,9 @@ inline void initialize(SharedCaptureRing& ring, std::uint32_t rate) {
     ring.halRequestedFrames.store(0, std::memory_order_relaxed);
     ring.halFramesFromRing.store(0, std::memory_order_relaxed);
     ring.halZeroFilledFrames.store(0, std::memory_order_relaxed);
+    ring.halMinQueuedFrames.store(kQueueMinUnset, std::memory_order_relaxed);
+    ring.halMaxQueuedFrames.store(0, std::memory_order_relaxed);
+    ring.halUnderrunEvents.store(0, std::memory_order_relaxed);
 }
 
 inline bool valid(const SharedCaptureRing& ring) {
