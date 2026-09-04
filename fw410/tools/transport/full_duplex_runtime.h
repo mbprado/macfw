@@ -22,6 +22,7 @@ struct FullDuplexRuntimeConfig {
     const char* rateLabel = "";
     unsigned prefillMilliseconds = 0;
     double runLoopSliceSeconds = 0.001;
+    bool runLoopReturnAfterSourceHandled = false;
     bool printIsoStarted = false;
     bool printTransportGeometry = false;
     UInt32 expectedGeneration = 0;
@@ -91,7 +92,8 @@ bool runFullDuplexServiceLoop(
         }
         previousLoopStart = loopStart;
 
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode, config.runLoopSliceSeconds, false);
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, config.runLoopSliceSeconds,
+                           config.runLoopReturnAfterSourceHandled);
 
         const std::uint64_t afterRunLoop = verboseDiagnostics ? mach_absolute_time() : 0;
         if (verboseDiagnostics) {

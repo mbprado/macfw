@@ -91,6 +91,7 @@ bool run() {
         runtimeConfig.rateLabel = "44.1";
         runtimeConfig.prefillMilliseconds = 93;
         runtimeConfig.runLoopSliceSeconds = 0.00025;
+        runtimeConfig.runLoopReturnAfterSourceHandled = true;
         runtimeConfig.expectedGeneration = setup.device.generation();
 
         ok = runFullDuplexServiceLoop(
