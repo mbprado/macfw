@@ -2,6 +2,8 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 
+#include <dispatch/dispatch.h>
+
 static NSString *const kMacfwRuntimeBuildFile = @"/Library/Application Support/macfw/fw410/runtime-build.conf";
 static NSString *const kMacfwDiagnosticsStatusTool = @"/Library/Application Support/macfw/fw410/tools/transport/transportstatus/transportstatus";
 static NSString *const kMacfwTransportLog = @"/Library/Logs/macfw-fw410-transport.log";
