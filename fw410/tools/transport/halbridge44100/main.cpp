@@ -24,6 +24,7 @@
 #include <mutex>
 #include <pthread.h>
 #include <thread>
+#include <vector>
 
 namespace {
 using namespace macfw::transport::duplex;
@@ -200,9 +201,25 @@ bool run() {
         const UInt32 forward = (setup.firstCycle + kCyclesPerSecond - now) % kCyclesPerSecond;
         if (forward > 4096u) goto cleanup;
         const double wait = static_cast<double>(forward) / kCyclesPerSecond + 0.020;
-        std::cout << "duplex ISO started; waiting " << std::fixed << std::setprecision(3) << wait
-                  << " s before 44.1 reassert\n" << std::defaultfloat;
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode, wait, false);
+        std::cout << "duplex ISO started; servicing audio for " << std::fixed << std::setprecision(3)
+                  << wait << " s before 44.1 reassert\n" << std::defaultfloat;
+
+        std::vector<float> startupAudio(4096 * macfw::hal::kChannels, 0.0f);
+        std::vector<std::int32_t> startupMapped(4096 * kPcmChannels, 0);
+        const CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + wait;
+        while (!gStopRequested && CFAbsoluteTimeGetCurrent() < deadline) {
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.00025, false);
+
+            capturePump.service(rx, *setup.captureShared.ring());
+            pumpPlayback(*setup.input.ring(), pcm, startupAudio, startupMapped);
+
+            UInt32 serviceCt = 0;
+            if ((*setup.native)->GetCycleTime(setup.native, &serviceCt) == kIOReturnSuccess)
+                streamer.service(cycleCount(serviceCt));
+
+            capturePump.service(rx, *setup.captureShared.ring());
+        }
+        if (gStopRequested) goto cleanup;
     }
 
     if (!fcp.reassert44100()) goto cleanup;
