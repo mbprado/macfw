@@ -34,6 +34,7 @@ void signalHandler(int) { gStopRequested = 1; }
 
 class IsochCallbackRunLoopThread {
 public:
+    IsochCallbackRunLoopThread() = default;
     ~IsochCallbackRunLoopThread() { stop(); }
 
     IsochCallbackRunLoopThread(const IsochCallbackRunLoopThread&) = delete;
