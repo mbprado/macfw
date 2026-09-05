@@ -15,6 +15,9 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/firewire/IOFireWireLib.h>
+#include <mach/mach.h>
+#include <mach/mach_time.h>
+#include <mach/thread_policy.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -157,6 +160,46 @@ void requestInteractiveQos(const char* label) {
         std::cout << label << " QoS: request failed (" << rc << ")\n";
 }
 
+std::uint32_t machTicksForNanoseconds(std::uint64_t nanoseconds) {
+    mach_timebase_info_data_t timebase{};
+    if (mach_timebase_info(&timebase) != KERN_SUCCESS || timebase.numer == 0) return 0;
+    const long double ticks = static_cast<long double>(nanoseconds) *
+                              static_cast<long double>(timebase.denom) /
+                              static_cast<long double>(timebase.numer);
+    return static_cast<std::uint32_t>(ticks);
+}
+
+bool requestAudioTimeConstraint() {
+    constexpr std::uint64_t kPeriodNs = 2000000;
+    constexpr std::uint64_t kComputationNs = 500000;
+    constexpr std::uint64_t kConstraintNs = 2000000;
+
+    thread_time_constraint_policy_data_t policy{};
+    policy.period = machTicksForNanoseconds(kPeriodNs);
+    policy.computation = machTicksForNanoseconds(kComputationNs);
+    policy.constraint = machTicksForNanoseconds(kConstraintNs);
+    policy.preemptible = TRUE;
+    if (policy.period == 0 || policy.computation == 0 || policy.constraint == 0) {
+        std::cout << "audio service thread time-constraint: unavailable (timebase)\n";
+        return false;
+    }
+
+    const thread_port_t threadPort = pthread_mach_thread_np(pthread_self());
+    const kern_return_t kr = thread_policy_set(
+        threadPort,
+        THREAD_TIME_CONSTRAINT_POLICY,
+        reinterpret_cast<thread_policy_t>(&policy),
+        THREAD_TIME_CONSTRAINT_POLICY_COUNT);
+    if (kr == KERN_SUCCESS) {
+        std::cout << "audio service thread time-constraint: period=2000 us computation=500 us constraint=2000 us\n";
+        return true;
+    }
+
+    std::cout << "audio service thread time-constraint: request failed (" << kr
+              << "); continuing with QoS only\n";
+    return false;
+}
+
 bool run() {
     FullDuplexEngineSetup setup;
     if (!setup.prepare(44100, kCycleLead,
@@ -232,6 +275,7 @@ bool run() {
 
         std::thread audioThread([&] {
             requestInteractiveQos("audio service thread");
+            requestAudioTimeConstraint();
             std::cout << "audio service: dedicated Mach-paced thread (250 us)\n";
 
             FullDuplexRuntimeConfig runtimeConfig;
