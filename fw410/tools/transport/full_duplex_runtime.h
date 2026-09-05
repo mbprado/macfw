@@ -7,7 +7,6 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/firewire/IOFireWireLib.h>
-#include <mach/mach_time.h>
 
 #include <atomic>
 #include <csignal>
@@ -22,7 +21,6 @@ struct FullDuplexRuntimeConfig {
     const char* rateLabel = "";
     unsigned prefillMilliseconds = 0;
     double runLoopSliceSeconds = 0.001;
-    bool runLoopReturnAfterSourceHandled = false;
     bool printIsoStarted = false;
     bool printTransportGeometry = false;
     UInt32 expectedGeneration = 0;
@@ -51,23 +49,6 @@ bool runFullDuplexServiceLoop(
     bool captureReady = false;
     const bool verboseDiagnostics = std::getenv("MACFW_VERBOSE") != nullptr;
 
-    mach_timebase_info_data_t timebase{};
-    if (verboseDiagnostics) mach_timebase_info(&timebase);
-    const auto ticksToMicroseconds = [&](std::uint64_t ticks) -> std::uint64_t {
-        if (!verboseDiagnostics || timebase.denom == 0) return 0;
-        return (ticks * static_cast<std::uint64_t>(timebase.numer)) /
-               static_cast<std::uint64_t>(timebase.denom) / 1000u;
-    };
-
-    std::uint64_t previousLoopStart = 0;
-    std::uint64_t maxLoopPeriodUs = 0;
-    std::uint64_t maxRunLoopUs = 0;
-    std::uint64_t maxServiceUs = 0;
-    std::uint64_t loopOver1ms = 0;
-    std::uint64_t loopOver2ms = 0;
-    std::uint64_t loopOver4ms = 0;
-    std::uint64_t loopOver8ms = 0;
-
     if (config.printIsoStarted) std::cout << "duplex ISO started\n";
     if (config.printTransportGeometry)
         std::cout << "TX ring: 640 cycles / 320-cycle refill halves\nPCM FIFO: 16384 frames\n";
@@ -81,25 +62,7 @@ bool runFullDuplexServiceLoop(
               << " kHz playback + capture; Ctrl-C to stop\n";
 
     while (!stopRequested) {
-        const std::uint64_t loopStart = verboseDiagnostics ? mach_absolute_time() : 0;
-        if (verboseDiagnostics && previousLoopStart != 0) {
-            const std::uint64_t periodUs = ticksToMicroseconds(loopStart - previousLoopStart);
-            if (periodUs > maxLoopPeriodUs) maxLoopPeriodUs = periodUs;
-            if (periodUs > 1000u) ++loopOver1ms;
-            if (periodUs > 2000u) ++loopOver2ms;
-            if (periodUs > 4000u) ++loopOver4ms;
-            if (periodUs > 8000u) ++loopOver8ms;
-        }
-        previousLoopStart = loopStart;
-
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode, config.runLoopSliceSeconds,
-                           config.runLoopReturnAfterSourceHandled);
-
-        const std::uint64_t afterRunLoop = verboseDiagnostics ? mach_absolute_time() : 0;
-        if (verboseDiagnostics) {
-            const std::uint64_t runLoopUs = ticksToMicroseconds(afterRunLoop - loopStart);
-            if (runLoopUs > maxRunLoopUs) maxRunLoopUs = runLoopUs;
-        }
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, config.runLoopSliceSeconds, false);
 
         const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
         if (config.expectedGeneration != 0 &&
@@ -136,12 +99,6 @@ bool runFullDuplexServiceLoop(
             std::cout << "capture prefill ready: CoreAudio consumer detected; live capture enabled\n";
         }
 
-        if (verboseDiagnostics) {
-            const std::uint64_t serviceEnd = mach_absolute_time();
-            const std::uint64_t serviceUs = ticksToMicroseconds(serviceEnd - afterRunLoop);
-            if (serviceUs > maxServiceUs) maxServiceUs = serviceUs;
-        }
-
         if (!verboseDiagnostics) continue;
         if (now - lastStatus < 2.0) continue;
 
@@ -168,22 +125,11 @@ bool runFullDuplexServiceLoop(
                   << " reorder=" << rxStats.reorderedPackets
                   << " stale=" << rxStats.stalePackets
                   << " hal-read=" << captureShared.ring()->halReadCalls.load(std::memory_order_acquire)
-                  << " | timing-us(loop/runloop/service)="
-                  << maxLoopPeriodUs << '/' << maxRunLoopUs << '/' << maxServiceUs
-                  << " loop>1/2/4/8ms="
-                  << loopOver1ms << '/' << loopOver2ms << '/' << loopOver4ms << '/' << loopOver8ms
                   << '\n';
 
         lastWrite = w;
         lastCaptureFrames = captureFrames;
         lastStatus = now;
-        maxLoopPeriodUs = 0;
-        maxRunLoopUs = 0;
-        maxServiceUs = 0;
-        loopOver1ms = 0;
-        loopOver2ms = 0;
-        loopOver4ms = 0;
-        loopOver8ms = 0;
     }
     return true;
 }
