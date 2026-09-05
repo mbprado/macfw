@@ -51,6 +51,12 @@ public:
         }
 
         worker_ = std::thread([this] {
+            const int qosRc = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+            if (qosRc == 0)
+                std::cout << "isoch callback thread QoS: user-interactive\n";
+            else
+                std::cout << "isoch callback thread QoS: request failed (" << qosRc << ")\n";
+
             CFRunLoopRef loop = CFRunLoopGetCurrent();
             CFRetain(loop);
 
