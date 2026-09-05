@@ -16,6 +16,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/firewire/IOFireWireLib.h>
 
+#include <atomic>
 #include <condition_variable>
 #include <csignal>
 #include <cstdint>
@@ -148,12 +149,12 @@ private:
     bool stopRequested_ = false;
 };
 
-void requestInteractiveQos() {
+void requestInteractiveQos(const char* label) {
     const int rc = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
     if (rc == 0)
-        std::cout << "transport thread QoS: user-interactive\n";
+        std::cout << label << " QoS: user-interactive\n";
     else
-        std::cout << "transport thread QoS: request failed (" << rc << ")\n";
+        std::cout << label << " QoS: request failed (" << rc << ")\n";
 }
 
 bool run() {
@@ -192,7 +193,7 @@ bool run() {
     isochCallbackThread.startPumping();
     std::cout << "isoch callback dispatcher: dedicated run-loop thread\n";
 
-    requestInteractiveQos();
+    requestInteractiveQos("transport thread");
 
     {
         UInt32 nowCt = 0;
@@ -226,21 +227,38 @@ bool run() {
     macfw::transport::signalEngineReady();
 
     {
-        FullDuplexRuntimeConfig runtimeConfig;
-        runtimeConfig.rateLabel = "44.1";
-        runtimeConfig.prefillMilliseconds = 93;
-        runtimeConfig.runLoopSliceSeconds = 0.00025;
-        runtimeConfig.expectedGeneration = setup.device.generation();
+        std::atomic<bool> audioFinished{false};
+        bool audioOk = false;
 
-        ok = runFullDuplexServiceLoop(
-            gStopRequested, setup.native, setup.input, pcm, rx, setup.captureShared, capturePump,
-            streamer, runtimeConfig,
-            [&](std::vector<float>& audio, std::vector<std::int32_t>& mapped) {
-                control.service();
-                meterServer.service();
-                pumpPlayback(*setup.input.ring(), pcm, audio, mapped);
-            });
+        std::thread audioThread([&] {
+            requestInteractiveQos("audio service thread");
+            std::cout << "audio service: dedicated Mach-paced thread (250 us)\n";
 
+            FullDuplexRuntimeConfig runtimeConfig;
+            runtimeConfig.rateLabel = "44.1";
+            runtimeConfig.prefillMilliseconds = 93;
+            runtimeConfig.useMachPacing = true;
+            runtimeConfig.machPaceNanoseconds = 250000;
+            runtimeConfig.expectedGeneration = setup.device.generation();
+
+            audioOk = runFullDuplexServiceLoop(
+                gStopRequested, setup.native, setup.input, pcm, rx, setup.captureShared, capturePump,
+                streamer, runtimeConfig,
+                [&](std::vector<float>& audio, std::vector<std::int32_t>& mapped) {
+                    meterServer.service();
+                    pumpPlayback(*setup.input.ring(), pcm, audio, mapped);
+                });
+
+            audioFinished.store(true, std::memory_order_release);
+        });
+
+        while (!gStopRequested && !audioFinished.load(std::memory_order_acquire)) {
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+            control.service();
+        }
+
+        audioThread.join();
+        ok = audioOk;
         std::cout << "stop requested; restoring ISO/CMP resources\n";
     }
 
