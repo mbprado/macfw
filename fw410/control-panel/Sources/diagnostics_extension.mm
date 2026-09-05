@@ -29,14 +29,15 @@ static NSString *MacfwDiagnosticsRunTool(NSString *path, NSArray<NSString *> *ar
     NSError *error = nil;
     if (![task launchAndReturnError:&error]) {
         if (statusOut) *statusOut = 126;
-        return error.localizedDescription ?: @"";
+        return error.localizedDescription != nil ? error.localizedDescription : @"";
     }
 
     [task waitUntilExit];
     NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
     if (statusOut) *statusOut = task.terminationStatus;
     NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    return [text ?: @"" stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *safeText = text != nil ? text : @"";
+    return [safeText stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
 static NSString *MacfwDiagnosticsValue(NSString *prefix, NSString *text) {
@@ -139,7 +140,8 @@ static NSDictionary<NSString *, NSString *> *MacfwRuntimeBuildMetadata(void) {
     NSTextView *infoView = [self macfwDiagnosticsInfoTextView];
     if (!infoView) return;
 
-    NSMutableString *info = [infoView.string mutableCopy] ?: [NSMutableString string];
+    NSMutableString *info = [infoView.string mutableCopy];
+    if (info == nil) info = [NSMutableString string];
     NSDictionary<NSString *, NSString *> *metadata = MacfwRuntimeBuildMetadata();
     NSString *version = metadata[@"version"];
     NSString *build = metadata[@"build"];
@@ -154,13 +156,20 @@ static NSDictionary<NSString *, NSString *> *MacfwRuntimeBuildMetadata(void) {
     int status = 0;
     NSString *transport = MacfwDiagnosticsRunTool(kMacfwDiagnosticsStatusTool, @[], &status);
     if (status == 0 && transport.length) {
-        NSString *pid = MacfwDiagnosticsValue(@"engine pid:", transport) ?: @"unknown";
-        NSString *transitions = MacfwDiagnosticsValue(@"transitions:", transport) ?: @"unknown";
-        NSString *heartbeat = MacfwDiagnosticsValue(@"heartbeat:", transport) ?: @"unknown";
-        NSString *captureState = MacfwDiagnosticsValue(@"capture state:", transport) ?: @"unknown";
-        NSString *queued = MacfwDiagnosticsValue(@"queued frames:", transport) ?: @"unknown";
-        NSString *underruns = MacfwDiagnosticsValue(@"underrun events:", transport) ?: @"unknown";
-        NSString *zeroFill = MacfwDiagnosticsValue(@"hal zero fill:", transport) ?: @"unknown";
+        NSString *pid = MacfwDiagnosticsValue(@"engine pid:", transport);
+        NSString *transitions = MacfwDiagnosticsValue(@"transitions:", transport);
+        NSString *heartbeat = MacfwDiagnosticsValue(@"heartbeat:", transport);
+        NSString *captureState = MacfwDiagnosticsValue(@"capture state:", transport);
+        NSString *queued = MacfwDiagnosticsValue(@"queued frames:", transport);
+        NSString *underruns = MacfwDiagnosticsValue(@"underrun events:", transport);
+        NSString *zeroFill = MacfwDiagnosticsValue(@"hal zero fill:", transport);
+        if (pid == nil) pid = @"unknown";
+        if (transitions == nil) transitions = @"unknown";
+        if (heartbeat == nil) heartbeat = @"unknown";
+        if (captureState == nil) captureState = @"unknown";
+        if (queued == nil) queued = @"unknown";
+        if (underruns == nil) underruns = @"unknown";
+        if (zeroFill == nil) zeroFill = @"unknown";
 
         [info appendString:@"\n\nRuntime diagnostics\n"];
         [info appendFormat:@"  Engine PID:       %@\n", pid];
