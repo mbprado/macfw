@@ -31,7 +31,7 @@ install:
 	    [ ! -x tools/control/fw410state/fw410state ] || \
 	    [ ! -x tools/device/fwboot/fwboot ] || \
 	    [ ! -x tools/device/deviceprobe/deviceprobe ] || \
-	    [ ! -x "control-panel/build/macfw FW410 Control.app/Contents/MacOS/macfw-fw410-control" ]; then \
+	    [ ! -x "control-panel/build/macfw-fw410-control.app/Contents/MacOS/macfw-fw410-control" ]; then \
 		echo "error: installable artifacts are not built; run 'make' as a normal user first" >&2; \
 		exit 1; \
 	fi
