@@ -10,6 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FW410_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_ROOT="/Library/Application Support/macfw/fw410"
 STATE_FILE="$INSTALL_ROOT/control-state.conf"
+RUNTIME_BUILD_FILE="$INSTALL_ROOT/runtime-build.conf"
 LAUNCHD_PLIST="/Library/LaunchDaemons/com.mbprado.macfw.fw410.transport.plist"
 LABEL="com.mbprado.macfw.fw410.transport"
 
@@ -77,6 +78,14 @@ install -o root -g wheel -m 0755 "$FWBOOT" \
 install -o root -g wheel -m 0755 "$DEVICEPROBE" \
     "$INSTALL_ROOT/tools/device/deviceprobe/deviceprobe"
 
+runtime_version="$(sed -n 's/^#define MACFW_VERSION "\([^"]*\)"/\1/p' "$FW410_DIR/version.h" | head -n 1)"
+runtime_build="$(git -C "$FW410_DIR" rev-parse --short=12 HEAD 2>/dev/null || true)"
+[[ -n "$runtime_version" ]] || runtime_version="unknown"
+[[ -n "$runtime_build" ]] || runtime_build="unknown"
+printf 'version=%s\nbuild=%s\n' "$runtime_version" "$runtime_build" > "$RUNTIME_BUILD_FILE"
+chown root:wheel "$RUNTIME_BUILD_FILE"
+chmod 0644 "$RUNTIME_BUILD_FILE"
+
 if [[ ! -e "$STATE_FILE" ]]; then
     : > "$STATE_FILE"
 fi
@@ -95,6 +104,7 @@ launchctl enable system/$LABEL
 launchctl kickstart -k system/$LABEL
 
 echo "installed macfw FW410 transport runtime: $INSTALL_ROOT"
+echo "runtime build: $runtime_version build $runtime_build"
 echo "loaded launchd service: $LABEL"
 echo "control client: $INSTALL_ROOT/tools/control/fw410ctl/fw410ctl"
 echo "saved control state: $STATE_FILE"
