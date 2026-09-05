@@ -201,8 +201,8 @@ static NSString *MacfwFramesAndMs(UInt32 frames, double sampleRate) {
     NSView *view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 600, 440)];
     item.view = view;
 
-    NSUInteger infoIndex = tabs.numberOfTabViewItems;
-    for (NSUInteger i = 0; i < tabs.numberOfTabViewItems; ++i) {
+    NSInteger infoIndex = tabs.numberOfTabViewItems;
+    for (NSInteger i = 0; i < tabs.numberOfTabViewItems; ++i) {
         if ([[tabs tabViewItemAtIndex:i].identifier isEqual:@"info"]) {
             infoIndex = i;
             break;
@@ -312,7 +312,8 @@ static NSString *MacfwFramesAndMs(UInt32 frames, double sampleRate) {
         requestedField.stringValue = requested.length ? requested : @"Unknown";
         pidField.stringValue = pid.length ? pid : @"Unknown";
 
-        NSScanner *scanner = [NSScanner scannerWithString:active ?: @""];
+        NSString *activeText = active != nil ? active : @"";
+        NSScanner *scanner = [NSScanner scannerWithString:activeText];
         [scanner scanDouble:&sampleRate];
     } else {
         stateField.stringValue = @"Unavailable";
