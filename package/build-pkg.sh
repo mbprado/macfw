@@ -27,7 +27,8 @@ GIT_SHA="$(git -C "$REPO_DIR" rev-parse --short=12 HEAD)"
 PKG="$OUTPUT/macfw-fw410-${VERSION}-${GIT_SHA}.pkg"
 
 HAL_BUNDLE="$FW410_DIR/hal/build/macfw-fw410.driver"
-CONTROL_APP="$FW410_DIR/control-panel/build/macfw FW410 Control.app"
+CONTROL_APP="$FW410_DIR/control-panel/build/macfw-fw410-control.app"
+CONTROL_APP_INSTALL_NAME="macfw FW410 Control.app"
 PLIST="$FW410_DIR/service/com.mbprado.macfw.fw410.transport.plist"
 DEVICEPROBE="$FW410_DIR/tools/device/deviceprobe/deviceprobe"
 
@@ -63,7 +64,9 @@ mkdir -p \
     "$SCRIPTS" "$STAGE" "$OUTPUT"
 
 cp -R "$HAL_BUNDLE" "$ROOT/Library/Audio/Plug-Ins/HAL/"
-cp -R "$CONTROL_APP" "$ROOT/Applications/"
+cp -R "$CONTROL_APP" "$ROOT/Applications/$CONTROL_APP_INSTALL_NAME"
+printf 'version=%s\nbuild=%s\n' "$VERSION" "$GIT_SHA" \
+    > "$ROOT/Library/Application Support/macfw/fw410/runtime-build.conf"
 
 for rel in \
     tools/transport/haltransport/haltransport \
