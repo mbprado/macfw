@@ -3,6 +3,8 @@
 #import <CoreAudio/CoreAudio.h>
 #import <objc/runtime.h>
 
+#include <dispatch/dispatch.h>
+
 static NSString *const kMacfwDeviceStatusTool = @"/Library/Application Support/macfw/fw410/tools/transport/transportstatus/transportstatus";
 static CFStringRef const kMacfwDeviceUID = CFSTR("com.mbprado.macfw.fw410.device");
 
@@ -15,6 +17,7 @@ static const void *kMacfwDeviceStateKey = &kMacfwDeviceStateKey;
 static const void *kMacfwDeviceActiveRateKey = &kMacfwDeviceActiveRateKey;
 static const void *kMacfwDeviceRequestedRateKey = &kMacfwDeviceRequestedRateKey;
 static const void *kMacfwDevicePidKey = &kMacfwDevicePidKey;
+static const void *kMacfwDeviceRateControlKey = &kMacfwDeviceRateControlKey;
 static const void *kMacfwDeviceBufferKey = &kMacfwDeviceBufferKey;
 static const void *kMacfwDeviceBufferControlKey = &kMacfwDeviceBufferControlKey;
 static const void *kMacfwDeviceOutputLatencyKey = &kMacfwDeviceOutputLatencyKey;
@@ -136,6 +139,22 @@ static BOOL MacfwPropertySettable(AudioObjectID device, AudioObjectPropertySelec
     return YES;
 }
 
+static OSStatus MacfwSetNominalSampleRate(AudioObjectID device, Float64 rate) {
+    AudioObjectPropertyAddress address{
+        kAudioDevicePropertyNominalSampleRate,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+    if (!AudioObjectHasProperty(device, &address)) return kAudioHardwareUnknownPropertyError;
+
+    Boolean settable = false;
+    OSStatus status = AudioObjectIsPropertySettable(device, &address, &settable);
+    if (status != noErr) return status;
+    if (!settable) return kAudioHardwareUnsupportedOperationError;
+
+    return AudioObjectSetPropertyData(device, &address, 0, nullptr, sizeof(rate), &rate);
+}
+
 static NSString *MacfwFramesAndMs(UInt32 frames, double sampleRate) {
     if (!(sampleRate > 0.0)) return [NSString stringWithFormat:@"%u frames", frames];
     return [NSString stringWithFormat:@"%u frames (%.2f ms)", frames,
@@ -196,13 +215,14 @@ static NSString *MacfwFramesAndMs(UInt32 frames, double sampleRate) {
     title.frame = NSMakeRect(28, 390, 300, 22);
     [view addSubview:title];
 
-    NSTextField *description = [NSTextField labelWithString:@"Read-only transport and CoreAudio timing diagnostics. No latency/buffer writes are made here."];
+    NSTextField *description = [NSTextField labelWithString:@"Sample-rate changes use the normal CoreAudio device lifecycle; timing values below are read-only diagnostics."];
     description.textColor = NSColor.secondaryLabelColor;
     description.frame = NSMakeRect(28, 364, 540, 20);
     [view addSubview:description];
 
     NSTextField *state = MacfwDeviceValueLabel(view, @"Connection state", 326);
     NSTextField *active = MacfwDeviceValueLabel(view, @"Active sample rate", 296);
+    active.frame = NSMakeRect(200, 296, 155, 20);
     NSTextField *requested = MacfwDeviceValueLabel(view, @"Requested rate", 266);
     NSTextField *pid = MacfwDeviceValueLabel(view, @"Engine PID", 236);
     NSTextField *buffer = MacfwDeviceValueLabel(view, @"CoreAudio buffer", 194);
@@ -211,10 +231,20 @@ static NSString *MacfwFramesAndMs(UInt32 frames, double sampleRate) {
     NSTextField *inputLatency = MacfwDeviceValueLabel(view, @"Input latency", 98);
     NSTextField *safety = MacfwDeviceValueLabel(view, @"Safety offsets", 68);
 
+    NSSegmentedControl *rateControl = [[NSSegmentedControl alloc] initWithFrame:NSMakeRect(370, 292, 185, 26)];
+    rateControl.segmentCount = 2;
+    [rateControl setLabel:@"44.1 kHz" forSegment:0];
+    [rateControl setLabel:@"48 kHz" forSegment:1];
+    rateControl.target = self;
+    rateControl.action = @selector(macfwDeviceRateChanged:);
+    rateControl.enabled = NO;
+    [view addSubview:rateControl];
+
     objc_setAssociatedObject(self, kMacfwDeviceStateKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self, kMacfwDeviceActiveRateKey, active, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self, kMacfwDeviceRequestedRateKey, requested, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self, kMacfwDevicePidKey, pid, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kMacfwDeviceRateControlKey, rateControl, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self, kMacfwDeviceBufferKey, buffer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self, kMacfwDeviceBufferControlKey, bufferControl, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self, kMacfwDeviceOutputLatencyKey, outputLatency, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -228,17 +258,44 @@ static NSString *MacfwFramesAndMs(UInt32 frames, double sampleRate) {
     [view addSubview:note];
 }
 
+- (void)macfwDeviceRateChanged:(NSSegmentedControl *)sender {
+    if (sender.selectedSegment < 0 || sender.selectedSegment > 1) return;
+
+    AudioObjectID device = MacfwFindCoreAudioDevice();
+    if (device == kAudioObjectUnknown) {
+        NSBeep();
+        [self macfwRefreshDevice];
+        return;
+    }
+
+    const Float64 rate = sender.selectedSegment == 0 ? 44100.0 : 48000.0;
+    const OSStatus status = MacfwSetNominalSampleRate(device, rate);
+    if (status != noErr) {
+        NSBeep();
+        [self macfwRefreshDevice];
+        return;
+    }
+
+    sender.enabled = NO;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, static_cast<int64_t>(1.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        sender.enabled = YES;
+        [self refresh:nil];
+    });
+}
+
 - (void)macfwRefreshDevice {
     NSTextField *stateField = objc_getAssociatedObject(self, kMacfwDeviceStateKey);
     NSTextField *activeField = objc_getAssociatedObject(self, kMacfwDeviceActiveRateKey);
     NSTextField *requestedField = objc_getAssociatedObject(self, kMacfwDeviceRequestedRateKey);
     NSTextField *pidField = objc_getAssociatedObject(self, kMacfwDevicePidKey);
+    NSSegmentedControl *rateControl = objc_getAssociatedObject(self, kMacfwDeviceRateControlKey);
     NSTextField *bufferField = objc_getAssociatedObject(self, kMacfwDeviceBufferKey);
     NSTextField *bufferControlField = objc_getAssociatedObject(self, kMacfwDeviceBufferControlKey);
     NSTextField *outputLatencyField = objc_getAssociatedObject(self, kMacfwDeviceOutputLatencyKey);
     NSTextField *inputLatencyField = objc_getAssociatedObject(self, kMacfwDeviceInputLatencyKey);
     NSTextField *safetyField = objc_getAssociatedObject(self, kMacfwDeviceSafetyKey);
-    if (!stateField || !activeField || !requestedField || !pidField || !bufferField ||
+    if (!stateField || !activeField || !requestedField || !pidField || !rateControl || !bufferField ||
         !bufferControlField || !outputLatencyField || !inputLatencyField || !safetyField) return;
 
     int status = 0;
@@ -266,12 +323,26 @@ static NSString *MacfwFramesAndMs(UInt32 frames, double sampleRate) {
 
     AudioObjectID device = MacfwFindCoreAudioDevice();
     if (device == kAudioObjectUnknown) {
+        rateControl.enabled = NO;
+        rateControl.selectedSegment = -1;
         bufferField.stringValue = @"CoreAudio device unavailable";
         bufferControlField.stringValue = @"—";
         outputLatencyField.stringValue = @"—";
         inputLatencyField.stringValue = @"—";
         safetyField.stringValue = @"—";
         return;
+    }
+
+    BOOL rateSettable = NO;
+    const BOOL hasRateSettableInfo = MacfwPropertySettable(device,
+        kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal, &rateSettable);
+    rateControl.enabled = hasRateSettableInfo && rateSettable;
+    if (sampleRate > 44099.0 && sampleRate < 44101.0) {
+        rateControl.selectedSegment = 0;
+    } else if (sampleRate > 47999.0 && sampleRate < 48001.0) {
+        rateControl.selectedSegment = 1;
+    } else {
+        rateControl.selectedSegment = -1;
     }
 
     UInt32 frames = 0;
