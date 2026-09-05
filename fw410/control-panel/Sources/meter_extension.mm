@@ -97,15 +97,15 @@ static BOOL MacfwParseMeters(NSString *text, double values[4]) {
     NSTabView *tabs = [self macfwMetersTabView];
     if (!tabs) return;
 
-    NSTabViewItem *item = [[NSTabViewItem alloc] initWithIdentifier:@"meters"];
-    item.label = @"Meters";
+    NSTabViewItem *item = [[NSTabViewItem alloc] initWithIdentifier:@"inputs"];
+    item.label = @"Inputs";
     NSView *view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 600, 440)];
     item.view = view;
 
     NSUInteger insertIndex = tabs.numberOfTabViewItems > 0 ? 1 : 0;
     [tabs insertTabViewItem:item atIndex:insertIndex];
 
-    NSTextField *description = [NSTextField labelWithString:@"Live input levels from the decoded FW410 capture stream."];
+    NSTextField *description = [NSTextField labelWithString:@"Live capture levels from the FW410 input stream."];
     description.textColor = NSColor.secondaryLabelColor;
     description.frame = NSMakeRect(24, 392, 540, 20);
     [view addSubview:description];
@@ -116,12 +116,23 @@ static BOOL MacfwParseMeters(NSString *text, double values[4]) {
     scale.frame = NSMakeRect(24, 368, 540, 18);
     [view addSubview:scale];
 
+    NSTextField *analogTitle = [NSTextField labelWithString:@"Analog Inputs"];
+    analogTitle.font = [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];
+    analogTitle.frame = NSMakeRect(24, 334, 180, 20);
+    [view addSubview:analogTitle];
+
+    NSTextField *digitalTitle = [NSTextField labelWithString:@"Digital Input"];
+    digitalTitle.font = [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];
+    digitalTitle.frame = NSMakeRect(24, 190, 180, 20);
+    [view addSubview:digitalTitle];
+
     NSArray<NSString *> *names = @[@"Analog Input 1", @"Analog Input 2", @"S/PDIF Input L", @"S/PDIF Input R"];
+    NSArray<NSNumber *> *positions = @[@278.0, @218.0, @134.0, @74.0];
     NSMutableArray<NSLevelIndicator *> *bars = [NSMutableArray arrayWithCapacity:4];
     NSMutableArray<NSTextField *> *values = [NSMutableArray arrayWithCapacity:4];
 
     for (NSUInteger i = 0; i < names.count; ++i) {
-        CGFloat y = 304.0 - i * 72.0;
+        CGFloat y = positions[i].doubleValue;
 
         NSTextField *label = [NSTextField labelWithString:names[i]];
         label.font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
@@ -156,6 +167,12 @@ static BOOL MacfwParseMeters(NSString *text, double values[4]) {
         zero.frame = NSMakeRect(434, y + 7, 50, 12);
         [view addSubview:zero];
     }
+
+    NSTextField *monitoring = [NSTextField labelWithString:@"Direct monitoring is routed in Mixer. These controls do not change the CoreAudio input channel assignment."];
+    monitoring.textColor = NSColor.tertiaryLabelColor;
+    monitoring.font = [NSFont systemFontOfSize:10];
+    monitoring.frame = NSMakeRect(24, 24, 545, 18);
+    [view addSubview:monitoring];
 
     objc_setAssociatedObject(self, kMacfwMeterBarsKey, bars, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self, kMacfwMeterValuesKey, values, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
