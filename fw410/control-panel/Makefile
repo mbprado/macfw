@@ -1,7 +1,7 @@
 CXX ?= c++
 GIT_SHA := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 CPPFLAGS += -I.. -DMACFW_GIT_SHA=\"$(GIT_SHA)\"
-APP := build/macfw FW410 Control.app
+APP := build/macfw-fw410-control.app
 INSTALL_APP := /Applications/macfw FW410 Control.app
 CONTENTS := $(APP)/Contents
 MACOS := $(CONTENTS)/MacOS
