@@ -15,11 +15,19 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/firewire/IOFireWireLib.h>
+#include <mach/mach.h>
+#include <mach/mach_time.h>
+#include <mach/thread_policy.h>
 
+#include <atomic>
+#include <condition_variable>
 #include <csignal>
 #include <cstdint>
 #include <iostream>
+#include <mutex>
 #include <pthread.h>
+#include <thread>
+#include <vector>
 
 namespace {
 using namespace macfw::transport::duplex;
@@ -28,12 +36,167 @@ constexpr UInt32 kCycleLead = 256;
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
 
-void requestInteractiveQos() {
+class IsochCallbackRunLoopThread {
+public:
+    IsochCallbackRunLoopThread() = default;
+    ~IsochCallbackRunLoopThread() { stop(); }
+
+    IsochCallbackRunLoopThread(const IsochCallbackRunLoopThread&) = delete;
+    IsochCallbackRunLoopThread& operator=(const IsochCallbackRunLoopThread&) = delete;
+
+    bool prepare() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (worker_.joinable()) return false;
+            ready_ = false;
+            pumping_ = false;
+            stopRequested_ = false;
+            runLoop_ = nullptr;
+        }
+
+        worker_ = std::thread([this] {
+            const int qosRc = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+            if (qosRc == 0)
+                std::cout << "isoch callback thread QoS: user-interactive\n";
+            else
+                std::cout << "isoch callback thread QoS: request failed (" << qosRc << ")\n";
+
+            CFRunLoopRef loop = CFRunLoopGetCurrent();
+            CFRetain(loop);
+
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                runLoop_ = loop;
+                ready_ = true;
+            }
+            cv_.notify_all();
+
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                cv_.wait(lock, [this] { return pumping_ || stopRequested_; });
+                if (stopRequested_) {
+                    runLoop_ = nullptr;
+                    lock.unlock();
+                    CFRelease(loop);
+                    return;
+                }
+            }
+
+            for (;;) {
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    if (stopRequested_) break;
+                }
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.050, false);
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                runLoop_ = nullptr;
+            }
+            CFRelease(loop);
+        });
+
+        std::unique_lock<std::mutex> lock(mutex_);
+        cv_.wait(lock, [this] { return ready_; });
+        return runLoop_ != nullptr;
+    }
+
+    CFRunLoopRef runLoop() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return runLoop_;
+    }
+
+    void startPumping() {
+        CFRunLoopRef loop = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            pumping_ = true;
+            loop = runLoop_;
+        }
+        cv_.notify_all();
+        if (loop) CFRunLoopWakeUp(loop);
+    }
+
+    void stop() {
+        CFRunLoopRef loop = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!worker_.joinable()) return;
+            stopRequested_ = true;
+            pumping_ = true;
+            loop = runLoop_;
+        }
+        cv_.notify_all();
+        if (loop) {
+            CFRunLoopStop(loop);
+            CFRunLoopWakeUp(loop);
+        }
+        worker_.join();
+
+        std::lock_guard<std::mutex> lock(mutex_);
+        ready_ = false;
+        pumping_ = false;
+        stopRequested_ = false;
+        runLoop_ = nullptr;
+    }
+
+private:
+    mutable std::mutex mutex_;
+    std::condition_variable cv_;
+    std::thread worker_;
+    CFRunLoopRef runLoop_ = nullptr;
+    bool ready_ = false;
+    bool pumping_ = false;
+    bool stopRequested_ = false;
+};
+
+void requestInteractiveQos(const char* label) {
     const int rc = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
     if (rc == 0)
-        std::cout << "transport thread QoS: user-interactive\n";
+        std::cout << label << " QoS: user-interactive\n";
     else
-        std::cout << "transport thread QoS: request failed (" << rc << ")\n";
+        std::cout << label << " QoS: request failed (" << rc << ")\n";
+}
+
+std::uint32_t machTicksForNanoseconds(std::uint64_t nanoseconds) {
+    mach_timebase_info_data_t timebase{};
+    if (mach_timebase_info(&timebase) != KERN_SUCCESS || timebase.numer == 0) return 0;
+    const long double ticks = static_cast<long double>(nanoseconds) *
+                              static_cast<long double>(timebase.denom) /
+                              static_cast<long double>(timebase.numer);
+    return static_cast<std::uint32_t>(ticks);
+}
+
+bool requestAudioTimeConstraint() {
+    constexpr std::uint64_t kPeriodNs = 2000000;
+    constexpr std::uint64_t kComputationNs = 500000;
+    constexpr std::uint64_t kConstraintNs = 2000000;
+
+    thread_time_constraint_policy_data_t policy{};
+    policy.period = machTicksForNanoseconds(kPeriodNs);
+    policy.computation = machTicksForNanoseconds(kComputationNs);
+    policy.constraint = machTicksForNanoseconds(kConstraintNs);
+    policy.preemptible = TRUE;
+    if (policy.period == 0 || policy.computation == 0 || policy.constraint == 0) {
+        std::cout << "audio service thread time-constraint: unavailable (timebase)\n";
+        return false;
+    }
+
+    const thread_port_t threadPort = pthread_mach_thread_np(pthread_self());
+    const kern_return_t kr = thread_policy_set(
+        threadPort,
+        THREAD_TIME_CONSTRAINT_POLICY,
+        reinterpret_cast<thread_policy_t>(&policy),
+        THREAD_TIME_CONSTRAINT_POLICY_COUNT);
+    if (kr == KERN_SUCCESS) {
+        std::cout << "audio service thread time-constraint: period=2000 us computation=500 us constraint=2000 us\n";
+        return true;
+    }
+
+    std::cout << "audio service thread time-constraint: request failed (" << kr
+              << "); continuing with QoS only\n";
+    return false;
 }
 
 bool run() {
@@ -56,47 +219,78 @@ bool run() {
     if (!lifecycle.prepare(setup.device, rx, tx.nativeLocalPort(),
                            kCaptureMaxPacket, kPlaybackMaxPacket))
         return false;
-    if (!lifecycle.addCallbackDispatcher()) return false;
 
     Fw410FcpControl fcp;
     Fw410ControlServer control;
     macfw::transport::CaptureMeterServer meterServer;
+    IsochCallbackRunLoopThread isochCallbackThread;
+    bool ok = false;
+
+    if (!lifecycle.addCallbackDispatcher()) goto cleanup;
     if (!fcp.arm(setup.device)) {
         std::cerr << "warning: FW410 FCP control unavailable; audio will continue\n";
     } else if (!control.start(fcp)) {
         std::cerr << "warning: FW410 control socket unavailable; audio will continue\n";
     }
+    if (!isochCallbackThread.prepare()) goto cleanup;
     if (!meterServer.start(capturePump))
         std::cerr << "warning: FW410 meter socket unavailable; audio will continue\n";
 
-    if (!lifecycle.startIsoch()) return false;
+    if (!lifecycle.startIsoch(isochCallbackThread.runLoop())) goto cleanup;
+    isochCallbackThread.startPumping();
+    std::cout << "isoch callback dispatcher: dedicated run-loop thread\n";
 
-    requestInteractiveQos();
+    requestInteractiveQos("transport thread");
     macfw::transport::signalEngineReady();
 
-    FullDuplexRuntimeConfig runtimeConfig;
-    runtimeConfig.rateLabel = "48";
-    runtimeConfig.prefillMilliseconds = 85;
-    runtimeConfig.runLoopSliceSeconds = 0.00025;
-    runtimeConfig.printIsoStarted = true;
-    runtimeConfig.printTransportGeometry = true;
-    runtimeConfig.expectedGeneration = setup.device.generation();
+    {
+        std::atomic<bool> audioFinished{false};
+        bool audioOk = false;
 
-    const bool runtimeOk = runFullDuplexServiceLoop(
-        gStopRequested, setup.native, setup.input, pcm, rx, setup.captureShared, capturePump,
-        streamer, runtimeConfig,
-        [&](std::vector<float>& audio, std::vector<std::int32_t>& mapped) {
-            control.service();
-            meterServer.service();
-            drainPlayback(*setup.input.ring(), pcm, audio, mapped);
+        std::thread audioThread([&] {
+            requestInteractiveQos("audio service thread");
+            requestAudioTimeConstraint();
+            std::cout << "audio service: dedicated Mach-paced thread (250 us)\n";
+
+            FullDuplexRuntimeConfig runtimeConfig;
+            runtimeConfig.rateLabel = "48";
+            runtimeConfig.prefillMilliseconds = 85;
+            runtimeConfig.useMachPacing = true;
+            runtimeConfig.machPaceNanoseconds = 250000;
+            runtimeConfig.printIsoStarted = true;
+            runtimeConfig.printTransportGeometry = true;
+            runtimeConfig.expectedGeneration = setup.device.generation();
+
+            audioOk = runFullDuplexServiceLoop(
+                gStopRequested, setup.native, setup.input, pcm, rx, setup.captureShared, capturePump,
+                streamer, runtimeConfig,
+                [&](std::vector<float>& audio, std::vector<std::int32_t>& mapped) {
+                    meterServer.service();
+                    drainPlayback(*setup.input.ring(), pcm, audio, mapped);
+                });
+
+            audioFinished.store(true, std::memory_order_release);
         });
 
-    std::cout << "stop requested; restoring ISO/CMP resources\n";
+        while (!gStopRequested && !audioFinished.load(std::memory_order_acquire)) {
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+            control.service();
+        }
+
+        audioThread.join();
+        ok = audioOk;
+        std::cout << "stop requested; restoring ISO/CMP resources\n";
+    }
+
+cleanup:
     meterServer.reset();
     control.reset();
+    lifecycle.stopIsochAndRestoreCmp();
     fcp.reset();
+    lifecycle.removeDispatchers();
+    isochCallbackThread.stop();
     lifecycle.stop();
-    return runtimeOk;
+    return ok;
 }
 } // namespace
 
