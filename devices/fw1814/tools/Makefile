@@ -17,6 +17,7 @@ OUTPUT_WATCH_TOOL := fw1814capture48_output_watch
 TEARDOWN_WATCH_TOOL := fw1814teardown_watch
 CLIENT_CLOSE_WATCH_TOOL := fw1814client_close_watch
 STREAM_CLIENT_CLOSE_WATCH_TOOL := fw1814stream_client_close_watch
+PLAYBACK_MAP_TOOL := fw1814playback_map
 
 .PHONY: fingerprint probe boot-tool boot-check boot \
 	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe \
@@ -28,7 +29,8 @@ STREAM_CLIENT_CLOSE_WATCH_TOOL := fw1814stream_client_close_watch
 	output-watch-tool output-watch-check output-watch output-watch-raw \
 	teardown-watch-tool teardown-watch-check teardown-watch \
 	client-close-watch-tool client-close-watch-check client-close-watch \
-	stream-client-close-watch-tool stream-client-close-watch-check stream-client-close-watch clean
+	stream-client-close-watch-tool stream-client-close-watch-check stream-client-close-watch \
+	playback-map-tool playback-map-check playback-map clean
 
 probe:
 	$(MAKE) -C $(PROBE_DIR)
@@ -123,7 +125,7 @@ dualcmp-wait: dualcmp-wait-tool
 	./$(DUALCMP_WAIT_TOOL) --execute
 
 dualcmp-wait-raw: dualcmp-wait-tool
-	./$(DUALCMP_WAIT_TOOL) --execute --raw
+	./$(DUALCMP_TOOL) --execute --raw
 
 # Full BeBoB transport-start diagnostic. Linux initializes these streams with
 # CIP_BLOCKING, so 48 kHz uses three 8-event data packets followed by one
@@ -206,8 +208,25 @@ stream-client-close-watch-check: stream-client-close-watch-tool
 stream-client-close-watch: stream-client-close-watch-tool
 	./$(STREAM_CLIENT_CLOSE_WATCH_TOOL) --execute
 
+# Guarded physical playback-position mapper. It reuses the proven full-duplex
+# 48 kHz startup and replaces playback silence with a 500 Hz / -24 dBFS tone
+# in one explicitly selected PCM position. Positions 0..5 are tested one at a
+# time; no physical output name is assumed in software.
+playback-map-tool: $(PLAYBACK_MAP_TOOL)
+
+$(PLAYBACK_MAP_TOOL): fw1814playback_map.cpp fw1814_tone_tx.h $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814playback_map.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+playback-map-check: playback-map-tool
+	@if [ -z "$(POSITION)" ]; then echo "usage: make playback-map-check POSITION=0..5"; exit 64; fi
+	./$(PLAYBACK_MAP_TOOL) --position $(POSITION)
+
+playback-map: playback-map-tool
+	@if [ -z "$(POSITION)" ]; then echo "usage: make playback-map POSITION=0..5"; exit 64; fi
+	./$(PLAYBACK_MAP_TOOL) --position $(POSITION) --execute
+
 clean:
 	$(MAKE) -C $(PROBE_DIR) clean
 	$(MAKE) -C $(BEBOB_PROBE_DIR) clean
 	$(MAKE) -C $(BUS_RESET_DIR) clean
-	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) fw1814capture48_duplex_nodata
+	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) $(PLAYBACK_MAP_TOOL) fw1814capture48_duplex_nodata
