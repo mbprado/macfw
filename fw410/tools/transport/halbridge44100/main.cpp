@@ -230,8 +230,6 @@ bool run() {
     if (!isochCallbackThread.prepare()) goto cleanup;
     if (!control.start(fcp))
         std::cerr << "warning: FW410 control socket unavailable; audio will continue\n";
-    if (!meterServer.start(capturePump))
-        std::cerr << "warning: FW410 meter socket unavailable; audio will continue\n";
     if (!lifecycle.startIsoch(isochCallbackThread.runLoop())) goto cleanup;
     isochCallbackThread.startPumping();
     std::cout << "isoch callback dispatcher: dedicated run-loop thread\n";
@@ -267,6 +265,13 @@ bool run() {
     }
 
     if (!fcp.reassert44100()) goto cleanup;
+
+    // Do not expose the meter endpoint until the 44.1 startup/reassert window is
+    // complete. The GUI meter client intentionally has a short timeout; opening
+    // the listener earlier lets it queue a request that expires before service.
+    if (!meterServer.start(capturePump))
+        std::cerr << "warning: FW410 meter socket unavailable; audio will continue\n";
+
     macfw::transport::signalEngineReady();
 
     {
