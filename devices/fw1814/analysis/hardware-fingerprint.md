@@ -1,14 +1,8 @@
 # FW1814 hardware fingerprint
 
-Observed on the local development M-Audio FireWire 1814 on macOS on 2026-09-06 using the read-only `fwprobe --rom --info` path.
+Observed on the local development M-Audio FireWire 1814 on macOS on 2026-09-06 using the read-only `fwprobe --rom --info` path before and after the guarded boot-from-flash cue.
 
-## Status
-
-**Observed personality:** bootloader
-
-No control or streaming writes were issued while collecting this fingerprint.
-
-## IORegistry / configuration-ROM identity
+## Bootloader personality
 
 ```text
 FireWire Product Name: FW 1814 Bootloader
@@ -19,11 +13,7 @@ Unit_SW_Version:        0x00014001
 Unit directory value:   0x00010070
 ```
 
-The GUID is unique to the development unit and must not be used as a model-wide identity match.
-
-## BeBoB information block
-
-Read from `0xffffc8020000`:
+BeBoB information block at `0xffffc8020000`:
 
 ```text
 manufacturer:         bridgeCo
@@ -42,32 +32,60 @@ bootloader date:      20040330
 bootloader time:      025909
 ```
 
+## Guarded boot-from-flash validation
+
+`make -C devices/fw1814/tools boot-check` passed every FW1814-specific registry and BeBoB information-block guard.
+
+`make -C devices/fw1814/tools boot` then sent the documented M-Audio 12-byte boot-from-flash cue to `0xffffc8021000` and the write completed successfully. The expected FireWire bus reset/re-enumeration followed.
+
+## Operational personality
+
+After the guarded boot cue, the same physical interface re-enumerated as:
+
+```text
+FireWire Product Name: FW 1814
+Vendor_ID:              0x00000d6c
+GUID:                   0x000d6c0400f96d0c
+Unit_Spec_ID:           0x0000a02d
+Unit_SW_Version:        0x00014001
+Unit directory value:   0x00010071
+```
+
+The change from registry GUID `0x000d6c0410f96d0c` in the bootloader personality to `0x000d6c0400f96d0c` in the operational personality is observed on this unit. Neither value should be used as a model-wide identity match because GUIDs are device-specific.
+
+The operational BeBoB information block remains:
+
+```text
+manufacturer:         bridgeCo
+protocol version:     0x00000001
+bootloader version:   0x00000000
+GUID (FFADO):         0x000d6c0400f96d0c
+hardware model ID:    0x00000083
+hardware revision:    0x00000001
+software date:        20070713
+software time:        080440
+software ID:          0x00000000
+software version:     0x00000000
+base address:         0x20080000
+max image length:     0x00180000
+bootloader date:      20040330
+bootloader time:      025909
+```
+
 ## Interpretation
 
-The observed hardware model ID (`0x83`) and firmware/bootloader dates match the published Linux/snd-firewire-ctl-services reference for the FireWire 1814. This is therefore a strong model-level correlation in addition to the local macOS observation.
+The observed hardware model ID `0x83` and firmware/bootloader dates match the published Linux/snd-firewire-ctl-services FW1814 reference.
 
-The operational FireWire personality remains unconfirmed locally. It must be fingerprinted after a guarded boot-from-flash operation before it is added to production identity matching.
+The configuration-ROM unit-directory value is `0x10070` in the bootloader personality and `0x10071` in the operational personality. The operational `0x10071` value also matches the Linux `MODEL_MAUDIO_FW1814` identifier.
 
-## Boot-from-flash next step
+Both locally observed personalities are now safe to represent in the experimental FW1814 device profile using product name + `Unit_Spec_ID` + `Unit_SW_Version`. The profile remains experimental and is not yet promoted into the production installer/runtime registry.
 
-`devices/fw1814/tools/fwboot1814` implements the documented M-Audio boot-from-flash cue with FW1814-specific guards. It requires the confirmed registry identity plus the observed BeBoB model/firmware fingerprint before a write can occur.
+## Next step
 
-The dry-run path is:
-
-```bash
-make -C devices/fw1814/tools boot-check
-```
-
-The guarded write path is:
+Run the common observational BeBoB operational probe:
 
 ```bash
-make -C devices/fw1814/tools boot
+make -C devices/fw1814/tools operational-probe
 ```
 
-A FireWire bus reset/re-enumeration is expected after the cue. The next action is to rerun:
-
-```bash
-make -C devices/fw1814/tools fingerprint
-```
-
-and record the operational personality.
+This collects current AV/C signal formats, supported BridgeCo stream formations and CMP plug state. It sends AV/C STATUS/list commands only; it sends no AV/C CONTROL, mixer/configuration or streaming writes.
