@@ -41,6 +41,8 @@ struct Formation {
 };
 
 bool gRaw = false;
+bool gBridgeCoFormats = false;
+bool gMaudioSpecial = false;
 
 std::string stringProperty(io_registry_entry_t service, const char* key) {
     CFStringRef k = CFStringCreateWithCString(kCFAllocatorDefault, key,
@@ -50,6 +52,7 @@ std::string stringProperty(io_registry_entry_t service, const char* key) {
                                                        kCFAllocatorDefault, 0);
     CFRelease(k);
     if (!value) return {};
+
     std::string result;
     if (CFGetTypeID(value) == CFStringGetTypeID()) {
         char buffer[1024] = {};
@@ -70,6 +73,7 @@ bool numberProperty(io_registry_entry_t service, const char* key,
                                                        kCFAllocatorDefault, 0);
     CFRelease(k);
     if (!value) return false;
+
     bool ok = false;
     if (CFGetTypeID(value) == CFNumberGetTypeID()) {
         long long n = 0;
@@ -114,20 +118,20 @@ unsigned rateForBridgeCoCode(UInt8 code) {
 
 IOReturn readAbsolute(IOFireWireLibDeviceRef device, UInt32 generation,
                       UInt16 node, UInt32 lo, void* buffer, UInt32& size) {
-    FWAddress a{};
-    a.nodeID = node;
-    a.addressHi = kAddressHi;
-    a.addressLo = lo;
-    return (*device)->Read(device, 0, &a, buffer, &size, true, generation);
+    FWAddress address{};
+    address.nodeID = node;
+    address.addressHi = kAddressHi;
+    address.addressLo = lo;
+    return (*device)->Read(device, 0, &address, buffer, &size, true, generation);
 }
 
 IOReturn writeFcp(IOFireWireLibDeviceRef device, UInt32 generation,
                   UInt16 node, const void* buffer, UInt32& size) {
-    FWAddress a{};
-    a.nodeID = node;
-    a.addressHi = kAddressHi;
-    a.addressLo = kFcpCommandLo;
-    return (*device)->Write(device, 0, &a, buffer, &size, true, generation);
+    FWAddress address{};
+    address.nodeID = node;
+    address.addressHi = kAddressHi;
+    address.addressLo = kFcpCommandLo;
+    return (*device)->Write(device, 0, &address, buffer, &size, true, generation);
 }
 
 UInt32 responseHandler(IOFireWireLibPseudoAddressSpaceRef space,
@@ -180,7 +184,7 @@ bool transaction(IOFireWireLibDeviceRef device, UInt32 generation,
 bool readSignalRate(IOFireWireLibDeviceRef device, UInt32 generation,
                     UInt16 node, ResponseContext& ctx, UInt8 opcode,
                     unsigned& rate) {
-    // AV/C STATUS for OUTPUT/INPUT PLUG SIGNAL FORMAT, unit plug 0.
+    // Standard AV/C STATUS for OUTPUT/INPUT PLUG SIGNAL FORMAT, unit plug 0.
     const UInt8 command[8] = {
         0x01, 0xff, opcode, 0x00, 0x90, 0xff, 0xff, 0xff
     };
@@ -197,7 +201,9 @@ bool readSignalRate(IOFireWireLibDeviceRef device, UInt32 generation,
 }
 
 std::array<UInt8, 12> streamFormatCommand(UInt8 direction, UInt8 eid) {
-    // AV/C STATUS: BridgeCo STREAM FORMAT SUPPORT / list request.
+    // BridgeCo extension: STREAM FORMAT SUPPORT / list request.
+    // IMPORTANT: this is intentionally opt-in. M-Audio FW1814/ProjectMix
+    // special firmware does not implement BridgeCo extensions.
     return {0x01, 0xff, 0x2f, 0xc1,
             direction, 0x00, 0x00, 0x00, 0xff,
             0x00, eid, 0x00};
@@ -205,10 +211,9 @@ std::array<UInt8, 12> streamFormatCommand(UInt8 direction, UInt8 eid) {
 
 bool decodeFormation(const UInt8* payload, UInt32 length,
                      Formation& formation) {
-    // BridgeCo extended stream-format payload:
-    //   90 40 <freq> 01 <cluster-count> [<channels> <format>]...
     if (length < 5 || payload[0] != 0x90 || payload[1] != 0x40)
         return false;
+
     formation.rate = rateForBridgeCoCode(payload[2]);
     formation.clusters = payload[4];
     const UInt32 required = 5 + formation.clusters * 2;
@@ -255,10 +260,10 @@ void enumerateFormats(IOFireWireLibDeviceRef device, UInt32 generation,
             break;
         }
 
-        Formation f;
+        Formation formation;
         const UInt8* payload = ctx.bytes.data() + 11;
         const UInt32 payloadLength = ctx.length - 11;
-        if (!decodeFormation(payload, payloadLength, f)) {
+        if (!decodeFormation(payload, payloadLength, formation)) {
             std::cout << "        entry " << eid << ": undecoded";
             if (gRaw) {
                 std::cout << " payload=";
@@ -268,12 +273,12 @@ void enumerateFormats(IOFireWireLibDeviceRef device, UInt32 generation,
             continue;
         }
 
-        std::cout << "        entry " << eid << ": " << f.rate
-                  << " Hz, PCM=" << f.pcmChannels
-                  << ", MIDI=" << f.midiChannels;
-        if (f.otherChannels)
-            std::cout << ", other=" << f.otherChannels;
-        std::cout << ", clusters=" << f.clusters << '\n';
+        std::cout << "        entry " << eid << ": " << formation.rate
+                  << " Hz, PCM=" << formation.pcmChannels
+                  << ", MIDI=" << formation.midiChannels;
+        if (formation.otherChannels)
+            std::cout << ", other=" << formation.otherChannels;
+        std::cout << ", clusters=" << formation.clusters << '\n';
     }
 }
 
@@ -283,8 +288,13 @@ bool readQuadlet(IOFireWireLibDeviceRef device, UInt32 generation,
     UInt32 size = static_cast<UInt32>(bytes.size());
     const IOReturn kr = readAbsolute(device, generation, node, lo,
                                      bytes.data(), size);
-    if (kr != kIOReturnSuccess || size != bytes.size())
+    if (kr != kIOReturnSuccess || size != bytes.size()) {
+        std::cout << "        CMP read 0xffff" << std::hex << lo
+                  << " failed: 0x" << kr << std::dec
+                  << " (" << size << " bytes)\n";
         return false;
+    }
+
     value = (static_cast<std::uint32_t>(bytes[0]) << 24) |
             (static_cast<std::uint32_t>(bytes[1]) << 16) |
             (static_cast<std::uint32_t>(bytes[2]) << 8) |
@@ -303,6 +313,7 @@ void printPcr(const char* name, std::uint32_t value, bool output) {
     const bool broadcast = (value & 0x40000000u) != 0;
     const unsigned p2p = (value >> 24) & 0x3f;
     const unsigned channel = (value >> 16) & 0x3f;
+
     std::cout << "    " << name << ": 0x" << std::hex << std::setw(8)
               << std::setfill('0') << value << std::dec << std::setfill(' ')
               << "  online=" << (online ? "yes" : "no")
@@ -320,22 +331,26 @@ void printPcr(const char* name, std::uint32_t value, bool output) {
 void printCmp(IOFireWireLibDeviceRef device, UInt32 generation, UInt16 node) {
     std::uint32_t ompr = 0, opcr0 = 0, impr = 0, ipcr0 = 0;
     std::cout << "    CMP register snapshot:\n";
-    if (!readQuadlet(device, generation, node, kOmprLo, ompr) ||
-        !readQuadlet(device, generation, node, kOpcr0Lo, opcr0) ||
-        !readQuadlet(device, generation, node, kImprLo, impr) ||
-        !readQuadlet(device, generation, node, kIpcr0Lo, ipcr0)) {
-        std::cout << "        unable to read complete CMP register set\n";
-        return;
-    }
-    printMpr("oMPR", ompr);
-    printPcr("oPCR[0] device OUTPUT / host capture", opcr0, true);
-    printMpr("iMPR", impr);
-    printPcr("iPCR[0] device INPUT / host playback", ipcr0, false);
+
+    const bool omprOk = readQuadlet(device, generation, node, kOmprLo, ompr);
+    const bool opcrOk = readQuadlet(device, generation, node, kOpcr0Lo, opcr0);
+    const bool imprOk = readQuadlet(device, generation, node, kImprLo, impr);
+    const bool ipcrOk = readQuadlet(device, generation, node, kIpcr0Lo, ipcr0);
+
+    if (omprOk) printMpr("oMPR", ompr);
+    if (opcrOk) printPcr("oPCR[0] device OUTPUT / host capture", opcr0, true);
+    if (imprOk) printMpr("iMPR", impr);
+    if (ipcrOk) printPcr("iPCR[0] device INPUT / host playback", ipcr0, false);
 }
 
 void usage(const char* argv0) {
     std::cout << "usage: " << argv0
-              << " --product <FireWire Product Name> [--raw]\n";
+              << " --product <FireWire Product Name>"
+              << " [--maudio-special] [--bridgeco-formats] [--raw]\n"
+              << "  default             standard signal-format STATUS + CMP reads\n"
+              << "  --maudio-special    use the restricted M-Audio special-firmware path\n"
+              << "  --bridgeco-formats  opt in to BridgeCo extended format enumeration\n"
+              << "  --raw               print raw FCP commands/responses\n";
 }
 
 } // namespace
@@ -346,6 +361,10 @@ int main(int argc, char** argv) {
         const std::string arg = argv[i];
         if (arg == "--product" && i + 1 < argc)
             product = argv[++i];
+        else if (arg == "--maudio-special")
+            gMaudioSpecial = true;
+        else if (arg == "--bridgeco-formats")
+            gBridgeCoFormats = true;
         else if (arg == "--raw")
             gRaw = true;
         else if (arg == "--help" || arg == "-h") {
@@ -356,16 +375,21 @@ int main(int argc, char** argv) {
             return 64;
         }
     }
-    if (product.empty()) {
+
+    if (product.empty() || (gMaudioSpecial && gBridgeCoFormats)) {
         usage(argv[0]);
         return 64;
     }
 
     std::cout << "macfw bebobprobe — observational BeBoB operational probe\n"
-              << "target product: " << product << "\n\n";
+              << "target product: " << product << '\n';
+    if (gMaudioSpecial)
+        std::cout << "mode: M-Audio special firmware (no BridgeCo extensions)\n";
+    std::cout << '\n';
 
     CFMutableDictionaryRef matching = IOServiceMatching("IOFireWireUnit");
     if (!matching) return 1;
+
     io_iterator_t iterator = IO_OBJECT_NULL;
     if (IOServiceGetMatchingServices(kIOMainPortDefault, matching,
                                      &iterator) != KERN_SUCCESS)
@@ -422,6 +446,7 @@ int main(int argc, char** argv) {
             IOObjectRelease(iterator);
             return 3;
         }
+
         std::cout << "    generation: " << generation << '\n'
                   << "    remote node: 0x" << std::hex << node
                   << std::dec << '\n';
@@ -431,6 +456,11 @@ int main(int argc, char** argv) {
             IOObjectRelease(iterator);
             return 4;
         }
+
+        // Read CMP before sending any FCP transaction. This makes transport
+        // register health independently visible when a device has AV/C issues.
+        printCmp(device, generation, node);
+
         if ((*device)->AddCallbackDispatcherToRunLoop(
                 device, CFRunLoopGetCurrent()) != kIOReturnSuccess) {
             (*device)->Close(device);
@@ -455,24 +485,49 @@ int main(int argc, char** argv) {
         (*responseSpace)->SetWriteHandler(responseSpace, responseHandler);
         (*responseSpace)->TurnOnNotification(responseSpace);
 
-        unsigned outRate = 0, inRate = 0;
-        const bool outOk = readSignalRate(device, generation, node, ctx,
-                                          0x18, outRate);
-        const bool inOk = readSignalRate(device, generation, node, ctx,
-                                         0x19, inRate);
-        std::cout << "    current signal formats:\n"
-                  << "        device OUTPUT / host capture:  "
-                  << (outOk ? std::to_string(outRate) : "unknown")
-                  << " Hz\n"
-                  << "        device INPUT / host playback: "
-                  << (inOk ? std::to_string(inRate) : "unknown")
-                  << " Hz\n";
+        if (gMaudioSpecial) {
+            // Linux snd-bebob treats the INPUT plug as the authoritative rate
+            // source for M-Audio special firmware and does not query BridgeCo
+            // stream-format extensions on FW1814/ProjectMix.
+            unsigned inRate = 0;
+            bool inOk = false;
+            for (unsigned attempt = 0; attempt < 3 && !inOk; ++attempt)
+                inOk = readSignalRate(device, generation, node, ctx,
+                                      0x19, inRate);
 
-        enumerateFormats(device, generation, node, ctx,
-                         0x01, "device OUTPUT / host capture");
-        enumerateFormats(device, generation, node, ctx,
-                         0x00, "device INPUT / host playback");
-        printCmp(device, generation, node);
+            std::cout << "    current signal format:\n"
+                      << "        device INPUT / host playback: "
+                      << (inOk ? std::to_string(inRate) : "unknown")
+                      << " Hz\n"
+                      << "        device OUTPUT / host capture: not queried"
+                      << " (special-firmware quirk)\n"
+                      << "    supported stream formats:\n"
+                      << "        not queried: FW1814 special firmware does not"
+                      << " support BridgeCo extensions\n";
+        } else {
+            unsigned outRate = 0, inRate = 0;
+            const bool outOk = readSignalRate(device, generation, node, ctx,
+                                              0x18, outRate);
+            const bool inOk = readSignalRate(device, generation, node, ctx,
+                                             0x19, inRate);
+            std::cout << "    current signal formats:\n"
+                      << "        device OUTPUT / host capture:  "
+                      << (outOk ? std::to_string(outRate) : "unknown")
+                      << " Hz\n"
+                      << "        device INPUT / host playback: "
+                      << (inOk ? std::to_string(inRate) : "unknown")
+                      << " Hz\n";
+
+            if (gBridgeCoFormats) {
+                enumerateFormats(device, generation, node, ctx,
+                                 0x01, "device OUTPUT / host capture");
+                enumerateFormats(device, generation, node, ctx,
+                                 0x00, "device INPUT / host playback");
+            } else {
+                std::cout << "    BridgeCo stream-format enumeration: skipped"
+                          << " (opt in with --bridgeco-formats)\n";
+            }
+        }
 
         (*responseSpace)->TurnOffNotification(responseSpace);
         (*responseSpace)->Release(responseSpace);
