@@ -24,9 +24,21 @@ This locally confirms that the extra post-boot bus reset restores reliable norma
 
 The guarded special-firmware initializer was then hardware-tested at 48 kHz. The known internal-clock/S/PDIF baseline was accepted, OUTPUT 48 kHz succeeded, INPUT 48 kHz succeeded after the required 100 ms delay, and authoritative INPUT STATUS read back 48000 Hz.
 
-The first receive-only AMDTP experiment then established oPCR[0] successfully and started the host receive channel, but received zero packets (`0 / 64` NuDCL slots touched). oPCR[0] restored exactly after the test. This showed that CMP connection alone does not cause this firmware to begin transmitting.
+The first receive-only AMDTP experiment established oPCR[0] successfully and started the host receive channel, but received zero packets (`0 / 64` NuDCL slots touched). oPCR[0] restored exactly after the test. This showed that an OUTPUT CMP connection alone does not cause this firmware to begin transmitting.
 
-Upstream Linux explains the missing step: after the CMP/AMDTP streams are established, the M-Audio special-firmware path deliberately reasserts the current sample rate. The source explicitly notes that these commands are how the customized firmware starts transmitting. The next macfw receive probe therefore performs the special rate reassert only after CMP connection and host RX startup.
+A second receive-only experiment added the M-Audio special-firmware stream kick after oPCR[0] connection and host RX startup. In that state:
+
+```text
+reassert OUTPUT 48000 Hz: PASS
+wait 100 ms
+reassert INPUT 48000 Hz:  FAIL
+```
+
+The same INPUT command succeeds outside streaming in `fw1814init`, so the command bytes and 100 ms timing are already hardware-validated. The failure is specific to the incomplete stream-start state.
+
+Re-reading the current Linux BeBoB streaming engine clarified the missing condition: `snd_bebob_stream_start_duplex()` starts the host-to-device and device-to-host streams, with both CMP connections established, before the M-Audio special-firmware rate reassert is issued. Therefore the earlier macfw assumption that FW1814 startup could be modeled as an oPCR-only receive stream was incorrect.
+
+The next incremental macfw experiment deliberately changes only one variable: reserve a host-to-device companion ISO channel and connect iPCR[0] as well as oPCR[0], while still starting only the capture DMA. If this makes the INPUT rate reassert succeed, the following experiment will add an actual host-to-device no-data DMA stream.
 
 ## Upstream Linux correlation
 
@@ -45,8 +57,8 @@ Important rules from that implementation:
 5. Linux uses static stream-formation tables derived from the selected digital modes rather than querying BridgeCo format support.
 6. Linux schedules a FireWire bus reset for FW1814/ProjectMix after registration because these devices can otherwise have a FireWire gap-count mismatch that causes frequent transaction failures.
 7. When changing sample rate, Linux programs device OUTPUT first, waits 100 ms, then programs device INPUT because the second command is otherwise prone to failure.
-8. For M-Audio special firmware, after CMP connections and the host AMDTP domain are started, Linux re-applies the current sample rate. Its source comment states that the customized firmware uses these commands to start transmitting the stream.
-9. Unlike FW410 and Ozonic, the FW1814 does not require both stream directions merely to make one direction operate; a single stream is permitted by the upstream M-Audio-specific logic.
+8. For M-Audio special firmware, after the CMP connections and AMDTP domain are started, Linux re-applies the current sample rate. Its source comment states that the customized firmware uses these commands to start transmitting the stream.
+9. The Linux BeBoB streaming engine reserves and starts both stream directions as one duplex domain before the M-Audio special rate reassert. This is distinct from whether an application is actively using both PCM directions; transport startup itself is duplex.
 
 ## Reference 44.1/48 kHz formations
 
@@ -66,6 +78,13 @@ host -> device / playback:  12 PCM + 1 MIDI
 
 These are upstream reference formations. They have not yet been validated from received macfw isochronous packets on the local FW1814.
 
+At 48 kHz in the S/PDIF baseline, the corresponding maximum packet reservations used by the current bring-up probes are:
+
+```text
+device -> host:  8 + 6 * 11 * 4 = 272 bytes
+host -> device:  8 + 6 *  7 * 4 = 176 bytes
+```
+
 ## macfw bring-up policy
 
 - Never send BridgeCo extended stream-format enumeration to FW1814.
@@ -73,6 +92,9 @@ These are upstream reference formations. They have not yet been validated from r
 - Validate CMP and standard AV/C STATUS after the reset.
 - Establish the known-safe M-Audio baseline explicitly: internal clock + S/PDIF input/output + unlocked clock controls.
 - For ordinary sample-rate changes, program OUTPUT, wait 100 ms, then program INPUT and verify with INPUT PLUG SIGNAL FORMAT STATUS.
-- When starting an FW1814 special-firmware stream, establish CMP and start the host ISO side first, then reassert the current rate using the same OUTPUT -> 100 ms -> INPUT sequence to kick device transmission.
+- Model FW1814 stream startup as a duplex transport handshake: both CMP directions must be accounted for before the M-Audio special-firmware rate reassert.
+- Keep application-level capture/playback concerns separate from the transport startup requirement; a capture-only client can still require a silent/no-data companion transport stream underneath.
+- Change one startup variable at a time during bring-up. First test dual CMP with capture DMA only; only if needed add host-to-device no-data DMA.
+- Always restore both PCRs exactly after experiments that connect them.
 - Keep the first transport baseline at 48 kHz, internal clock, S/PDIF digital mode.
 - Preserve the MIDI AM824 position but defer CoreMIDI exposure.
