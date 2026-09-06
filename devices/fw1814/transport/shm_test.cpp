@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -41,26 +42,41 @@ struct CaptureMapping {
 };
 
 bool initPlayback() {
-    const int fd = shm_open(macfw::fw1814::hal::kPlaybackShmName,
-                            O_CREAT | O_RDWR, 0666);
-    if (fd < 0) return false;
+    const char* name = macfw::fw1814::hal::kPlaybackShmName;
+    const int fd = shm_open(name, O_CREAT | O_RDWR, 0666);
+    if (fd < 0) {
+        std::cerr << "shm_open(" << name << ") failed: "
+                  << std::strerror(errno) << " (errno=" << errno << ")\n";
+        return false;
+    }
+
+    // Match the already-working FW410 HAL creation path: shm_open ->
+    // ftruncate -> mmap. fchmod is unnecessary for this temporary same-user
+    // producer/consumer test and was the only extra syscall in the FW1814
+    // initializer.
     const std::size_t bytes = sizeof(macfw::fw1814::hal::SharedPlaybackRing);
-    if (fchmod(fd, 0666) != 0 ||
-        ftruncate(fd, static_cast<off_t>(bytes)) != 0) {
+    if (ftruncate(fd, static_cast<off_t>(bytes)) != 0) {
+        std::cerr << "ftruncate(" << name << ", " << bytes << ") failed: "
+                  << std::strerror(errno) << " (errno=" << errno << ")\n";
         close(fd);
         return false;
     }
+
     void* p = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (p == MAP_FAILED) {
+        std::cerr << "mmap(" << name << ", " << bytes << ") failed: "
+                  << std::strerror(errno) << " (errno=" << errno << ")\n";
         close(fd);
         return false;
     }
+
     auto* ring = static_cast<macfw::fw1814::hal::SharedPlaybackRing*>(p);
     macfw::fw1814::hal::initialize(*ring, 48000);
     munmap(p, bytes);
     close(fd);
-    std::cout << "initialized " << macfw::fw1814::hal::kPlaybackShmName
-              << " as 48000 Hz / 4 physical analog outputs\n";
+    std::cout << "initialized " << name
+              << " as 48000 Hz / 4 physical analog outputs (" << bytes
+              << " bytes)\n";
     return true;
 }
 
