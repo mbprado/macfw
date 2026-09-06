@@ -12,17 +12,26 @@ inline constexpr std::uint32_t kInitialSampleRates[] = {
     48000,
 };
 
-// Intentionally empty until the connected development FW1814 has been
-// fingerprinted on macOS. Published Linux/BeBoB identifiers are useful
-// reference evidence, but are not promoted into macfw installer/runtime
-// matching before local hardware validation.
+// Confirmed on the local development FW1814 on macOS, 2026-09-06.
+// The operational identity is intentionally not listed until the unit has been
+// booted from flash and fingerprinted in that personality.
+inline constexpr IdentityMatch kIdentities[] = {
+    {
+        "FW 1814 Bootloader",
+        Personality::Bootloader,
+        0x0000a02d,
+        0x00014001,
+        true,
+    },
+};
+
 inline constexpr DeviceProfile kProfile = {
     "fw1814",
     "M-Audio",
     "FireWire 1814",
     SupportLevel::Experimental,
-    nullptr,
-    0,
+    kIdentities,
+    sizeof(kIdentities) / sizeof(kIdentities[0]),
     kInitialSampleRates,
     sizeof(kInitialSampleRates) / sizeof(kInitialSampleRates[0]),
 };
