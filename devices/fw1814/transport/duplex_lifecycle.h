@@ -117,6 +117,9 @@ public:
     bool stopIsochAndRestoreCmp() {
         if (!device_) return true;
 
+        // Stop local DMA regardless of bus generation. Never issue a remote
+        // write until the current generation is known to match the one used
+        // when the CMP connections were established.
         if (captureStarted_ && capture_.nativeChannel())
             (*capture_.nativeChannel())->Stop(capture_.nativeChannel());
         if (playbackStarted_ && playback_.nativeChannel())
@@ -125,21 +128,23 @@ public:
         playbackStarted_ = false;
 
         bool restoreOk = true;
-        if (generationStillValid()) {
-            if (ipConnected_) {
-                const IOReturn kr = macfw::cmp::restore(
-                    *device_, macfw::cmp::kIpcr0AddressLo, ipcr0_);
-                restoreOk = restoreOk && kr == kIOReturnSuccess;
+        if (ipConnected_ || opConnected_) {
+            if (generationStillValid()) {
+                if (ipConnected_) {
+                    const IOReturn kr = macfw::cmp::restore(
+                        *device_, macfw::cmp::kIpcr0AddressLo, ipcr0_);
+                    restoreOk = restoreOk && kr == kIOReturnSuccess;
+                }
+                if (opConnected_) {
+                    const IOReturn kr = macfw::cmp::restore(
+                        *device_, macfw::cmp::kOpcr0AddressLo, opcr0_);
+                    restoreOk = restoreOk && kr == kIOReturnSuccess;
+                }
+            } else {
+                std::cerr << "FW1814 bus generation changed/unavailable; "
+                             "skipping stale-generation PCR restore writes\n";
+                restoreOk = false;
             }
-            if (opConnected_) {
-                const IOReturn kr = macfw::cmp::restore(
-                    *device_, macfw::cmp::kOpcr0AddressLo, opcr0_);
-                restoreOk = restoreOk && kr == kIOReturnSuccess;
-            }
-        } else if (ipConnected_ || opConnected_) {
-            std::cerr << "FW1814 bus generation changed/unavailable; "
-                         "skipping stale-generation PCR restore writes\n";
-            restoreOk = false;
         }
         ipConnected_ = false;
         opConnected_ = false;
@@ -167,11 +172,16 @@ public:
         if (!device_) return;
         stopIsochAndRestoreCmp();
         removeDispatchers();
+
+        // Clear every object/pointer that could reach the FireWire client so a
+        // destructor or explicit second stop() is a strict no-op.
         playback_ = macfw::IsochAllocation{};
         capture_ = macfw::IsochAllocation{};
         native_ = nullptr;
         device_ = nullptr;
         initialGeneration_ = 0;
+        opcr0_ = 0;
+        ipcr0_ = 0;
     }
 
     IOFireWireLibDeviceRef native() const { return native_; }
