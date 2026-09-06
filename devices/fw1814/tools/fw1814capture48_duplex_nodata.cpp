@@ -28,14 +28,14 @@ constexpr UInt32 kFcpResponseSize = 0x200;
 constexpr double kFcpTimeoutSeconds = 1.0;
 
 constexpr unsigned kRate = 48000;
-constexpr UInt32 kCaptureMaxPayload = 272;  // 10 PCM + 1 MIDI, six events.
-constexpr UInt32 kPlaybackMaxPayload = 176; // 6 PCM + 1 MIDI, six events.
-constexpr std::uint8_t kPlaybackDbs = 7;    // 6 PCM + 1 MIDI.
+constexpr UInt32 kCaptureMaxPayload = 272;
+constexpr UInt32 kPlaybackMaxPayload = 176;
+constexpr std::uint8_t kPlaybackDbs = 7;
 constexpr std::uint8_t kFdf48 = 0x02;
 constexpr std::size_t kCapturePackets = 64;
 constexpr std::size_t kTxPackets = 128;
 constexpr UInt32 kCyclesPerSecond = 8000;
-constexpr UInt32 kTxCycleLead = 256;        // ~32 ms at 8 kHz cycle rate.
+constexpr UInt32 kTxCycleLead = 256;
 
 struct ResponseContext {
     UInt16 expectedNode = 0;
@@ -359,7 +359,7 @@ bool run(bool execute, bool raw) {
         UInt32 cycleTime = 0;
         if ((*native)->GetCycleTime(native, &cycleTime) != kIOReturnSuccess) {
             std::cout << "GetCycleTime failed\n";
-            goto cleanup_stream;
+            goto cleanup;
         }
         const UInt32 currentCycle = (cycleTime >> 12) & 0x1fffu;
         const UInt32 firstTxCycle = (currentCycle + kTxCycleLead) % kCyclesPerSecond;
@@ -374,7 +374,6 @@ bool run(bool execute, bool raw) {
         auto playback = macfw::IsochAllocation::create(
             device, macfw::IsochAllocation::Direction::HostToDevice,
             kPlaybackMaxPayload);
-
         IOFireWireLibIsochChannelRef captureChannel = nullptr;
         IOFireWireLibIsochChannelRef playbackChannel = nullptr;
 
@@ -416,7 +415,6 @@ bool run(bool execute, bool raw) {
         isochDispatcher = true;
         if ((*native)->TurnOnNotification(native)) notifications = true;
 
-        // Follow the proven duplex ordering: playback resources before capture.
         {
             const IOReturn kr = playback.allocate();
             if (kr != kIOReturnSuccess) {
@@ -466,7 +464,6 @@ bool run(bool execute, bool raw) {
         ipcrConnected = true;
         std::cout << "CMP: BOTH oPCR[0] and iPCR[0] connected\n";
 
-        // Linux/proven FW410 ordering: host playback direction starts first.
         {
             const IOReturn kr = (*playbackChannel)->Start(playbackChannel);
             if (kr != kIOReturnSuccess) {
