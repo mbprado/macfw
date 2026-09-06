@@ -4,19 +4,17 @@ FRAMEWORKS := -framework IOKit -framework CoreFoundation
 
 PROBE_DIR := ../../../fw410/tools/device/fwprobe
 BEBOB_PROBE_DIR := ../../../common/tools/bebobprobe
+BUS_RESET_DIR := ../../../common/tools/firewirebusreset
 BOOT_TOOL := fwboot1814
 
-.PHONY: fingerprint probe operational-probe boot-tool boot-check boot clean
+.PHONY: fingerprint probe boot-tool boot-check boot \
+	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe clean
 
 probe:
 	$(MAKE) -C $(PROBE_DIR)
 
 fingerprint: probe
 	sh ./fingerprint.sh
-
-operational-probe:
-	$(MAKE) -C $(BEBOB_PROBE_DIR)
-	$(BEBOB_PROBE_DIR)/bebobprobe --product "FW 1814"
 
 boot-tool: $(BOOT_TOOL)
 
@@ -29,7 +27,23 @@ boot-check: boot-tool
 boot: boot-tool
 	./$(BOOT_TOOL) --execute
 
+bebob-probe:
+	$(MAKE) -C $(BEBOB_PROBE_DIR)
+
+bus-reset-tool:
+	$(MAKE) -C $(BUS_RESET_DIR)
+
+bus-reset-check: bus-reset-tool
+	$(BUS_RESET_DIR)/firewirebusreset --product "FW 1814"
+
+bus-reset: bus-reset-tool
+	$(BUS_RESET_DIR)/firewirebusreset --product "FW 1814" --execute
+
+operational-probe: bebob-probe
+	$(BEBOB_PROBE_DIR)/bebobprobe --product "FW 1814" --maudio-special
+
 clean:
 	$(MAKE) -C $(PROBE_DIR) clean
 	$(MAKE) -C $(BEBOB_PROBE_DIR) clean
+	$(MAKE) -C $(BUS_RESET_DIR) clean
 	rm -f $(BOOT_TOOL)
