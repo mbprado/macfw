@@ -75,7 +75,6 @@ def main() -> int:
     malformed_packets = 0
     decoded_events = 0
     saw_transport_success = False
-    saw_input_pass = False
 
     for line in sys.stdin:
         # Preserve the original diagnostic on stderr so failures remain visible.
@@ -83,10 +82,6 @@ def main() -> int:
 
         if "duplex-blocking-silence experiment: PACKETS RECEIVED" in line:
             saw_transport_success = True
-        if "reassert INPUT 48000 Hz" in line:
-            current_packet = current_packet  # no-op; keeps state explicit
-        if "result: PASS" in line and "reassert" not in line:
-            pass
 
         match = PACKET_RE.match(line)
         if match:
@@ -103,12 +98,6 @@ def main() -> int:
             if current_packet["length"] == 8 and current_packet["syt"] == 0xFFFF:
                 nodata_packets += 1
             continue
-
-        # In this diagnostic the line immediately following the INPUT heading is
-        # the result line; remember a successful kick without depending on raw
-        # response-code details.
-        if line.strip() == "result: PASS":
-            saw_input_pass = True
 
         raw_match = RAW_RE.match(line)
         if not raw_match or not current_packet:
