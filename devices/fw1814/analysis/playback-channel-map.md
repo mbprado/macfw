@@ -106,7 +106,11 @@ waiting 100 ms before INPUT rate CONTROL...
 reassert INPUT 48000 Hz... FAIL
 ```
 
-PCR restoration succeeds afterward. In the observed failure there was no FCP write-failure or response-timeout message, so the next diagnostic step is to log the exact returned INPUT CONTROL response bytes on validation failure rather than change transport timing or command bytes speculatively.
+PCR restoration succeeds afterward. In the observed failure there was no FCP write-failure or response-timeout message.
+
+A strong software-side race hypothesis now exists: the current FCP response callback marks any response from the expected FW1814 node as the response for the active transaction, while `setSignalRate()` also accepts AV/C `INTERIM` (`0x0f`) as a successful terminal response. If OUTPUT returns `INTERIM` first and its later final response arrives after the INPUT transaction has reset the shared response context, that late OUTPUT response can be mistaken for the INPUT response. The INPUT validator then sees opcode `0x18` instead of `0x19` and reports `FAIL` even though the device may have accepted the INPUT command normally.
+
+This matches the intermittent nature of the failure and the absence of an FCP timeout. The production FCP helper should therefore match responses to the active command and handle `INTERIM` as non-final, waiting for the corresponding final response instead of treating the first response from the node as terminal. Before changing transport timing or command bytes, capture the exact response on a failing run to verify this race.
 
 ## Deferred
 
