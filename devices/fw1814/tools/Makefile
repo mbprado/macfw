@@ -6,9 +6,11 @@ PROBE_DIR := ../../../fw410/tools/device/fwprobe
 BEBOB_PROBE_DIR := ../../../common/tools/bebobprobe
 BUS_RESET_DIR := ../../../common/tools/firewirebusreset
 BOOT_TOOL := fwboot1814
+INIT_TOOL := fw1814init
 
 .PHONY: fingerprint probe boot-tool boot-check boot \
-	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe clean
+	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe \
+	init-tool init-check init-48 init-44 clean
 
 probe:
 	$(MAKE) -C $(PROBE_DIR)
@@ -42,8 +44,22 @@ bus-reset: bus-reset-tool
 operational-probe: bebob-probe
 	$(BEBOB_PROBE_DIR)/bebobprobe --product "FW 1814" --maudio-special
 
+init-tool: $(INIT_TOOL)
+
+$(INIT_TOOL): fw1814init.cpp
+	$(CXX) $(CXXFLAGS) $< $(FRAMEWORKS) -o $@
+
+init-check: init-tool
+	./$(INIT_TOOL) 48000
+
+init-48: init-tool
+	./$(INIT_TOOL) 48000 --execute
+
+init-44: init-tool
+	./$(INIT_TOOL) 44100 --execute
+
 clean:
 	$(MAKE) -C $(PROBE_DIR) clean
 	$(MAKE) -C $(BEBOB_PROBE_DIR) clean
 	$(MAKE) -C $(BUS_RESET_DIR) clean
-	rm -f $(BOOT_TOOL)
+	rm -f $(BOOT_TOOL) $(INIT_TOOL)
