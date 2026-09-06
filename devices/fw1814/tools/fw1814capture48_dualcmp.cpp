@@ -371,19 +371,23 @@ bool run(bool execute, bool raw) {
         auto companion = macfw::IsochAllocation::create(
             device, macfw::IsochAllocation::Direction::HostToDevice,
             kPlaybackMaxPayload);
+        IOFireWireLibIsochChannelRef captureChannel = nullptr;
+
         if (!ring || !capture || !companion) {
             std::cout << "ISO resource creation failed\n";
-            goto cleanup;
+            goto cleanup_stream;
         }
 
-        auto captureChannel = capture.nativeChannel();
-        const IOReturn listenerKr = (*captureChannel)->AddListener(
-            captureChannel,
-            reinterpret_cast<IOFireWireLibIsochPortRef>(ring.nativeLocalPort()));
-        if (listenerKr != kIOReturnSuccess) {
-            std::cout << "capture AddListener failed: 0x" << std::hex
-                      << listenerKr << std::dec << '\n';
-            goto cleanup_stream;
+        captureChannel = capture.nativeChannel();
+        {
+            const IOReturn listenerKr = (*captureChannel)->AddListener(
+                captureChannel,
+                reinterpret_cast<IOFireWireLibIsochPortRef>(ring.nativeLocalPort()));
+            if (listenerKr != kIOReturnSuccess) {
+                std::cout << "capture AddListener failed: 0x" << std::hex
+                          << listenerKr << std::dec << '\n';
+                goto cleanup_stream;
+            }
         }
 
         if ((*native)->AddIsochCallbackDispatcherToRunLoop(
@@ -466,7 +470,7 @@ bool run(bool execute, bool raw) {
                   << (success ? "PACKETS RECEIVED" : "NO PACKETS") << '\n';
 
 cleanup_stream:
-        if (captureStarted) {
+        if (captureStarted && captureChannel) {
             (*captureChannel)->Stop(captureChannel);
             captureStarted = false;
         }
