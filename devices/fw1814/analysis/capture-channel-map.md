@@ -15,7 +15,7 @@ Hardware-observed mapping for the M-Audio FireWire 1814 special firmware.
 
 | AM824 position | Physical source | Evidence |
 |---:|---|---|
-| 0 | Analog Input 1 | 440 Hz sine injected only into physical Input 1; pos 0 measured RMS -18.3 dBFS and peak -8.8 dBFS while the next-highest MBLA position was about -76.5 dBFS (~58 dB separation). |
+| 0 | Analog Input 1 | 440 Hz sine injected only into physical Input 1. First run: RMS -18.3 dBFS, peak -8.8 dBFS; next-highest MBLA position about -76.5 dBFS (~58 dB separation). Louder repeat near clipping: pos 0 rose to RMS -11.7 dBFS and peak -2.7 dBFS while all other MBLA positions remained near the same ~-76 to -99 dBFS noise floor. The position therefore tracks the physical Input 1 level and is hardware-confirmed. |
 
 ## Still unassigned
 
