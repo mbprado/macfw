@@ -23,7 +23,9 @@ install:
 uninstall:
 	$(MAKE) -C fw410 uninstall
 
-package: all
+package:
+	$(MAKE) -C fw410 clean
+	$(MAKE) -C fw410 all
 	chmod +x package/build-pkg.sh package/scripts/preinstall package/scripts/postinstall
 	./package/build-pkg.sh
 

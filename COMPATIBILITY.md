@@ -4,18 +4,22 @@ This file records hardware-tested macOS compatibility for the macfw M-Audio Fire
 
 Only configurations that have actually been tested on real hardware are marked validated. Versions that appear likely to work based on neighboring macOS releases are still listed as untested until verified.
 
+The table is cumulative across development releases; not every operating-system row is re-run for every tag.
+
 ## M-Audio FireWire 410
 
-| macOS version | Intel Mac | Installer | Playback | Capture | 44.1/48 kHz switching | Disconnect/reconnect | Sleep/wake | Status |
-|---|---|---|---|---|---|---|---|---|
-| Monterey 12.7.6 | validated | validated | validated | validated | validated | validated | not separately recorded | **Validated** |
-| Ventura 13.7.8 | validated | validated | validated | validated | validated | validated | validated | **Validated** |
-| Sonoma 14.8.9 | validated | validated | validated | validated | validated | validated | validated | **Validated** |
-| Sequoia 15.x | validated | validated | validated | validated | validated | validated | not separately recorded | **Validated** |
+| macOS version | Intel Mac | Installer | Playback | Capture | 44.1/48 kHz switching | Disconnect/reconnect | Sleep/wake | Status | UEFI
+|---|---|---|---|---|---|---|---|---|---|
+| Monterey 12.7.6 | validated | validated | validated | validated | validated | validated | not separately recorded | **Validated** | Stock |
+| Ventura 13.7.8 | validated | validated | validated | validated | validated | validated | validated | **Validated** | Stock/OpenCore LP |
+| Sonoma 14.8.9 | validated | validated | validated | validated | validated | validated | validated | **Validated** | OpenCore LP |
+| Sequoia 15.x | validated | validated | validated | validated | validated | validated | validated | **Validated** | OpenCore LP |
 
-The native control panel and current transport/control architecture have also been exercised on the validated development systems. The key control-path rule is common across releases: the GUI/CLI use the active transport's Unix-socket IPC rather than opening FireWire independently.
+The native control panel and transport/control architecture have been exercised on the validated development systems. The control-path rule is common across releases: the GUI/CLI use the active transport's Unix-socket IPC rather than opening FireWire independently.
 
-For the `0.02.000` candidate, the complete packaged control lifecycle was additionally hardware-validated: package installation, launchd startup, transport status, normal GUI/CLI control changes, Reset Defaults, saved-state restoration after reboot, and saved-state restoration after physical FW410 disconnect/reconnect all behaved as expected. Sequoia testing additionally confirmed input/output operation and preservation of the configured controls through the same reset/reconnect lifecycle.
+The `0.03.000` release-candidate regression on the current development system additionally validated the new low-latency scheduler, 256-frame capture prefill, Inputs meters, Device-tab rate control, Info/Diagnostics surface, repeated 44.1 <-> 48 kHz switching from both the control panel and Audio MIDI Setup, and the source/package build paths. The slower 48 -> 44.1 direction completed reliably after the `SIGPIPE`/meter-startup hardening.
+
+The operating-system rows below remain cumulative evidence from the individual hardware tests in which they were recorded; they should not be interpreted as a fresh `0.03.000` package re-test on every listed macOS version.
 
 ## Monterey 12.7.6
 

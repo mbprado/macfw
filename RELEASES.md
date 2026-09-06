@@ -22,6 +22,7 @@ Examples:
 0.01.000   first development release
 0.01.001   patch/fix to 0.01.000
 0.02.000   larger update or feature addition
+0.03.000   next larger update
 1.00.000   first major/stable generation
 ```
 
@@ -30,7 +31,7 @@ The numeric fields are zero-padded as shown. `yy` is two digits and `zzz` is thr
 Release tags use the exact version string, with no `v` prefix:
 
 ```text
-0.02.000
+0.03.000
 ```
 
 A release workflow should reject tags that do not match:
@@ -46,7 +47,7 @@ Pre-release status such as **alpha** or **beta** is represented by the GitHub Re
 The intended release flow is:
 
 1. Validate the candidate on real supported hardware.
-2. Update `CHANGELOG.md`, `KNOWN-LIMITATIONS.md`, `COMPATIBILITY.md`, `INSTALL.md`, and `RELEASE-NOTES.md`.
+2. Update `CHANGELOG.md`, `KNOWN-LIMITATIONS.md`, `COMPATIBILITY.md`, `INSTALL.md`, `RELEASE-NOTES.md`, and the public README where needed.
 3. Merge the validated release-candidate work into `main`.
 4. Confirm the version embedded by the build on `main` matches the intended release.
 5. Build/check the package from `main`.
@@ -78,7 +79,9 @@ and appears under:
 package/dist/
 ```
 
-The package contains the FW410 CoreAudio HAL plug-in, self-contained transport/control runtime, persistent control-state helper, launchd service definition, native control-panel application, and installation scripts. Installation is gated by `deviceprobe --require-supported`, so a known supported interface must be connected in either operational or bootloader personality.
+The package contains the FW410 CoreAudio HAL plug-in, self-contained transport/control runtime, persistent control-state helper, exact runtime build metadata, launchd service definition, native control-panel application, and installation scripts. Installation is gated by `deviceprobe --require-supported`, so a known supported interface must be connected in either operational or bootloader personality.
+
+`make package` performs a fresh release-artifact rebuild before staging the package so embedded build identities correspond to the source commit being packaged.
 
 ## Source installation
 
@@ -134,33 +137,37 @@ Every release candidate should review/update:
 - [`CHANGELOG.md`](CHANGELOG.md) — accumulated user-visible changes;
 - [`RELEASE-NOTES.md`](RELEASE-NOTES.md) — release-facing summary for the current candidate;
 - [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) — current limitations and unsupported behavior;
-- [`COMPATIBILITY.md`](COMPATIBILITY.md) — exact hardware-tested operating-system matrix;
-- [`INSTALL.md`](INSTALL.md) — installation, status, troubleshooting, persistence and source-build instructions.
+- [`COMPATIBILITY.md`](COMPATIBILITY.md) — cumulative hardware-tested operating-system matrix;
+- [`INSTALL.md`](INSTALL.md) — installation, status, troubleshooting, persistence and source-build instructions;
+- [`README.md`](README.md) — current public capability/status summary.
 
-## Current `0.02.000` release gate
+## Current `0.03.000` release gate
 
-Before tagging `0.02.000`, verify at minimum:
+Before tagging `0.03.000`, verify at minimum:
 
 - clean source build with `make`;
 - source installation with `sudo make install`;
 - root `make package` produces the expected `.pkg`;
-- fresh/current `.pkg` installation succeeds with a supported FW410 attached;
 - control application is installed at `/Applications/macfw FW410 Control.app`;
 - launchd runtime reaches `ONLINE`;
-- 44.1 kHz playback/capture;
-- 48 kHz playback/capture;
-- runtime 44.1 <-> 48 kHz switching;
+- 44.1 kHz playback/capture and Logic software-monitoring loopback;
+- 48 kHz playback/capture and Logic software-monitoring loopback;
+- low-latency 256-frame capture baseline remains stable;
+- repeated 44.1 <-> 48 kHz switching from the Device tab;
+- repeated switching from Audio MIDI Setup;
+- 48 -> 44.1 kHz is slower but consistently completes without entering recovery;
 - physical disconnect/reconnect recovery;
-- reboot recovery;
-- boot without interface followed by delayed attachment;
-- launchd process restart;
+- reboot/delayed-attachment/launchd-restart lifecycle remains intact from the validated baseline;
 - main-mixer route controls;
 - physical output, headphone and AUX controls;
-- writable control-state persistence across reboot;
-- writable control-state persistence across physical disconnect/reconnect;
+- live Inputs meters at both rates;
+- writable control-state persistence across rate changes/restart/reconnect;
 - Reset Defaults behavior;
-- package postinstall diagnostics at `/Library/Logs/macfw_install.log`;
-- known limitations and signing status are accurately stated;
+- Info/Diagnostics exact runtime metadata, Copy Diagnostics and Open Transport Log;
+- GUI build is free of the previously addressed Makefile/compiler warnings;
+- package/source install paths use the corrected internal GUI bundle path;
+- package contains runtime build metadata;
+- known limitations and unsigned/unnotarized status are accurately stated;
 - release candidate is merged into `main` before tagging.
 
-The development machine has hardware-validated the `0.02.000` control/package lifecycle through installation, status, Reset Defaults, reboot persistence and physical reconnect persistence. The final release pass exists to ensure the exact `main`/tagged package preserves those behaviors.
+The development machine completed the `0.03.000` release-candidate regression after the real-time scheduler, 256-frame capture prefill, Inputs/Device/Info GUI expansion, build/package cleanup, and 44.1 `SIGPIPE`/meter-startup hardening. No regression was observed in the previously validated audio/control functionality, and repeated rate switching completed reliably.

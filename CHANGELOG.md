@@ -6,7 +6,52 @@ The project uses the `x.yy.zzz` version format described in [`RELEASES.md`](RELE
 
 ## [Unreleased]
 
-No user-visible changes have been recorded after the `0.02.000` release candidate yet.
+No user-visible changes have been recorded after the `0.03.000` release candidate yet.
+
+## [0.03.000] — third alpha — 2026-09-06
+
+### Added
+
+- **Inputs** tab with live Analog Input 1/2 and S/PDIF L/R capture meters.
+- Transport-side input-meter accumulator and local meter IPC without adding another FireWire owner.
+- **Device** tab with connection/transport state, active/requested sample rate, engine PID and CoreAudio buffer diagnostics.
+- 44.1/48 kHz sample-rate selection from the control panel through the normal CoreAudio nominal-sample-rate property and HAL configuration-change lifecycle.
+- **Info/Diagnostics** runtime details including exact installed runtime version/build, transport counters, **Copy Diagnostics** and **Open Transport Log**.
+- Installer-persisted runtime metadata in `/Library/Application Support/macfw/fw410/runtime-build.conf`.
+- Dedicated Mach-paced real-time audio service thread and `THREAD_TIME_CONSTRAINT_POLICY` scheduling at both 44.1 and 48 kHz.
+
+### Changed
+
+- Capture prefill reduced from the earlier 4,096-frame development baseline to **256 frames**, producing hardware-validated low-latency software monitoring.
+- 44.1 kHz startup continues servicing RX/TX during the required pre-reassert interval instead of leaving the audio path idle.
+- 48 kHz transport uses the same validated real-time audio scheduling architecture as 44.1 kHz.
+- Input meters are presented contextually as an **Inputs** tab rather than the earlier temporary Meters validation surface.
+- Device latency/safety-offset placeholders are shown as **Not reported by HAL** instead of misleading `0 frame` measurements.
+- The package builder now stages the space-free internal control-panel bundle under the correct installed application name.
+- `make package` performs a fresh release-artifact rebuild before packaging so embedded build identities match the package commit.
+- Package payload now includes exact runtime version/build metadata for the Info/Diagnostics surface.
+
+### Fixed
+
+- Prevented disappearing local control/meter clients from terminating a native audio engine with `SIGPIPE`.
+- Delayed the 44.1 kHz meter listener until the startup/reassert sequence is complete, eliminating a race between the GUI's short meter timeout and the longer 44.1 startup window.
+- Restored reliable repeated 48 -> 44.1 kHz switching while the control panel is open; the direction remains slower than 44.1 -> 48 because of the device-specific 44.1 startup sequence.
+- Corrected aggregate `sudo make install` after the control-panel internal bundle path changed.
+- Corrected `make package` after the control-panel internal bundle path changed.
+- Removed GNU-make circular-target warnings and duplicate GUI link steps caused by spaces in the internal build-bundle target.
+- Cleaned the remaining control-panel signed/unsigned and GNU shorthand conditional compiler warnings without disabling diagnostics.
+
+### Validation
+
+- 44.1 kHz full-duplex playback/capture and Logic software monitoring hardware-validated with excellent subjective round-trip latency.
+- 48 kHz full-duplex playback/capture hardware-validated with the real-time scheduler and similarly strong stability/latency.
+- Repeated 44.1 <-> 48 kHz switching validated from both the macfw Device tab and Audio MIDI Setup.
+- Mixer, Outputs, Headphones, AUX, Inputs meters, persistent state, diagnostics, disconnect/reconnect and launchd service behavior rechecked without regression.
+- Source build/install and local package targets revalidated after release-build cleanup.
+
+### Known limitations
+
+See [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md).
 
 ## [0.02.000] — second alpha
 

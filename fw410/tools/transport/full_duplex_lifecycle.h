@@ -68,11 +68,12 @@ public:
         return true;
     }
 
-    bool startIsoch() {
+    bool startIsoch(CFRunLoopRef isochRunLoop = nullptr) {
         if (!device_ || !native_ || !capture_ || !playback_) return false;
 
+        CFRunLoopRef dispatcherRunLoop = isochRunLoop ? isochRunLoop : CFRunLoopGetCurrent();
         if ((*native_)->AddIsochCallbackDispatcherToRunLoop(
-                native_, CFRunLoopGetCurrent()) != kIOReturnSuccess)
+                native_, dispatcherRunLoop) != kIOReturnSuccess)
             return false;
         isochDispatcher_ = true;
 

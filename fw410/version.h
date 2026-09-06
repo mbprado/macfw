@@ -1,7 +1,7 @@
 #pragma once
 
 #ifndef MACFW_VERSION
-#define MACFW_VERSION "0.02.000"
+#define MACFW_VERSION "0.03.000"
 #endif
 
 #ifndef MACFW_GIT_SHA

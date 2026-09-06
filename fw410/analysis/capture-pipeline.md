@@ -1,12 +1,12 @@
 # FW410 CoreAudio capture pipeline
 
-Last updated: 2026-08-19
+Last updated: 2026-09-05
 
-This document is the source of truth for the hardware-validated native 48 kHz capture path from the M-Audio FireWire 410 into normal macOS CoreAudio applications.
+This document records the current hardware-validated native capture path used by the production full-duplex 44.1/48 kHz transport.
 
 ## Validated result
 
-Native 48 kHz capture is working end to end through the macfw AudioServerPlugIn and was validated in Logic Pro with a controlled 1 kHz source.
+Native capture is working end to end at **44.1 kHz and 48 kHz** through the macfw AudioServerPlugIn and launchd-managed full-duplex transport.
 
 ```text
 FW410 Analog/S/PDIF input
@@ -15,6 +15,7 @@ FW410 Analog/S/PDIF input
     -> completed 32-cycle publication groups
     -> AMDTP/CIP validation and DBC continuity
     -> AM824 MBLA-24 decode
+    -> CoreAudio channel permutation
     -> four-channel Float32 shared capture ring
     -> AudioServerPlugIn ReadInput
     -> CoreAudio application / Logic Pro
@@ -27,15 +28,15 @@ CoreAudio-facing input order:
 3. S/PDIF In L
 4. S/PDIF In R
 
-Raw FW410 AMDTP order at 44.1/48 kHz:
+Raw FW410 AMDTP audio order:
 
 1. S/PDIF In L
 2. Analog In 1
 3. S/PDIF In R
 4. Analog In 2
-5. MIDI
+5. MIDI slot alongside the audio payload
 
-The transport explicitly permutes the four audio positions into the CoreAudio-facing order.
+The transport explicitly permutes the four audio positions into CoreAudio order.
 
 ## Shared-memory capture ABI
 
@@ -45,72 +46,80 @@ The capture path uses persistent POSIX shared memory:
 /macfw_fw410_capture_v2
 ```
 
-The ring is defined by `hal/include/macfw_hal_capture_shm.h` and carries:
+The current structure ABI is versioned independently inside `hal/include/macfw_hal_capture_shm.h` and carries:
 
 - four interleaved Float32 channels;
 - 32,768-frame capacity;
 - monotonic write/read frame counters;
 - producer state and sample rate;
 - packet/decode diagnostics;
-- HAL `ReadInput` consumption diagnostics.
+- queue extrema/underrun diagnostics;
+- HAL `ReadInput` consumption and zero-fill diagnostics.
 
-The HAL maps the object outside the real-time callback. The producer reuses and reinitializes that same persistent object in place. `ReadInput` performs lock-free reads and zero-fills only while capture is unavailable or genuinely underruns.
+The HAL establishes a stable mapping outside the real-time callback. Each native engine reuses and reinitializes the same persistent object in place on startup, preventing stale producer/consumer mapping splits.
 
-## Duplex requirement
+## Full-duplex requirement
 
-The FW410 does not remain in sample-bearing capture state from a receive connection alone. Valid host-to-device AMDTP must continue flowing.
+The FW410 capture path depends on valid host-to-device AMDTP continuing at the same time. Production capture is therefore not a standalone receive bridge: both directions are established and serviced in one native full-duplex engine.
 
-`capturebridge48000` therefore establishes both CMP/ISO directions and services the proven 48 kHz playback scheduler with an empty 10-channel PCM FIFO. This produces correctly timed digital silence as a capture keepalive.
-
-The production full-duplex runtime should replace that silence with the real 10-channel CoreAudio playback ring while preserving the same duplex startup and servicing behavior.
-
-## Capture prefill
-
-CoreAudio can begin issuing `ReadInput` before the FireWire receive path reaches steady state. The bridge therefore:
-
-1. initializes the capture ring inactive;
-2. waits until HAL `ReadInput` activity is observed;
-3. accumulates 4,096 frames (~85 ms at 48 kHz);
-4. positions the read cursor at that controlled live-edge cushion;
-5. publishes `active=1`.
-
-This eliminates startup starvation without turning the steady-state path into a high-latency queue.
-
-## NuDCL receive publication problem
-
-The first working receive implementation published metadata for the full 256-slot ring at the end of every revolution. At the 8 kHz FireWire cycle rate that exposed data in roughly 32 ms bursts.
-
-The captured signal was recognizable but badly corrupted. Shared-memory buffering and CoreAudio consumption were healthy; the corruption originated earlier because userspace could scan slots while early DMA payload locations were already being reused by the following ring revolution.
-
-Reducing publication to 32-cycle groups (~4 ms) made the recording almost clean. However, globally scanning every changed slot across all 256 descriptors could still combine independently published groups and create occasional temporal discontinuities.
-
-## Final completed-group rule
-
-The final validated receive rule is:
-
-- each publication group contains 32 receive DCL slots;
-- the terminal receive DCL publishes that group's metadata update list via `SetDCLUpdateList`;
-- userspace treats a changed terminal-slot `(timestamp, isoHeader)` signature as the completed-group token;
-- only then are the exact 32 slots in that group snapshotted;
-- AMDTP DBC continuity is validated and ordering is applied only inside that completed group.
-
-This retains a receive-only NuDCL program. A speculative mixed send/receive completion-marker experiment was explicitly rejected before hardware testing.
-
-Representative final run:
+At both rates the audio service thread owns the steady-state capture/playback work:
 
 ```text
-capture frames=940064 (delta 96000)
-active=1
-queued=3968
-drops=0
-malformed=0
-invalid=0
-chunks=4981
-dbc-gap=0
-ts-back=4
-reorder=0
-stale=0
+capture publication/decode
+ -> capture SHM publication
+ -> playback SHM -> PCM pumping
+ -> TX refill/service
+ -> meter accumulation
 ```
+
+The isoch callback dispatcher runs on its own dedicated run-loop thread.
+
+## Capture prefill — current baseline
+
+The original capture implementation used a 4,096-frame queue, which produced roughly 85-93 ms of steady capture latency. That value is obsolete.
+
+Hardware testing progressively reduced the prefill and established **256 frames** as the current validated stability/latency baseline.
+
+Approximate prefill duration:
+
+```text
+44.1 kHz: 256 frames ~= 5.8 ms
+48 kHz:   256 frames ~= 5.3 ms
+```
+
+Activation sequence:
+
+1. initialize the capture ring inactive;
+2. wait until HAL `ReadInput` activity is observed;
+3. accumulate at least the configured 256-frame prefill;
+4. position the read cursor at the controlled live-edge cushion;
+5. publish capture active.
+
+This prefill is only one internal latency component. It must not be equated with total input, output or round-trip latency.
+
+## Prefill experiments
+
+Historical hardware tests established the current choice:
+
+- 4096 frames — very stable but ~90 ms queue, unacceptable for software monitoring;
+- 2048 — stable, lower but still high latency;
+- 1024 — stable and improved;
+- 512 — bad queue behavior / HAL zero fill;
+- 256 — best validated low-latency baseline;
+- lower experimental values did not improve the effective result reliably and in some cases worsened queue behavior.
+
+Do not lower or raise the 256-frame baseline casually before release. In particular, do not increase it merely to hide scheduler stalls.
+
+## NuDCL receive publication rule
+
+The working receive rule remains:
+
+- capture receive ring: 256 FireWire cycles;
+- each publication group: 32 receive DCL slots;
+- the terminal receive DCL publishes that group's metadata update list via `SetDCLUpdateList`;
+- userspace treats a changed terminal-slot `(timestamp, isoHeader)` signature as the completed-group token;
+- only the exact 32 slots in that group are snapshotted/decoded;
+- AMDTP DBC continuity and ordering are applied inside the completed group.
 
 The expected publication cadence is:
 
@@ -118,64 +127,103 @@ The expected publication cadence is:
 8000 FireWire cycles/sec / 32 cycles/group = 250 groups/sec
 ```
 
-Therefore the chunk counter should increase by about 500 every two-second reporting interval, which is what the validated run showed.
+A 16-cycle grouping experiment at 44.1 kHz produced deterministic frame loss/DBC gaps and was reverted. **32 cycles is the validated production grouping.**
 
-## Controlled quality validation
+## Real-time scheduling
 
-The final validation source was a 1 kHz, 1.0 V, 60% duty-cycle signal recorded as mono 48 kHz audio in Logic Pro.
+The main remaining capture discontinuities were not solved by adding queue depth; they were strongly tied to userspace service starvation.
 
-The progression was measurable:
+The release baseline therefore uses:
 
-| Recording | Receive behavior | Detected discontinuity clusters | Approximate rate |
-|---|---|---:|---:|
-| test 17 | early/full-ring receive path | 434 | 5.75/sec |
-| test 19 | 32-cycle publication plus global DBC ordering | 70 | 2.23/sec |
-| test 20 | terminal-slot completed groups | 1 startup event | 0.03/sec |
+- dedicated isoch callback thread with USER_INTERACTIVE QoS;
+- dedicated audio service thread;
+- 250 us `mach_wait_until` pacing;
+- USER_INTERACTIVE QoS;
+- `THREAD_TIME_CONSTRAINT_POLICY`:
+  - period 2000 us;
+  - computation 500 us;
+  - constraint 2000 us;
+  - preemptible true.
 
-After the initial startup region in test 20, no significant periodic discontinuities were detected for the remainder of the recording. Subjectively, no further dropouts were audible.
+This scheduling architecture is hardware-validated at both 44.1 and 48 kHz.
 
-Short comparison excerpts are stored under `pictures/audio/` rather than committing the full development recordings:
+44.1 kHz also services capture/playback/TX during its startup lead and post-start reassert interval so the rings are not left unserviced before READY.
 
-- `capture-test19-before.wav`
-- `capture-test20-after.wav`
+## Hardware validation method
+
+The main low-latency/stability regression path is a physical round trip:
+
+```text
+YouTube / CoreAudio playback
+ -> FW410 outputs 1/2
+ -> physical cable
+ -> FW410 inputs 1/2
+ -> CoreAudio capture
+ -> Logic software monitoring
+ -> CoreAudio playback
+ -> FW410 outputs 3/4
+```
+
+For relative latency comparison, FW410 hardware direct monitoring can be enabled simultaneously with Logic monitoring. Audible flamming/echo between the direct and software-monitored paths provides a useful subjective round-trip comparison.
+
+With the current scheduler:
+
+- 44.1 kHz latency is excellent and cutoffs are reduced to a practically solved level in normal service operation;
+- 48 kHz is likewise very stable and has slightly lower perceived round-trip latency.
 
 ## Diagnostics
 
-`capturebridge48000` reports:
+The production runtime/status path can report:
 
-- `chunks`: completed 32-slot groups consumed;
-- `dbc-gap`: accepted packet sequence discontinuities;
-- `ts-back`: non-forward NuDCL timestamp observations;
-- `reorder`: packets emitted in a different order inside a completed group;
-- `stale`: packets rejected as behind the live DBC sequence;
-- `drops`: frames rejected because the shared capture ring was full;
-- `malformed`: invalid CIP/formation packets;
-- `invalid`: invalid AM824 MBLA labels;
-- `hal-read`: HAL `ReadInput` calls;
-- `tx-late` and `tx-silence`: playback-keepalive scheduler diagnostics.
+- capture frames decoded/published;
+- active state;
+- queued frames;
+- queue extrema;
+- shared-ring drops;
+- malformed packets;
+- invalid MBLA labels;
+- completed 32-cycle groups (`chunks`);
+- DBC gaps;
+- timestamp-back observations (`ts-back`);
+- reorder/stale counts;
+- HAL read calls/requested/consumed frames;
+- underrun events;
+- HAL zero-filled frames;
+- playback/TX late and silence counters where verbose diagnostics are enabled.
 
-In the final controlled run, `dbc-gap`, `reorder`, `stale`, `drops`, `malformed`, and `invalid` remained zero. Small `ts-back` increments did not correlate with audible or sample-level discontinuities and are treated as a timestamp diagnostic edge case rather than evidence of reordered PCM.
+Small `ts-back` increases have not correlated with audible failures or frame deficits in the known-good scheduler and are treated as a secondary timestamp diagnostic rather than a fault by themselves.
 
-## What is solved vs pending
+## HAL underrun caveat
 
-Solved at 48 kHz:
+The HAL currently advances the capture read cursor only by frames actually obtained from the shared ring, while CoreAudio's timeline advances for the entire requested buffer and missing frames are zero-filled.
 
-- FireWire capture and MBLA decode;
-- physical channel mapping;
+After a real underrun, this can create timeline/backlog debt rather than an immediate clean resynchronization. The issue is known, but the current scheduler has made real underruns rare enough that it is **not** part of the release stabilization work.
+
+A future fix should implement a safe resync/rebuffer policy; do not simply advance the read cursor beyond `writeFrame`.
+
+## Foreground verbose testing caveat
+
+`MACFW_VERBOSE=1` is useful diagnostically but is not performance-neutral: large periodic verbose reporting is executed from the real-time audio service path. Normal launchd-managed service operation is therefore the authoritative release test path.
+
+## Solved vs deferred
+
+Solved / release baseline:
+
+- 44.1 and 48 kHz FireWire capture;
+- MBLA decode and physical channel mapping;
 - persistent capture SHM lifecycle;
 - CoreAudio `ReadInput` delivery;
-- startup prefill;
-- receive publication consistency;
-- completed-group consumption;
-- controlled steady-state recording quality.
+- 256-frame low-latency prefill;
+- 32-cycle completed-group receive consistency;
+- full-duplex playback/capture integration;
+- launchd startup and runtime recovery;
+- dedicated real-time scheduling at both rates;
+- live capture meter feed to the Inputs tab.
 
-Still pending:
+Deferred:
 
-- merge capture with real playback in one full-duplex runtime;
-- native 44.1 capture integration/validation;
-- automatic boot/startup;
-- bus-reset and reconnect recovery;
-- persistent-service lifecycle;
-- mixer/control/MIDI integration.
+- calibrated CoreAudio latency/safety-offset reporting;
+- robust HAL resync policy after a genuine capture underrun;
+- further latency optimization only if it can preserve the current stability baseline.
 
-The next primary implementation step is full-duplex 48 kHz operation in the normal transport: consume the 10-channel playback shared ring while simultaneously feeding the proven four-channel capture shared ring.
+The release rule is to preserve the current 256-frame prefill, 32-cycle grouping and proven scheduler unless a reproducible regression provides evidence for a change.

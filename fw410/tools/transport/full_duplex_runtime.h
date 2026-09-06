@@ -7,6 +7,7 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/firewire/IOFireWireLib.h>
+#include <mach/mach_time.h>
 
 #include <atomic>
 #include <csignal>
@@ -21,6 +22,8 @@ struct FullDuplexRuntimeConfig {
     const char* rateLabel = "";
     unsigned prefillMilliseconds = 0;
     double runLoopSliceSeconds = 0.001;
+    bool useMachPacing = false;
+    std::uint64_t machPaceNanoseconds = 250000;
     bool printIsoStarted = false;
     bool printTransportGeometry = false;
     UInt32 expectedGeneration = 0;
@@ -49,6 +52,20 @@ bool runFullDuplexServiceLoop(
     bool captureReady = false;
     const bool verboseDiagnostics = std::getenv("MACFW_VERBOSE") != nullptr;
 
+    std::uint64_t machPaceTicks = 0;
+    std::uint64_t nextMachWake = 0;
+    if (config.useMachPacing) {
+        mach_timebase_info_data_t timebase{};
+        if (mach_timebase_info(&timebase) != KERN_SUCCESS || timebase.numer == 0) return false;
+        const long double ticks =
+            static_cast<long double>(config.machPaceNanoseconds) *
+            static_cast<long double>(timebase.denom) /
+            static_cast<long double>(timebase.numer);
+        machPaceTicks = static_cast<std::uint64_t>(ticks);
+        if (machPaceTicks == 0) machPaceTicks = 1;
+        nextMachWake = mach_absolute_time();
+    }
+
     if (config.printIsoStarted) std::cout << "duplex ISO started\n";
     if (config.printTransportGeometry)
         std::cout << "TX ring: 640 cycles / 320-cycle refill halves\nPCM FIFO: 16384 frames\n";
@@ -62,7 +79,15 @@ bool runFullDuplexServiceLoop(
               << " kHz playback + capture; Ctrl-C to stop\n";
 
     while (!stopRequested) {
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode, config.runLoopSliceSeconds, false);
+        if (config.useMachPacing) {
+            nextMachWake += machPaceTicks;
+            mach_wait_until(nextMachWake);
+            const std::uint64_t afterWake = mach_absolute_time();
+            if (afterWake > nextMachWake + machPaceTicks * 4)
+                nextMachWake = afterWake;
+        } else {
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, config.runLoopSliceSeconds, false);
+        }
 
         const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
         if (config.expectedGeneration != 0 &&

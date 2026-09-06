@@ -1,31 +1,37 @@
 # FW410 current integration status
 
-Last updated: 2026-08-29
+Last updated: 2026-09-06
 
-This document is the current handoff for the CoreAudio/HAL/runtime/control-panel phase. Older reverse-engineering documents remain useful historical evidence, but this file defines the present integration state and immediate next work.
+This document is the canonical handoff for the current CoreAudio/HAL/runtime/control-panel release-candidate state. Older reverse-engineering notes remain useful historical evidence, but this file defines the present integration baseline and immediate next work.
 
 ## Executive status
 
-macfw publishes **M-Audio FireWire 410** as a normal macOS CoreAudio device through a dependency-free AudioServerPlugIn.
+macfw publishes **M-Audio FireWire 410** as a normal macOS CoreAudio device through a dependency-free AudioServerPlugIn and launchd-managed user-space FireWire transport.
+
+The current release-candidate code baseline was hardware-validated at:
+
+```text
+71962daa48d275b43ef6dee4dccc78dcdffa444b
+```
 
 Hardware-confirmed:
 
 - native 44.1 kHz and 48 kHz full-duplex operation;
 - ten playback channels: Analog Out 1-8 and S/PDIF L/R;
 - four capture channels: Analog In 1/2 and S/PDIF In L/R;
-- simultaneous playback, recording and live monitoring;
-- runtime 44.1 <-> 48 kHz switching;
+- simultaneous playback, recording and Logic software monitoring;
+- reliable runtime 44.1 <-> 48 kHz switching through both the native Device tab and Audio MIDI Setup;
 - physical disconnect/reconnect and guarded bootloader recovery;
 - logical CoreAudio-device continuity while the physical transport is offline;
-- launchd service restart/recovery, including process kill and late interface connection after macOS boot;
+- launchd service restart/recovery and late interface connection after macOS boot;
+- low-latency 256-frame capture prefill;
+- dedicated isoch callback thread plus dedicated Mach-paced real-time audio service thread at both supported rates;
 - native AppKit control panel operation while full-duplex audio remains active;
-- headphone mixer/AUX source selection, independent L/R headphone volume and five mixer-output source pairs;
-- AUX source/output stereo levels;
-- physical output Mixer/AUX source selection and independent L/R output levels;
-- reusable stereo-link GUI behavior for headphone/output level pairs;
-- complete 7x5 FW410 main-mixer assignment routing for analog input, S/PDIF input and software returns;
-- multiple simultaneous mixer-bus assignments;
-- CoreAudio/Logic-aligned software-return labels in the GUI despite the FW410 raw AV/C return rotation.
+- headphone, AUX, physical output and complete 7x5 main-mixer routing controls;
+- live four-channel input meters;
+- Device-tab 44.1/48 kHz selection through the normal CoreAudio/HAL lifecycle;
+- Info/diagnostics surface with exact runtime build metadata, Copy Diagnostics and Open Transport Log;
+- clean aggregate build/install/package paths.
 
 The current architecture is:
 
@@ -40,6 +46,9 @@ macOS application
        -> OFFLINE / RECOVERING / ONLINE status ABI
        -> native-engine READY handshake
        -> native 44.1 or 48 full-duplex engine
+          -> normal callback/FCP/control thread
+          -> dedicated isoch callback run-loop thread
+          -> dedicated Mach-paced real-time audio service thread
           -> local FW410 control IPC
           -> AV/C control transactions
           -> CMP / ISO / AMDTP transport
@@ -52,17 +61,134 @@ macfw FW410 Control.app / fw410ctl
 
 The HAL and GUI never open FireWire independently. Device boot, rate control, CMP, ISO, AMDTP scheduling, recovery and live AV/C control remain in the transport/service layer.
 
-## Audio/runtime status
+## Audio/runtime baseline
 
-The validated transport uses a 640-cycle TX ring with 320-cycle refill halves, 16,384-frame playback PCM FIFO and a controlled 4,096-frame capture prefill. The receive path consumes terminal-slot-confirmed 32-cycle NuDCL groups and uses rate-specific completion semantics.
+### Shared transport geometry
 
-44.1 kHz retains its required post-start AV/C rate reassert before the native engine reports READY. A clean 44.1 stop leaves the interface at 44.1 rather than forcing the old development 48 kHz restore. This substantially improved repeated 44.1 restart behavior.
+Current full-duplex constants:
 
-The logical CoreAudio device stays registered during a physical disconnect. Playback is safely discarded/silenced and capture supplies silence until the transport returns ONLINE; existing clients can continue after automatic recovery.
+- playback TX ring: 640 FireWire cycles;
+- playback refill half: 320 cycles;
+- playback PCM FIFO: 16,384 frames;
+- capture receive ring: 256 FireWire cycles;
+- receive publication group: 32 cycles;
+- capture shared ring: 32,768 frames;
+- **capture prefill: 256 frames**.
+
+The previous 4,096-frame capture prefill was an early stability baseline and is no longer current. Hardware testing established 256 frames as the best validated latency/stability point for the present scheduler.
+
+Approximate capture-prefill time:
+
+```text
+44.1 kHz: 256 / 44100 ~= 5.8 ms
+48 kHz:   256 / 48000 ~= 5.3 ms
+```
+
+This is only one internal buffering component and must not be presented as complete CoreAudio or end-to-end latency.
+
+### Real-time scheduling
+
+Both native engines use the proven scheduling architecture:
+
+```text
+normal/control thread
+  - normal FireWire callbacks
+  - FCP/control IPC
+
+isoch callback thread
+  - dedicated CFRunLoop
+  - USER_INTERACTIVE QoS
+
+audio service thread
+  - capture publication/decode
+  - playback SHM -> PCM pumping
+  - TX refill/service
+  - input meter accumulation
+  - USER_INTERACTIVE QoS
+  - 250 us Mach pacing
+  - THREAD_TIME_CONSTRAINT_POLICY
+      period      2000 us
+      computation  500 us
+      constraint  2000 us
+      preemptible  true
+```
+
+This architecture was hardware-validated at both rates. 44.1 kHz showed a major reduction in cutoffs while preserving excellent subjective round-trip latency; the same architecture produced very good 48 kHz behavior with slightly lower perceived latency.
+
+Treat this scheduling path as frozen for the release candidate unless a new reproducible regression requires a change.
+
+### 44.1 kHz startup specifics
+
+44.1 kHz retains its hardware-established post-start AV/C rate reassert before READY. The startup path services audio during the pre-reassert interval so the TX/RX rings are not left unserviced during startup.
+
+A clean 44.1 stop leaves the FW410 at 44.1 rather than forcing an unnecessary restore to 48 kHz. A tested forced 48 -> 44.1 re-arm workaround did not solve the earlier foreground-only startup symptom and was reverted.
+
+Normal launchd-managed operation is the release reference. Foreground `MACFW_VERBOSE=1` runs are not performance-neutral because verbose diagnostics execute on the audio service path and can perturb real-time behavior.
+
+### Fixed 44.1 startup socket race
+
+A release-candidate regression made 48 -> 44.1 changes slow and unreliable. Earlier logs showed the 44.1 engine reaching READY and then exiting on signal 13 (`SIGPIPE`) while control-state restore and GUI clients were reconnecting.
+
+The live meter path exposed the race clearly:
+
+```text
+44.1 engine creates meter socket
+ -> engine enters ~267 ms startup/reassert interval
+ -> GUI meter client connects and sends METERS GET
+ -> GUI receive timeout expires at 200 ms and closes the socket
+ -> startup finishes
+ -> meter server services the stale request
+ -> reply to closed peer raises SIGPIPE
+ -> complete native engine exits
+ -> supervisor enters boot/retry/backoff path
+```
+
+The release fix is intentionally narrow:
+
+- local transport socket replies cannot terminate the engine with `SIGPIPE` when a client disappears;
+- the 44.1 meter socket is not exposed until the startup/reassert window is complete;
+- the previously validated 48 kHz real-time scheduler remains unchanged.
+
+Hardware regression testing with the control panel open and meter polling active confirmed repeated 48 -> 44.1 and 44.1 -> 48 switches now complete reliably and do not affect playback, capture, meters, controls or latency behavior.
+
+### Rate-switch asymmetry
+
+44.1 -> 48 kHz switching is fast. 48 -> 44.1 kHz remains noticeably slower because the 44.1 path performs additional established startup work:
+
+- initial AV/C rate transition with settle/readback;
+- a larger rate-specific ISO start lead;
+- post-start OUTPUT and INPUT 44.1 reassert transactions before READY.
+
+The slow direction is now consistently reliable and audio returns correctly. This is an accepted release non-blocker. Optimize it later with dedicated timing instrumentation rather than modifying the stable 44.1 path before release.
+
+## Capture pipeline
+
+The receive path consumes terminal-slot-confirmed 32-cycle NuDCL groups and validates AMDTP/CIP/DBC continuity before publishing four-channel Float32 capture into the persistent shared ring.
+
+CoreAudio input order:
+
+1. Analog In 1
+2. Analog In 2
+3. S/PDIF In L
+4. S/PDIF In R
+
+The transport performs the required raw FW410 AMDTP -> CoreAudio channel permutation.
+
+Current diagnostics include capture frames, queue extrema, shared-ring drops, malformed/invalid packets, completed chunks, DBC gaps, timestamp-back observations, reorder/stale counts, HAL read calls, underrun events and zero-filled frames.
+
+Small `ts-back` increments have not correlated with audible or frame-count failures in the known-good scheduler and are not currently treated as a transport fault by themselves.
+
+## CoreAudio latency reporting
+
+The HAL currently exposes placeholder zero values for `kAudioDevicePropertyLatency`, `kAudioDevicePropertySafetyOffset` and stream latency. These are **not calibrated latency measurements**.
+
+The Device tab therefore displays **Not reported by HAL** rather than formatting those zeros as real latency.
+
+Do not invent latency values from the capture prefill or FireWire ring geometry. Proper CoreAudio latency/safety-offset reporting is deferred until the complete input/output pipeline is measured and mapped to CoreAudio's property semantics.
 
 ## Control subsystem
 
-The production control architecture avoids the earlier conflict where standalone probes attempted to open the FireWire interface while the transport already owned it.
+Production control remains transport-owned:
 
 ```text
 fw410ctl / native GUI
@@ -80,7 +206,7 @@ existing FireWire handle + FCP response space
 FW410 AV/C function blocks
 ```
 
-Validated controls now include:
+Validated controls include:
 
 - headphone source: mixer / AUX;
 - headphone independent L/R level;
@@ -92,13 +218,11 @@ Validated controls now include:
 - S/PDIF connector state readback;
 - main-mixer route assignment for seven sources into five mixer buses.
 
-The AUX path is independent of the five-source headphone mixer. Headphone source/mixer/level state survives 44.1 <-> 48 kHz transitions.
-
-Detailed headphone/output mapping remains in `analysis/headphone-control.md` and related protocol notes. Main-mixer evidence is consolidated in `analysis/original-control-panel-mixer-model.md`.
+The AUX path is independent of the five-source headphone mixer. Implemented control state survives 44.1 <-> 48 kHz transitions and normal service lifecycle events.
 
 ## Main mixer state model
 
-The original M-Audio control panel and upstream Linux `snd-firewire-ctl-services` implementation establish a 7-source x 5-destination assignment matrix.
+The validated main mixer is a 7-source x 5-destination assignment matrix.
 
 Sources:
 
@@ -121,44 +245,52 @@ Hardware testing established an important state-management rule: issuing one mix
 1. lazily establishes the complete macfw-compatible 35-cell baseline on first main-mixer access;
 2. caches that matrix in the transport process;
 3. avoids mixer STATUS polling;
-4. performs subsequent route changes as differential CONTROL writes against the trusted cache.
+4. performs later route changes as differential CONTROL writes against the trusted cache.
 
-The Linux/original identity matrix is logically correct for the original return numbering but shifts macfw playback because macfw's AMDTP slot order is different. The validated macfw baseline compensates for that raw slot order.
+Do not change this rule casually.
 
-Hardware tests confirmed analog direct-monitor assignments such as:
-
-```text
-Analog Input 1/2 -> Mixer 1/2  => Input 1 -> Output 1, Input 2 -> Output 2
-Analog Input 1/2 -> Mixer 3/4  => Input 1 -> Output 3, Input 2 -> Output 4
-```
-
-The same matrix supports multiple simultaneous destination assignments.
+Main strip level/pan/mute/AUX-send semantics remain unresolved and are deliberately parked for post-release research. Existing Feature Volume writes/readback were not sufficient to prove the audible signal path and therefore must not be exposed as production controls.
 
 ## Native control panel
 
-`fw410/control-panel` is a native AppKit/Objective-C++ application built directly with the standard macOS Command Line Tools. Full Xcode is not required.
+`fw410/control-panel` is a native AppKit/Objective-C++ application built directly with the standard macOS Command Line Tools.
 
 Current tabs:
 
 - **Mixer** — 7x5 main-mixer assignment matrix;
-- **Outputs** — physical-output Mixer/AUX source selection, L/R level and link behavior;
-- **Headphones** — source, L/R volume, five mixer-output pair switches and link behavior;
+- **Outputs** — physical-output Mixer/AUX source, L/R level and stereo link;
+- **Headphones** — source, L/R volume, five mixer-output pair switches and stereo link;
 - **AUX** — software-return 1/2 -> AUX and AUX output stereo levels;
-- **Info** — GUI/HAL build information, live transport state/rate, macOS/Mac information, FireWire controller information and FW410 identity.
+- **Inputs** — live Analog Input 1/2 and S/PDIF L/R meters;
+- **Device** — connection state, active/requested sample rate, engine PID, CoreAudio buffer state, 44.1/48 kHz selector and non-calibrated latency status;
+- **Info** — GUI/HAL/runtime build identity, system/device information, runtime diagnostics, Copy Diagnostics and Open Transport Log.
 
-The GUI currently uses the validated `fw410ctl` command as its backend boundary. This deliberately reuses the proven socket/control path while the UI evolves. Direct socket IPC can replace the subprocess boundary later without changing the hardware-control semantics.
+The Device sample-rate selector writes `kAudioDevicePropertyNominalSampleRate`; the HAL requests the normal CoreAudio device configuration change, and the supervisor performs the native engine transition. The GUI does not call `rateprobe` directly.
 
-The Mixer tab presents software returns in CoreAudio/Logic order. Internally, the raw FW410 AV/C return identities are rotated:
+The GUI uses the validated `fw410ctl` command for established hardware-control actions. This reuses the proven socket/control path and introduces no extra FireWire ownership.
+
+The Mixer tab presents software returns in CoreAudio/Logic order while translating to the FW410's raw rotated AV/C return identities internally.
+
+## Build/install/package status
+
+Aggregate targets:
 
 ```text
-GUI / CoreAudio SW Return 1/2   -> raw AV/C sw3/4
-GUI / CoreAudio SW Return 3/4   -> raw AV/C sw5/6
-GUI / CoreAudio SW Return 5/6   -> raw AV/C sw7/8
-GUI / CoreAudio SW Return 7/8   -> raw AV/C sw9/10
-GUI / CoreAudio SW Return 9/10  -> raw AV/C sw1/2
+make             -> HAL + release runtime + GUI
+make hal         -> HAL only
+make runtime     -> installed runtime/control binaries only
+make gui         -> control panel only
+make all-tools   -> development/reverse-engineering tools
+make package     -> clean rebuild + complete package including GUI
 ```
 
-This mapping is a presentation/backend translation only; no extra FireWire ownership is introduced.
+`sudo make install` expects artifacts to have been built as the normal user and installs the HAL bundle, launchd/runtime tree and `/Applications/macfw FW410 Control.app`.
+
+The GUI Makefile uses a space-free internal bundle path so GNU make does not split the application name into multiple targets. The installed application name remains `macfw FW410 Control.app`.
+
+The package builder explicitly stages that user-facing application name, persists runtime build metadata, and performs a clean release-artifact rebuild so package SHA and embedded build identities stay synchronized.
+
+The current GUI build is clean for the warnings addressed in the release pass.
 
 ## Current functional matrix
 
@@ -167,7 +299,8 @@ This mapping is a presentation/backend translation only; no extra FireWire owner
 | 10-channel playback | validated | validated |
 | 4-channel capture | validated | validated |
 | simultaneous full duplex | validated | validated |
-| software monitoring | validated | validated |
+| Logic software monitoring / physical loopback | validated | validated |
+| low-latency real-time scheduler | validated | validated |
 | runtime rate switching | validated | validated |
 | physical disconnect/reconnect recovery | validated | validated |
 | guarded bootloader recovery | validated | validated |
@@ -176,44 +309,44 @@ This mapping is a presentation/backend translation only; no extra FireWire owner
 | live headphone/AUX controls | validated | validated |
 | physical output controls | validated | validated |
 | main-mixer assignment routing | validated | validated |
+| live input meters | validated | validated |
+| Device-tab rate control | validated | validated |
 | native GUI controls | validated | validated |
 
-## Build/install status
+## Known non-blockers / deferred work
 
-The aggregate Makefile targets have been normalized:
+- slower but reliable 48 -> 44.1 kHz transition;
+- calibrated CoreAudio latency/safety-offset reporting;
+- unresolved mixer strip level/pan/mute/AUX-send semantics;
+- named user presets;
+- optional menu-bar status/quick controls.
 
-```text
-make             -> HAL + release runtime + GUI
-make hal         -> HAL only
-make runtime     -> installed runtime/control binaries only
-make gui         -> control panel only
-make all-tools   -> all development/reverse-engineering tools
-make package     -> complete package including GUI
-```
+## Final release-candidate regression — PASSED
 
-`sudo make install` now expects all installable artifacts to have been built as the normal user. It installs the HAL bundle, launchd/runtime tree and `/Applications/macfw FW410 Control.app` without intentionally compiling as root.
+The launchd-managed release candidate has completed the final regression pass:
 
-## Control-panel implementation sequence
+1. clean build and full install — **passed**;
+2. CoreAudio enumeration and normal device usability — **passed**;
+3. 44.1 playback + capture + Logic monitoring loopback — **passed**;
+4. 48 kHz playback + capture + Logic monitoring loopback — **passed**;
+5. repeated 44.1 -> 48 and 48 -> 44.1 switching from the Device tab — **passed**;
+6. equivalent switching from Audio MIDI Setup — **passed**;
+7. Mixer routing, Outputs, Headphones and AUX controls while audio is active — **passed**;
+8. Inputs meters at both sample rates — **passed**;
+9. persistent control state across rate switches and transport restart — **passed**;
+10. physical disconnect/reconnect recovery — **passed**;
+11. Info runtime metadata, Copy Diagnostics and Open Transport Log — **passed**;
+12. aggregate `make`, `sudo make install` and `make package` behavior — **passed**;
+13. GUI compiler/build warning cleanup — **passed**.
 
-1. Outputs — **routing/level GUI implemented and hardware-tested**.
-2. Mixer — **7x5 assignment matrix implemented and hardware-tested**; remaining strip controls still pending.
-3. Inputs / Monitoring — direct-monitor controls separate from CoreAudio capture where they are not already naturally represented by Mixer routing.
-4. Meters — derive peak/RMS from already-decoded PCM and publish lightweight telemetry.
-5. Device — sample-rate and confirmed clock/device controls.
-6. Buffer / latency — investigate CoreAudio buffer property and each internal buffering layer before exposing settings.
-7. Stereo link — base reusable behavior implemented; expand consistently where additional stereo level controls are added.
-8. Presets / state — complete mixer/routing snapshots.
-9. Optional menu-bar status/quick headphone controls.
-10. Info / diagnostics — exact installed runtime metadata, recovery counters and Copy Diagnostics.
+No functional regression was observed from the final 44.1 socket-race fix.
 
-## Immediate next checkpoint
+## Release state
 
-The routing portion of the Mixer phase is complete and hardware-validated. Before adding the remaining mixer-strip controls, preserve the current known-good state and continue with the Linux/original-control-panel protocol references for level/pan/mute semantics.
+The current implementation is considered **release-candidate ready**. Do not resume mixer-strip research, latency calibration or rate-switch optimization in this release line unless a new release-blocking regression is found.
 
-Do not change the proven 35-cell initialization rule casually. New main-mixer controls should continue through the transport-owned socket/cache architecture and should be validated one class at a time while full-duplex audio remains active.
-
-Do not expose a generic buffer slider during this phase. Buffer/latency work remains a separate measured investigation.
+Packaging/version/tag/release publication can proceed as a separate release step when explicitly requested.
 
 ## Quick handoff
 
-> Native 44.1/48 kHz full duplex, recovery and production launchd lifecycle are hardware-validated. The transport owns the live control IPC used by `fw410ctl` and the native AppKit GUI. Headphone, AUX, physical Outputs and the complete 7x5 main-mixer assignment matrix are now hardware-validated. The main mixer requires a coherent 35-cell cached baseline before individual route writes. The GUI translates raw FW410 software-return identities into CoreAudio/Logic channel order. Current tabs are Mixer, Outputs, Headphones, AUX and Info. The next Mixer work is the remaining strip controls, using the Linux driver and original-panel model as references without changing FireWire ownership.
+> Native 44.1/48 kHz full duplex is hardware-validated with dedicated isoch + Mach-paced time-constraint scheduling at both rates. Capture prefill is 256 frames. The launchd service path is the authoritative runtime baseline. The transport owns all FireWire and live control IPC. The native GUI includes Mixer, Outputs, Headphones, AUX, Inputs, Device and Info/Diagnostics; rate selection uses the normal CoreAudio/HAL lifecycle. A 44.1 startup race caused by short-lived local socket clients was fixed by preventing SIGPIPE from killing the transport and delaying the 44.1 meter listener until after the startup/reassert window. 48 -> 44.1 remains slower than the opposite direction but is now consistently reliable. The final release-candidate regression passed without loss of other functionality. Mixer strip controls and calibrated HAL latency reporting remain deferred.

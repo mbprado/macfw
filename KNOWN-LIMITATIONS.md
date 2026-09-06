@@ -5,9 +5,9 @@ This file records limitations and open items for the current macfw M-Audio FireW
 ## Platform scope
 
 - **Intel Macs only.** Apple Silicon is not currently a project target.
-- Hardware validation includes **macOS Monterey 12.7.6**, **Ventura 13.7.8**, and **Sonoma 14.8.9**.
+- Hardware validation includes **macOS Monterey 12.7.6**, **Ventura 13.7.8**, **Sonoma 14.8.9**, and **Sequoia 15.x**.
 - Hardware validation is still concentrated on a small number of Mac/FW410 combinations. A broader Mac / FireWire-adapter / firmware matrix is still needed.
-- See [`COMPATIBILITY.md`](COMPATIBILITY.md) for the current tested matrix.
+- See [`COMPATIBILITY.md`](COMPATIBILITY.md) for the cumulative tested matrix.
 
 ## Supported hardware
 
@@ -24,17 +24,25 @@ This file records limitations and open items for the current macfw M-Audio FireW
 
 ## Latency
 
-Capture currently uses a deliberately conservative 4,096-frame prefill to prioritize correctness and recovery stability. This produces noticeable software-monitoring latency and has not yet been tuned for low-latency production use.
+Capture now uses a hardware-validated **256-frame prefill**, approximately 5.8 ms at 44.1 kHz and 5.3 ms at 48 kHz. Physical loopback with Logic software monitoring showed excellent subjective round-trip latency on the development system.
 
-## 44.1 kHz lifecycle
+This prefill is only one internal buffering layer and must not be confused with complete CoreAudio or end-to-end latency.
 
-The FW410 requires a device-specific 44.1 kHz startup sequence, including an AV/C rate reassertion after duplex streaming starts.
+The HAL does not yet publish calibrated `kAudioDevicePropertyLatency`, `kAudioDevicePropertySafetyOffset`, or stream-latency values. Those internal properties currently remain zero placeholders, and the control panel deliberately displays **Not reported by HAL** instead of presenting them as real measurements.
 
-Earlier development testing occasionally produced broken 44.1 kHz audio/capture. Removing the unconditional clean-stop reset to 48 kHz reduced this occurrence significantly to practically zero in subsequent testing. The historical failure remains documented until broader hardware testing establishes that the lifecycle is fully robust across machines and interfaces.
+## 44.1 kHz lifecycle and rate-switch timing
+
+The FW410 requires a device-specific 44.1 kHz startup sequence, including a larger rate-specific ISO start lead and an AV/C rate reassertion after duplex streaming starts.
+
+The current 44.1 path is hardware-validated as stable and reliable in normal launchd-managed operation. However, **48 -> 44.1 kHz switching takes noticeably longer than 44.1 -> 48 kHz** because the slow direction performs additional settle/readback, startup-lead and post-start reassert work before reporting READY.
+
+The slower direction is accepted for the current release because repeated switching from both Audio MIDI Setup and the macfw Device tab completes reliably. Timing optimization is deferred until it can be instrumented without disturbing the stable 44.1 sequence.
+
+A release-candidate failure where 44.1 could fall into repeated recovery was traced to a local Unix-socket `SIGPIPE` race: a GUI/control client could time out and disappear before the native engine replied. The transport now ignores `SIGPIPE`, and the 44.1 meter listener is not exposed until the startup/reassert window is complete. Repeated hardware testing after that fix showed reliable switching.
 
 ## Sleep/wake coverage
 
-Sleep/wake has been hardware-validated on Ventura 13.7.8 and Sonoma 14.8.9. Playback and capture resumed normally after wake in the validated tests.
+Sleep/wake has been hardware-validated on Ventura 13.7.8, Sonoma 14.8.9 and Sequoia 15.x. Playback and capture resumed normally after wake in the validated tests.
 
 On Sonoma, the FW410 remained in its operational personality rather than falling back to its bootloader personality during the validated sleep/wake test.
 
@@ -61,17 +69,19 @@ A substantial part of the FW410 control surface is implemented and hardware-vali
 - AUX levels;
 - physical output Mixer/AUX selection and L/R levels;
 - 7-source x 5-bus main-mixer route assignments;
-- native AppKit GUI for Mixer, Outputs, Headphones, AUX and Info;
+- native AppKit GUI with Mixer, Outputs, Headphones, AUX, Inputs, Device and Info/Diagnostics tabs;
+- live Analog In 1/2 and S/PDIF L/R meters;
+- 44.1/48 kHz selection through the standard CoreAudio/HAL lifecycle;
 - persistence of currently writable production controls across reboot and interface reconnect;
 - Reset Defaults to the documented macfw baseline.
 
-The full original mixer strip feature set is **not yet complete**. Remaining work includes controls such as strip level, pan/balance, mute/solo and AUX-send behavior where those semantics are confirmed.
+The full original mixer strip feature set is **not yet complete**. Remaining work includes strip level, pan/balance, mute/solo and AUX-send behavior where those semantics are confirmed.
 
 The main mixer also has a device-specific state-management limitation: isolated route writes against an unknown matrix are unsafe. macfw must first establish a complete known 35-cell baseline, cache it in the transport process and then apply later route changes differentially. Mixer STATUS polling is intentionally avoided.
 
 Persistent state follows the same safety model: saved main-mixer routes are restored through the full known baseline before differential route replay. The persisted reset baseline is a macfw-defined default, not a claim about undocumented M-Audio factory defaults.
 
-The GUI currently invokes `fw410ctl` subprocesses as its proven backend boundary. This is functional but not the final efficiency target; mixer refresh can later be optimized to fetch the cached matrix in one operation.
+The GUI currently invokes `fw410ctl` subprocesses as its proven backend boundary for established hardware-control actions. This is functional and hardware-validated, but direct socket IPC may be a future efficiency cleanup.
 
 ## S/PDIF control coverage
 
@@ -87,17 +97,19 @@ The alpha packaging work is focused on reproducible installation and hardware va
 
 ## Package and compatibility testing
 
-The `.pkg` installer has been validated for immediate operation after installation without reboot. A completely fresh **Monterey 12.7.6** installation worked as expected with the packaged driver. Ventura 13.7.8 and Sonoma 14.8.9 are also functionally validated.
+The `.pkg` installer has been validated for immediate operation after installation without reboot. A completely fresh **Monterey 12.7.6** installation worked as expected with the packaged driver. Ventura 13.7.8, Sonoma 14.8.9 and Sequoia 15.x are also functionally validated in the cumulative compatibility matrix.
 
-The `0.02.000` candidate package path has additionally been hardware-validated through installation, launchd startup, status reporting, normal control operation, Reset Defaults, reboot persistence and physical disconnect/reconnect persistence.
+The `0.03.000` release-candidate source/install/package path was revalidated on the development system after the low-latency scheduler, Device/Inputs/Diagnostics GUI work and 44.1 rate-switch hardening. `make`, `sudo make install`, and `make package` all completed correctly, and the final functional regression did not expose regressions in the previously validated control/audio paths.
 
-The package/source install paths include the native control-panel application, persistent state helper, HAL and launchd/runtime components.
+The package/source install paths include the native control-panel application, persistent state helper, HAL, launchd/runtime components and runtime build metadata.
 
-Reboot recovery, delayed hardware attachment, sample-rate switching, physical disconnect/reconnect, and launchd process restart have also been validated during development testing.
+Reboot recovery, delayed hardware attachment, sample-rate switching, physical disconnect/reconnect, sleep/wake on the recorded systems, and launchd process restart have all been validated during development testing.
 
-This does not yet constitute a broad compatibility guarantee across all Intel Mac models, FireWire adapters, macOS versions, or FW410 hardware revisions.
+This does not constitute a broad compatibility guarantee across all Intel Mac models, FireWire adapters, macOS versions, or FW410 hardware revisions.
 
 ## Diagnostics
+
+The control panel's **Copy Diagnostics** action is the preferred first support snapshot for the current release. It includes the visible Info state, full transport status and recent transport log output.
 
 Transport diagnostics and reverse-engineering tools are primarily developer/tester interfaces. Their output and command-line contracts may change during the 0.x development series.
 
@@ -113,6 +125,7 @@ Useful reports should include:
 - FW410 behavior at 44.1 or 48 kHz;
 - whether the problem occurs after install, boot, rate switch, disconnect/reconnect, sleep/wake, normal streaming, or a control change;
 - whether persistent controls or Reset Defaults are involved;
+- Copy Diagnostics output where available;
 - relevant `/Library/Logs/macfw-fw410-transport.log` output;
 - `/Library/Logs/macfw_install.log` for package-install problems;
 - transport status output where available.

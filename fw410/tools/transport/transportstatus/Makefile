@@ -4,7 +4,7 @@ CPPFLAGS += -I../../../hal/include
 
 all: transportstatus transportstatus-reset
 
-transportstatus: main.cpp ../../../hal/include/macfw_hal_transport_status.h
+transportstatus: main.cpp ../../../hal/include/macfw_hal_transport_status.h ../../../hal/include/macfw_hal_capture_shm.h
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) main.cpp -o $@
 
 transportstatus-reset: reset.cpp ../../../hal/include/macfw_hal_transport_status.h
