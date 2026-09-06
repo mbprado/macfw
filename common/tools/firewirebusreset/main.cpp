@@ -124,10 +124,27 @@ int main(int argc, char** argv) {
             return 0;
         }
 
-        std::cout << "\nrequesting FireWire bus reset...\n";
+        std::cout << "\nopening FireWire device...\n";
+        const IOReturn openKr = (*device)->Open(device);
+        std::cout << "Open result:     0x" << std::hex << openKr
+                  << std::dec << '\n';
+        if (openKr != kIOReturnSuccess) {
+            std::cout << "status: FAIL - device could not be opened\n";
+            (*device)->Release(device);
+            IOObjectRelease(iterator);
+            return 3;
+        }
+
+        std::cout << "requesting FireWire bus reset...\n";
         const IOReturn resetKr = (*device)->BusReset(device);
         std::cout << "BusReset result: 0x" << std::hex << resetKr
                   << std::dec << '\n';
+
+        // BusReset() operates on an opened IOFireWireLib device interface.
+        // The reset can invalidate the previously observed generation/node ID,
+        // so do not perform any further device transactions before closing.
+        (*device)->Close(device);
+
         if (resetKr == kIOReturnSuccess)
             std::cout << "status: PASS - bus re-enumeration is expected now\n";
         else
@@ -135,7 +152,7 @@ int main(int argc, char** argv) {
 
         (*device)->Release(device);
         IOObjectRelease(iterator);
-        return resetKr == kIOReturnSuccess ? 0 : 3;
+        return resetKr == kIOReturnSuccess ? 0 : 4;
     }
 
     IOObjectRelease(iterator);
