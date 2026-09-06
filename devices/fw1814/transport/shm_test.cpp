@@ -151,11 +151,21 @@ bool captureMeter(unsigned seconds) {
     auto nextPrint = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
 
     while (std::chrono::steady_clock::now() < end) {
+        // Match the intended HAL contract: merely announcing read callbacks is
+        // enough for the producer to notice a consumer. Do not drain capture
+        // before active=1, otherwise the producer can never accumulate its
+        // required prefill.
         m.ring->halReadCalls.fetch_add(1, std::memory_order_relaxed);
         m.ring->halRequestedFrames.fetch_add(kFrames, std::memory_order_relaxed);
-        const std::size_t got = macfw::fw1814::hal::capture::read(
-            *m.ring, block.data(), kFrames);
-        m.ring->halFramesFromRing.fetch_add(got, std::memory_order_relaxed);
+
+        std::size_t got = 0;
+        const bool active =
+            m.ring->active.load(std::memory_order_acquire) != 0;
+        if (active) {
+            got = macfw::fw1814::hal::capture::read(
+                *m.ring, block.data(), kFrames);
+            m.ring->halFramesFromRing.fetch_add(got, std::memory_order_relaxed);
+        }
         if (got < kFrames)
             m.ring->halZeroFilledFrames.fetch_add(
                 kFrames - got, std::memory_order_relaxed);
@@ -174,7 +184,7 @@ bool captureMeter(unsigned seconds) {
                 std::cout << " A" << (ch + 1) << '=' << peaks[ch];
             std::cout << " queued="
                       << macfw::fw1814::hal::capture::availableFrames(*m.ring)
-                      << " active=" << m.ring->active.load(std::memory_order_acquire)
+                      << " active=" << (active ? 1 : 0)
                       << '\n';
             peaks.fill(0.0f);
             nextPrint += std::chrono::milliseconds(500);
