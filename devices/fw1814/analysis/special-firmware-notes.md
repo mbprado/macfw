@@ -13,14 +13,20 @@ A dedicated post-boot FireWire bus reset was then tested on the local unit. The 
 Immediately after the successful reset, the corrected special-firmware probe produced a clean CMP snapshot and a successful standard AV/C INPUT PLUG SIGNAL FORMAT STATUS read:
 
 ```text
-oMPR:   0xbfff0002  plugs=2
-oPCR[0]: 0x80000080 online=yes p2p=0 broadcast=no channel=0
-iMPR:   0x80ff0003  plugs=3
-iPCR[0]: 0x80000000 online=yes p2p=0 broadcast=no channel=0
+oMPR:    0xbfff0002  plugs=2
+oPCR[0]: 0x80000080  online=yes p2p=0 broadcast=no channel=0
+iMPR:    0x80ff0003  plugs=3
+iPCR[0]: 0x80000000  online=yes p2p=0 broadcast=no channel=0
 current INPUT signal format: 44100 Hz
 ```
 
 This locally confirms that the extra post-boot bus reset restores reliable normal transaction handling on the development FW1814.
+
+The guarded special-firmware initializer was then hardware-tested at 48 kHz. The known internal-clock/S/PDIF baseline was accepted, OUTPUT 48 kHz succeeded, INPUT 48 kHz succeeded after the required 100 ms delay, and authoritative INPUT STATUS read back 48000 Hz.
+
+The first receive-only AMDTP experiment then established oPCR[0] successfully and started the host receive channel, but received zero packets (`0 / 64` NuDCL slots touched). oPCR[0] restored exactly after the test. This showed that CMP connection alone does not cause this firmware to begin transmitting.
+
+Upstream Linux explains the missing step: after the CMP/AMDTP streams are established, the M-Audio special-firmware path deliberately reasserts the current sample rate. The source explicitly notes that these commands are how the customized firmware starts transmitting. The next macfw receive probe therefore performs the special rate reassert only after CMP connection and host RX startup.
 
 ## Upstream Linux correlation
 
@@ -39,6 +45,8 @@ Important rules from that implementation:
 5. Linux uses static stream-formation tables derived from the selected digital modes rather than querying BridgeCo format support.
 6. Linux schedules a FireWire bus reset for FW1814/ProjectMix after registration because these devices can otherwise have a FireWire gap-count mismatch that causes frequent transaction failures.
 7. When changing sample rate, Linux programs device OUTPUT first, waits 100 ms, then programs device INPUT because the second command is otherwise prone to failure.
+8. For M-Audio special firmware, after CMP connections and the host AMDTP domain are started, Linux re-applies the current sample rate. Its source comment states that the customized firmware uses these commands to start transmitting the stream.
+9. Unlike FW410 and Ozonic, the FW1814 does not require both stream directions merely to make one direction operate; a single stream is permitted by the upstream M-Audio-specific logic.
 
 ## Reference 44.1/48 kHz formations
 
@@ -56,7 +64,7 @@ device -> host / capture:   16 PCM + 1 MIDI
 host -> device / playback:  12 PCM + 1 MIDI
 ```
 
-These are upstream reference formations. They have not yet been validated by macfw isochronous capture on the local FW1814.
+These are upstream reference formations. They have not yet been validated from received macfw isochronous packets on the local FW1814.
 
 ## macfw bring-up policy
 
@@ -64,6 +72,7 @@ These are upstream reference formations. They have not yet been validated by mac
 - After booting operational firmware, apply the explicit FireWire bus-reset workaround before further operational transactions.
 - Validate CMP and standard AV/C STATUS after the reset.
 - Establish the known-safe M-Audio baseline explicitly: internal clock + S/PDIF input/output + unlocked clock controls.
-- For sample-rate changes, program OUTPUT, wait 100 ms, then program INPUT and verify with INPUT PLUG SIGNAL FORMAT STATUS.
+- For ordinary sample-rate changes, program OUTPUT, wait 100 ms, then program INPUT and verify with INPUT PLUG SIGNAL FORMAT STATUS.
+- When starting an FW1814 special-firmware stream, establish CMP and start the host ISO side first, then reassert the current rate using the same OUTPUT -> 100 ms -> INPUT sequence to kick device transmission.
 - Keep the first transport baseline at 48 kHz, internal clock, S/PDIF digital mode.
 - Preserve the MIDI AM824 position but defer CoreMIDI exposure.
