@@ -10,11 +10,13 @@ LIBMACFW_INCLUDE := ../../../fw410/lib/include
 BOOT_TOOL := fwboot1814
 INIT_TOOL := fw1814init
 CAPTURE48_TOOL := fw1814capture48
+DUALCMP_TOOL := fw1814capture48_dualcmp
 
 .PHONY: fingerprint probe boot-tool boot-check boot \
 	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe \
 	init-tool init-check init-48 init-44 \
-	capture48-tool capture48-check capture48 capture48-raw clean
+	capture48-tool capture48-check capture48 capture48-raw \
+	dualcmp-tool dualcmp-check dualcmp dualcmp-raw clean
 
 probe:
 	$(MAKE) -C $(PROBE_DIR)
@@ -70,10 +72,7 @@ capture48-tool: $(CAPTURE48_TOOL)
 $(CAPTURE48_TOOL): fw1814capture48.cpp $(LIBMACFW)
 	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) $< $(LIBMACFW) $(FRAMEWORKS) -o $@
 
-# FW1814 M-Audio special firmware does not start transmitting merely when
-# oPCR[0] is connected. The device-specific harness starts host RX, then
-# reasserts OUTPUT 48 kHz, waits 100 ms, and reasserts INPUT 48 kHz.
-# The expected S/PDIF formation is 10 PCM + 1 MIDI (DBS=11), max 272 bytes.
+# Original receive-only experiment. This intentionally connects only oPCR[0].
 capture48-check: capture48-tool
 	./$(CAPTURE48_TOOL)
 
@@ -83,8 +82,26 @@ capture48: capture48-tool
 capture48-raw: capture48-tool
 	./$(CAPTURE48_TOOL) --execute --raw
 
+# Incremental FW1814 startup diagnostic. Linux's BeBoB engine establishes both
+# CMP directions before its M-Audio special-firmware rate reassert. This test
+# reserves and connects both oPCR[0] and iPCR[0], starts ONLY capture DMA, and
+# deliberately does not send host->device packets yet.
+dualcmp-tool: $(DUALCMP_TOOL)
+
+$(DUALCMP_TOOL): fw1814capture48_dualcmp.cpp $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) $< $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+dualcmp-check: dualcmp-tool
+	./$(DUALCMP_TOOL)
+
+dualcmp: dualcmp-tool
+	./$(DUALCMP_TOOL) --execute
+
+dualcmp-raw: dualcmp-tool
+	./$(DUALCMP_TOOL) --execute --raw
+
 clean:
 	$(MAKE) -C $(PROBE_DIR) clean
 	$(MAKE) -C $(BEBOB_PROBE_DIR) clean
 	$(MAKE) -C $(BUS_RESET_DIR) clean
-	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL)
+	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL)
