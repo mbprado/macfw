@@ -11,12 +11,14 @@ BOOT_TOOL := fwboot1814
 INIT_TOOL := fw1814init
 CAPTURE48_TOOL := fw1814capture48
 DUALCMP_TOOL := fw1814capture48_dualcmp
+DUALCMP_WAIT_TOOL := fw1814capture48_dualcmp_wait
 
 .PHONY: fingerprint probe boot-tool boot-check boot \
 	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe \
 	init-tool init-check init-48 init-44 \
 	capture48-tool capture48-check capture48 capture48-raw \
-	dualcmp-tool dualcmp-check dualcmp dualcmp-raw clean
+	dualcmp-tool dualcmp-check dualcmp dualcmp-raw \
+	dualcmp-wait-tool dualcmp-wait-check dualcmp-wait dualcmp-wait-raw clean
 
 probe:
 	$(MAKE) -C $(PROBE_DIR)
@@ -100,8 +102,27 @@ dualcmp: dualcmp-tool
 dualcmp-raw: dualcmp-tool
 	./$(DUALCMP_TOOL) --execute --raw
 
+# Same dual-CMP experiment, but mirrors Linux special_set_rate more closely:
+# OUTPUT CONTROL -> 100 ms -> INPUT CONTROL, then wait for stream readiness.
+# The immediate INPUT STATUS query is intentionally omitted because Linux does
+# not make it part of the stream-start kick and the device can transiently stop
+# answering STATUS at exactly that point.
+dualcmp-wait-tool: $(DUALCMP_WAIT_TOOL)
+
+$(DUALCMP_WAIT_TOOL): fw1814capture48_dualcmp_wait.cpp $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) $< $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+dualcmp-wait-check: dualcmp-wait-tool
+	./$(DUALCMP_WAIT_TOOL)
+
+dualcmp-wait: dualcmp-wait-tool
+	./$(DUALCMP_WAIT_TOOL) --execute
+
+dualcmp-wait-raw: dualcmp-wait-tool
+	./$(DUALCMP_WAIT_TOOL) --execute --raw
+
 clean:
 	$(MAKE) -C $(PROBE_DIR) clean
 	$(MAKE) -C $(BEBOB_PROBE_DIR) clean
 	$(MAKE) -C $(BUS_RESET_DIR) clean
-	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL)
+	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL)
