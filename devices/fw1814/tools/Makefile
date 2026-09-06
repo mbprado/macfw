@@ -18,6 +18,7 @@ TEARDOWN_WATCH_TOOL := fw1814teardown_watch
 CLIENT_CLOSE_WATCH_TOOL := fw1814client_close_watch
 STREAM_CLIENT_CLOSE_WATCH_TOOL := fw1814stream_client_close_watch
 PLAYBACK_MAP_TOOL := fw1814playback_map
+ROUTE_ANALOG_TOOL := fw1814route_stream_to_analog
 
 .PHONY: fingerprint probe boot-tool boot-check boot \
 	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe \
@@ -30,7 +31,8 @@ PLAYBACK_MAP_TOOL := fw1814playback_map
 	teardown-watch-tool teardown-watch-check teardown-watch \
 	client-close-watch-tool client-close-watch-check client-close-watch \
 	stream-client-close-watch-tool stream-client-close-watch-check stream-client-close-watch \
-	playback-map-tool playback-map-check playback-map clean
+	playback-map-tool playback-map-check playback-map \
+	route-analog-tool route-analog-check route-analog clean
 
 probe:
 	$(MAKE) -C $(PROBE_DIR)
@@ -225,8 +227,22 @@ playback-map: playback-map-tool
 	@if [ -z "$(POSITION)" ]; then echo "usage: make playback-map POSITION=0..5"; exit 64; fi
 	./$(PLAYBACK_MAP_TOOL) --position $(POSITION) --execute
 
+# Minimal documented special-firmware routing write used only to make the four
+# analog playback stream positions reachable at the physical analog jacks.
+# The FW1814 mixer register area is write-only; no readback/probing is attempted.
+route-analog-tool: $(ROUTE_ANALOG_TOOL)
+
+$(ROUTE_ANALOG_TOOL): fw1814route_stream_to_analog.cpp $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) $< $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+route-analog-check: route-analog-tool
+	./$(ROUTE_ANALOG_TOOL)
+
+route-analog: route-analog-tool
+	./$(ROUTE_ANALOG_TOOL) --execute
+
 clean:
 	$(MAKE) -C $(PROBE_DIR) clean
 	$(MAKE) -C $(BEBOB_PROBE_DIR) clean
 	$(MAKE) -C $(BUS_RESET_DIR) clean
-	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) $(PLAYBACK_MAP_TOOL) fw1814capture48_duplex_nodata
+	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) $(PLAYBACK_MAP_TOOL) $(ROUTE_ANALOG_TOOL) fw1814capture48_duplex_nodata
