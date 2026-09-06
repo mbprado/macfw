@@ -64,48 +64,50 @@ public:
 
     bool open(std::uint32_t sampleRate) {
         reset();
-        bool created = false;
+
+        // The transport process owns and initializes this versioned capture
+        // ring. Open/create it directly and force the exact ABI size on every
+        // engine start. This also repairs a stale zero-length object left by a
+        // previous failed initialization attempt.
         fd_ = shm_open(macfw::fw1814::hal::capture::kShmName,
-                       O_CREAT | O_EXCL | O_RDWR, 0666);
-        if (fd_ >= 0) {
-            created = true;
-        } else if (errno == EEXIST) {
-            fd_ = shm_open(macfw::fw1814::hal::capture::kShmName, O_RDWR, 0);
-        }
+                       O_CREAT | O_RDWR, 0666);
         if (fd_ < 0) {
-            std::fprintf(stderr, "FW1814 capture shm_open failed: %s\n",
+            std::fprintf(stderr, "FW1814 capture shm_open(%s) failed: %s\n",
+                         macfw::fw1814::hal::capture::kShmName,
                          std::strerror(errno));
             return false;
         }
 
-        const std::size_t bytes = sizeof(macfw::fw1814::hal::capture::SharedCaptureRing);
-        if (created) {
-            if (fchmod(fd_, 0666) != 0 ||
-                ftruncate(fd_, static_cast<off_t>(bytes)) != 0) {
-                std::fprintf(stderr, "FW1814 capture shared-memory setup failed: %s\n",
-                             std::strerror(errno));
-                reset();
-                return false;
-            }
-        } else {
-            struct stat st{};
-            if (fstat(fd_, &st) != 0 || st.st_size < 0 ||
-                static_cast<std::size_t>(st.st_size) < bytes) {
-                std::fprintf(stderr, "FW1814 capture shared-memory object has wrong size\n");
-                reset();
-                return false;
-            }
+        const std::size_t bytes =
+            sizeof(macfw::fw1814::hal::capture::SharedCaptureRing);
+        if (ftruncate(fd_, static_cast<off_t>(bytes)) != 0) {
+            const int savedErrno = errno;
+            std::fprintf(stderr,
+                         "FW1814 capture ftruncate(%zu) failed: %s\n",
+                         bytes, std::strerror(savedErrno));
+            reset();
+            return false;
         }
 
         void* p = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
         if (p == MAP_FAILED) {
-            std::fprintf(stderr, "FW1814 capture mmap failed: %s\n", std::strerror(errno));
+            const int savedErrno = errno;
+            std::fprintf(stderr,
+                         "FW1814 capture mmap(%zu) failed: %s\n",
+                         bytes, std::strerror(savedErrno));
             reset();
             return false;
         }
+
         ring_ = static_cast<macfw::fw1814::hal::capture::SharedCaptureRing*>(p);
         macfw::fw1814::hal::capture::initialize(*ring_, sampleRate);
         ring_->active.store(0, std::memory_order_release);
+
+        std::fprintf(stdout,
+                     "FW1814 capture SHM ready: %s (%zu bytes, %u Hz, %u channels)\n",
+                     macfw::fw1814::hal::capture::kShmName,
+                     bytes, sampleRate,
+                     macfw::fw1814::hal::capture::kInputChannels);
         return true;
     }
 
