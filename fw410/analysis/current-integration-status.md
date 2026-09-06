@@ -1,6 +1,6 @@
 # FW410 current integration status
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 This document is the canonical handoff for the current CoreAudio/HAL/runtime/control-panel release-candidate state. Older reverse-engineering notes remain useful historical evidence, but this file defines the present integration baseline and immediate next work.
 
@@ -8,13 +8,19 @@ This document is the canonical handoff for the current CoreAudio/HAL/runtime/con
 
 macfw publishes **M-Audio FireWire 410** as a normal macOS CoreAudio device through a dependency-free AudioServerPlugIn and launchd-managed user-space FireWire transport.
 
+The current release-candidate code baseline was hardware-validated at:
+
+```text
+71962daa48d275b43ef6dee4dccc78dcdffa444b
+```
+
 Hardware-confirmed:
 
 - native 44.1 kHz and 48 kHz full-duplex operation;
 - ten playback channels: Analog Out 1-8 and S/PDIF L/R;
 - four capture channels: Analog In 1/2 and S/PDIF In L/R;
 - simultaneous playback, recording and Logic software monitoring;
-- runtime 44.1 <-> 48 kHz switching;
+- reliable runtime 44.1 <-> 48 kHz switching through both the native Device tab and Audio MIDI Setup;
 - physical disconnect/reconnect and guarded bootloader recovery;
 - logical CoreAudio-device continuity while the physical transport is offline;
 - launchd service restart/recovery and late interface connection after macOS boot;
@@ -24,7 +30,8 @@ Hardware-confirmed:
 - headphone, AUX, physical output and complete 7x5 main-mixer routing controls;
 - live four-channel input meters;
 - Device-tab 44.1/48 kHz selection through the normal CoreAudio/HAL lifecycle;
-- Info/diagnostics surface with exact runtime build metadata, Copy Diagnostics and Open Transport Log.
+- Info/diagnostics surface with exact runtime build metadata, Copy Diagnostics and Open Transport Log;
+- clean aggregate build/install/package paths.
 
 The current architecture is:
 
@@ -81,7 +88,7 @@ This is only one internal buffering component and must not be presented as compl
 
 ### Real-time scheduling
 
-Both native engines now use the proven scheduling architecture:
+Both native engines use the proven scheduling architecture:
 
 ```text
 normal/control thread
@@ -106,7 +113,7 @@ audio service thread
       preemptible  true
 ```
 
-This architecture was hardware-validated at both rates. 44.1 kHz showed a major reduction in cutoffs while preserving excellent subjective round-trip latency; the same architecture then produced very good 48 kHz behavior with slightly lower perceived latency.
+This architecture was hardware-validated at both rates. 44.1 kHz showed a major reduction in cutoffs while preserving excellent subjective round-trip latency; the same architecture produced very good 48 kHz behavior with slightly lower perceived latency.
 
 Treat this scheduling path as frozen for the release candidate unless a new reproducible regression requires a change.
 
@@ -114,19 +121,45 @@ Treat this scheduling path as frozen for the release candidate unless a new repr
 
 44.1 kHz retains its hardware-established post-start AV/C rate reassert before READY. The startup path services audio during the pre-reassert interval so the TX/RX rings are not left unserviced during startup.
 
-A clean 44.1 stop leaves the FW410 at 44.1 rather than forcing an unnecessary restore to 48 kHz. A tested forced 48 -> 44.1 re-arm workaround did not solve the remaining foreground-only startup symptom and was reverted.
+A clean 44.1 stop leaves the FW410 at 44.1 rather than forcing an unnecessary restore to 48 kHz. A tested forced 48 -> 44.1 re-arm workaround did not solve the earlier foreground-only startup symptom and was reverted.
 
 Normal launchd-managed operation is the release reference. Foreground `MACFW_VERBOSE=1` runs are not performance-neutral because verbose diagnostics execute on the audio service path and can perturb real-time behavior.
 
+### Fixed 44.1 startup socket race
+
+A release-candidate regression made 48 -> 44.1 changes slow and unreliable. Earlier logs showed the 44.1 engine reaching READY and then exiting on signal 13 (`SIGPIPE`) while control-state restore and GUI clients were reconnecting.
+
+The live meter path exposed the race clearly:
+
+```text
+44.1 engine creates meter socket
+ -> engine enters ~267 ms startup/reassert interval
+ -> GUI meter client connects and sends METERS GET
+ -> GUI receive timeout expires at 200 ms and closes the socket
+ -> startup finishes
+ -> meter server services the stale request
+ -> reply to closed peer raises SIGPIPE
+ -> complete native engine exits
+ -> supervisor enters boot/retry/backoff path
+```
+
+The release fix is intentionally narrow:
+
+- local transport socket replies cannot terminate the engine with `SIGPIPE` when a client disappears;
+- the 44.1 meter socket is not exposed until the startup/reassert window is complete;
+- the previously validated 48 kHz real-time scheduler remains unchanged.
+
+Hardware regression testing with the control panel open and meter polling active confirmed repeated 48 -> 44.1 and 44.1 -> 48 switches now complete reliably and do not affect playback, capture, meters, controls or latency behavior.
+
 ### Rate-switch asymmetry
 
-44.1 -> 48 kHz switching is fast. 48 -> 44.1 kHz is noticeably slower because the 44.1 path currently performs additional established startup work:
+44.1 -> 48 kHz switching is fast. 48 -> 44.1 kHz remains noticeably slower because the 44.1 path performs additional established startup work:
 
 - initial AV/C rate transition with settle/readback;
 - a larger rate-specific ISO start lead;
 - post-start OUTPUT and INPUT 44.1 reassert transactions before READY.
 
-The switch completes and audio returns correctly, so this is a known release non-blocker. Optimize it later with dedicated timing instrumentation rather than modifying the now-stable 44.1 path before release.
+The slow direction is now consistently reliable and audio returns correctly. This is an accepted release non-blocker. Optimize it later with dedicated timing instrumentation rather than modifying the stable 44.1 path before release.
 
 ## Capture pipeline
 
@@ -234,11 +267,11 @@ Current tabs:
 
 The Device sample-rate selector writes `kAudioDevicePropertyNominalSampleRate`; the HAL requests the normal CoreAudio device configuration change, and the supervisor performs the native engine transition. The GUI does not call `rateprobe` directly.
 
-The GUI still uses the validated `fw410ctl` command for established hardware-control actions. This reuses the proven socket/control path while the UI evolves and introduces no extra FireWire ownership.
+The GUI uses the validated `fw410ctl` command for established hardware-control actions. This reuses the proven socket/control path and introduces no extra FireWire ownership.
 
 The Mixer tab presents software returns in CoreAudio/Logic order while translating to the FW410's raw rotated AV/C return identities internally.
 
-## Build/install status
+## Build/install/package status
 
 Aggregate targets:
 
@@ -248,14 +281,16 @@ make hal         -> HAL only
 make runtime     -> installed runtime/control binaries only
 make gui         -> control panel only
 make all-tools   -> development/reverse-engineering tools
-make package     -> complete package including GUI
+make package     -> clean rebuild + complete package including GUI
 ```
 
 `sudo make install` expects artifacts to have been built as the normal user and installs the HAL bundle, launchd/runtime tree and `/Applications/macfw FW410 Control.app`.
 
-The GUI Makefile now uses a space-free internal bundle path so GNU make does not split the application name into multiple targets. The current GUI build is clean under `-Wall -Wextra -Wpedantic` for the warnings addressed in the release pass.
+The GUI Makefile uses a space-free internal bundle path so GNU make does not split the application name into multiple targets. The installed application name remains `macfw FW410 Control.app`.
 
-The runtime installer persists exact release version and Git SHA metadata for the Info/diagnostics page.
+The package builder explicitly stages that user-facing application name, persists runtime build metadata, and performs a clean release-artifact rebuild so package SHA and embedded build identities stay synchronized.
+
+The current GUI build is clean for the warnings addressed in the release pass.
 
 ## Current functional matrix
 
@@ -280,32 +315,38 @@ The runtime installer persists exact release version and Git SHA metadata for th
 
 ## Known non-blockers / deferred work
 
-- slower 48 -> 44.1 kHz transition;
+- slower but reliable 48 -> 44.1 kHz transition;
 - calibrated CoreAudio latency/safety-offset reporting;
 - unresolved mixer strip level/pan/mute/AUX-send semantics;
 - named user presets;
-- optional menu-bar status/quick controls;
-- separate SIGPIPE hardening remains desirable if the previously observed disconnected-client `signal 13` engine exit is reproduced; do not mix that work into the stable audio baseline without a focused test.
+- optional menu-bar status/quick controls.
 
-## Final release-candidate regression
+## Final release-candidate regression — PASSED
 
-Before packaging, validate the installed launchd-managed build, not a verbose foreground transport:
+The launchd-managed release candidate has completed the final regression pass:
 
-1. clean build and full install;
-2. CoreAudio enumeration and default-device usability;
-3. 44.1 playback + capture + Logic monitoring loopback;
-4. 48 kHz playback + capture + Logic monitoring loopback;
-5. 44.1 -> 48 and 48 -> 44.1 switching from the Device tab;
-6. repeat the same rate switch once from Audio MIDI Setup;
-7. Mixer routing, Outputs, Headphones and AUX controls while audio is active;
-8. Inputs meters at both sample rates;
-9. persistent control state across rate switches and transport restart;
-10. physical disconnect/reconnect recovery;
-11. Info runtime metadata, Copy Diagnostics and Open Transport Log;
-12. clean `make gui` with no previously reported Makefile/compiler warnings.
+1. clean build and full install — **passed**;
+2. CoreAudio enumeration and normal device usability — **passed**;
+3. 44.1 playback + capture + Logic monitoring loopback — **passed**;
+4. 48 kHz playback + capture + Logic monitoring loopback — **passed**;
+5. repeated 44.1 -> 48 and 48 -> 44.1 switching from the Device tab — **passed**;
+6. equivalent switching from Audio MIDI Setup — **passed**;
+7. Mixer routing, Outputs, Headphones and AUX controls while audio is active — **passed**;
+8. Inputs meters at both sample rates — **passed**;
+9. persistent control state across rate switches and transport restart — **passed**;
+10. physical disconnect/reconnect recovery — **passed**;
+11. Info runtime metadata, Copy Diagnostics and Open Transport Log — **passed**;
+12. aggregate `make`, `sudo make install` and `make package` behavior — **passed**;
+13. GUI compiler/build warning cleanup — **passed**.
 
-Do not merge/package/release until that regression is complete and explicitly approved.
+No functional regression was observed from the final 44.1 socket-race fix.
+
+## Release state
+
+The current implementation is considered **release-candidate ready**. Do not resume mixer-strip research, latency calibration or rate-switch optimization in this release line unless a new release-blocking regression is found.
+
+Packaging/version/tag/release publication can proceed as a separate release step when explicitly requested.
 
 ## Quick handoff
 
-> Native 44.1/48 kHz full duplex is hardware-validated with the same dedicated isoch + Mach-paced time-constraint audio scheduling architecture at both rates. Capture prefill is 256 frames. The launchd service path is the authoritative runtime baseline. The transport owns all FireWire and live control IPC. The native GUI now includes Mixer, Outputs, Headphones, AUX, Inputs, Device and Info/Diagnostics; rate selection uses the normal CoreAudio/HAL lifecycle. Mixer strip controls remain parked, 48 -> 44.1 switching is a known slow-but-working non-blocker, and calibrated HAL latency reporting is deferred. The next action is the final regression checklist, then packaging/release after explicit approval.
+> Native 44.1/48 kHz full duplex is hardware-validated with dedicated isoch + Mach-paced time-constraint scheduling at both rates. Capture prefill is 256 frames. The launchd service path is the authoritative runtime baseline. The transport owns all FireWire and live control IPC. The native GUI includes Mixer, Outputs, Headphones, AUX, Inputs, Device and Info/Diagnostics; rate selection uses the normal CoreAudio/HAL lifecycle. A 44.1 startup race caused by short-lived local socket clients was fixed by preventing SIGPIPE from killing the transport and delaying the 44.1 meter listener until after the startup/reassert window. 48 -> 44.1 remains slower than the opposite direction but is now consistently reliable. The final release-candidate regression passed without loss of other functionality. Mixer strip controls and calibrated HAL latency reporting remain deferred.
