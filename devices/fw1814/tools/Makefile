@@ -12,7 +12,7 @@ INIT_TOOL := fw1814init
 CAPTURE48_TOOL := fw1814capture48
 DUALCMP_TOOL := fw1814capture48_dualcmp
 DUALCMP_WAIT_TOOL := fw1814capture48_dualcmp_wait
-DUPLEX_NODATA_TOOL := fw1814capture48_duplex_nodata
+DUPLEX_BLOCKING_TOOL := fw1814capture48_duplex_blocking
 
 .PHONY: fingerprint probe boot-tool boot-check boot \
 	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe \
@@ -20,7 +20,7 @@ DUPLEX_NODATA_TOOL := fw1814capture48_duplex_nodata
 	capture48-tool capture48-check capture48 capture48-raw \
 	dualcmp-tool dualcmp-check dualcmp dualcmp-raw \
 	dualcmp-wait-tool dualcmp-wait-check dualcmp-wait dualcmp-wait-raw \
-	duplex-nodata-tool duplex-nodata-check duplex-nodata duplex-nodata-raw clean
+	duplex-blocking-tool duplex-blocking-check duplex-blocking duplex-blocking-raw clean
 
 probe:
 	$(MAKE) -C $(PROBE_DIR)
@@ -117,25 +117,27 @@ dualcmp-wait: dualcmp-wait-tool
 dualcmp-wait-raw: dualcmp-wait-tool
 	./$(DUALCMP_WAIT_TOOL) --execute --raw
 
-# Full transport-start diagnostic: both CMP directions plus a real host->device
-# looping NODATA AMDTP stream (48 kHz FDF=0x02, DBS=7). Playback starts first,
-# then capture, then the M-Audio OUTPUT -> 100 ms -> INPUT rate kick.
-duplex-nodata-tool: $(DUPLEX_NODATA_TOOL)
+# Full BeBoB transport-start diagnostic. Linux initializes these streams with
+# CIP_BLOCKING, so 48 kHz uses three 8-event data packets followed by one
+# NODATA packet. Playback is 6 PCM + 1 MIDI (DBS=7, max 232 bytes); capture is
+# 10 PCM + 1 MIDI (DBS=11, max 360 bytes). Playback starts first, then capture,
+# then the M-Audio OUTPUT -> 100 ms -> INPUT rate kick.
+duplex-blocking-tool: $(DUPLEX_BLOCKING_TOOL)
 
-$(DUPLEX_NODATA_TOOL): fw1814capture48_duplex_nodata.cpp $(LIBMACFW)
-	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) $< $(LIBMACFW) $(FRAMEWORKS) -o $@
+$(DUPLEX_BLOCKING_TOOL): fw1814capture48_duplex_nodata.cpp fw1814_blocking_tx.h $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814capture48_duplex_nodata.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
 
-duplex-nodata-check: duplex-nodata-tool
-	./$(DUPLEX_NODATA_TOOL)
+duplex-blocking-check: duplex-blocking-tool
+	./$(DUPLEX_BLOCKING_TOOL)
 
-duplex-nodata: duplex-nodata-tool
-	./$(DUPLEX_NODATA_TOOL) --execute
+duplex-blocking: duplex-blocking-tool
+	./$(DUPLEX_BLOCKING_TOOL) --execute
 
-duplex-nodata-raw: duplex-nodata-tool
-	./$(DUPLEX_NODATA_TOOL) --execute --raw
+duplex-blocking-raw: duplex-blocking-tool
+	./$(DUPLEX_BLOCKING_TOOL) --execute --raw
 
 clean:
 	$(MAKE) -C $(PROBE_DIR) clean
 	$(MAKE) -C $(BEBOB_PROBE_DIR) clean
 	$(MAKE) -C $(BUS_RESET_DIR) clean
-	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_NODATA_TOOL)
+	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) fw1814capture48_duplex_nodata
