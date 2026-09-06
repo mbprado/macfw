@@ -15,6 +15,7 @@ DUALCMP_WAIT_TOOL := fw1814capture48_dualcmp_wait
 DUPLEX_BLOCKING_TOOL := fw1814capture48_duplex_blocking
 OUTPUT_WATCH_TOOL := fw1814capture48_output_watch
 TEARDOWN_WATCH_TOOL := fw1814teardown_watch
+CLIENT_CLOSE_WATCH_TOOL := fw1814client_close_watch
 
 .PHONY: fingerprint probe boot-tool boot-check boot \
 	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe \
@@ -24,7 +25,8 @@ TEARDOWN_WATCH_TOOL := fw1814teardown_watch
 	dualcmp-wait-tool dualcmp-wait-check dualcmp-wait dualcmp-wait-raw \
 	duplex-blocking-tool duplex-blocking-check duplex-blocking duplex-blocking-raw \
 	output-watch-tool output-watch-check output-watch output-watch-raw \
-	teardown-watch-tool teardown-watch-check teardown-watch clean
+	teardown-watch-tool teardown-watch-check teardown-watch \
+	client-close-watch-tool client-close-watch-check client-close-watch clean
 
 probe:
 	$(MAKE) -C $(PROBE_DIR)
@@ -173,8 +175,22 @@ teardown-watch-check: teardown-watch-tool
 teardown-watch: teardown-watch-tool
 	./$(TEARDOWN_WATCH_TOOL) --execute
 
+# Plain client lifecycle diagnostic. It uses a second read-only observer handle
+# and performs no ISO, CMP or AV/C operations. This isolates whether simply
+# closing/releasing an IOFireWireLib client changes the bus generation.
+client-close-watch-tool: $(CLIENT_CLOSE_WATCH_TOOL)
+
+$(CLIENT_CLOSE_WATCH_TOOL): fw1814client_close_watch.cpp $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814client_close_watch.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+client-close-watch-check: client-close-watch-tool
+	./$(CLIENT_CLOSE_WATCH_TOOL)
+
+client-close-watch: client-close-watch-tool
+	./$(CLIENT_CLOSE_WATCH_TOOL) --execute
+
 clean:
 	$(MAKE) -C $(PROBE_DIR) clean
 	$(MAKE) -C $(BEBOB_PROBE_DIR) clean
 	$(MAKE) -C $(BUS_RESET_DIR) clean
-	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) fw1814capture48_duplex_nodata
+	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) fw1814capture48_duplex_nodata
