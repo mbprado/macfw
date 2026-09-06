@@ -4,6 +4,7 @@
 
 #include <cerrno>
 #include <cmath>
+#include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
@@ -23,6 +24,12 @@ public:
 
     bool start(CaptureReceivePump& pump) {
         reset();
+
+        // Meter and control sockets live inside the real-time transport process.
+        // A GUI/client can legitimately disappear during a rate switch; never let
+        // a late socket reply terminate the whole audio engine with SIGPIPE.
+        std::signal(SIGPIPE, SIG_IGN);
+
         pump_ = &pump;
         listenFd_ = socket(AF_UNIX, SOCK_STREAM, 0);
         if (listenFd_ < 0) return false;
