@@ -20,9 +20,11 @@
 #include <mach/thread_policy.h>
 
 #include <atomic>
+#include <condition_variable>
 #include <csignal>
 #include <cstdint>
 #include <iostream>
+#include <mutex>
 #include <pthread.h>
 #include <thread>
 #include <vector>
@@ -33,6 +35,121 @@ constexpr UInt32 kCycleLead = 256;
 
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
+
+class IsochCallbackRunLoopThread {
+public:
+    IsochCallbackRunLoopThread() = default;
+    ~IsochCallbackRunLoopThread() { stop(); }
+
+    IsochCallbackRunLoopThread(const IsochCallbackRunLoopThread&) = delete;
+    IsochCallbackRunLoopThread& operator=(const IsochCallbackRunLoopThread&) = delete;
+
+    bool prepare() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (worker_.joinable()) return false;
+            ready_ = false;
+            pumping_ = false;
+            stopRequested_ = false;
+            runLoop_ = nullptr;
+        }
+
+        worker_ = std::thread([this] {
+            const int qosRc = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+            if (qosRc == 0)
+                std::cout << "isoch callback thread QoS: user-interactive\n";
+            else
+                std::cout << "isoch callback thread QoS: request failed (" << qosRc << ")\n";
+
+            CFRunLoopRef loop = CFRunLoopGetCurrent();
+            CFRetain(loop);
+
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                runLoop_ = loop;
+                ready_ = true;
+            }
+            cv_.notify_all();
+
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                cv_.wait(lock, [this] { return pumping_ || stopRequested_; });
+                if (stopRequested_) {
+                    runLoop_ = nullptr;
+                    lock.unlock();
+                    CFRelease(loop);
+                    return;
+                }
+            }
+
+            for (;;) {
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    if (stopRequested_) break;
+                }
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.050, false);
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                runLoop_ = nullptr;
+            }
+            CFRelease(loop);
+        });
+
+        std::unique_lock<std::mutex> lock(mutex_);
+        cv_.wait(lock, [this] { return ready_; });
+        return runLoop_ != nullptr;
+    }
+
+    CFRunLoopRef runLoop() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return runLoop_;
+    }
+
+    void startPumping() {
+        CFRunLoopRef loop = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            pumping_ = true;
+            loop = runLoop_;
+        }
+        cv_.notify_all();
+        if (loop) CFRunLoopWakeUp(loop);
+    }
+
+    void stop() {
+        CFRunLoopRef loop = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!worker_.joinable()) return;
+            stopRequested_ = true;
+            pumping_ = true;
+            loop = runLoop_;
+        }
+        cv_.notify_all();
+        if (loop) {
+            CFRunLoopStop(loop);
+            CFRunLoopWakeUp(loop);
+        }
+        worker_.join();
+
+        std::lock_guard<std::mutex> lock(mutex_);
+        ready_ = false;
+        pumping_ = false;
+        stopRequested_ = false;
+        runLoop_ = nullptr;
+    }
+
+private:
+    mutable std::mutex mutex_;
+    std::condition_variable cv_;
+    std::thread worker_;
+    CFRunLoopRef runLoop_ = nullptr;
+    bool ready_ = false;
+    bool pumping_ = false;
+    bool stopRequested_ = false;
+};
 
 void requestInteractiveQos(const char* label) {
     const int rc = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
@@ -106,6 +223,7 @@ bool run() {
     Fw410FcpControl fcp;
     Fw410ControlServer control;
     macfw::transport::CaptureMeterServer meterServer;
+    IsochCallbackRunLoopThread isochCallbackThread;
     bool ok = false;
 
     if (!lifecycle.addCallbackDispatcher()) goto cleanup;
@@ -114,15 +232,13 @@ bool run() {
     } else if (!control.start(fcp)) {
         std::cerr << "warning: FW410 control socket unavailable; audio will continue\n";
     }
+    if (!isochCallbackThread.prepare()) goto cleanup;
     if (!meterServer.start(capturePump))
         std::cerr << "warning: FW410 meter socket unavailable; audio will continue\n";
 
-    // Keep 48 kHz isoch callback ownership on the transport thread. Audio
-    // service remains isolated on its dedicated Mach-paced real-time worker,
-    // but returning the dispatcher to the original run loop restores the
-    // proven FireWire teardown/rate-transition lifecycle.
-    if (!lifecycle.startIsoch()) goto cleanup;
-    std::cout << "isoch callback dispatcher: transport run-loop thread\n";
+    if (!lifecycle.startIsoch(isochCallbackThread.runLoop())) goto cleanup;
+    isochCallbackThread.startPumping();
+    std::cout << "isoch callback dispatcher: dedicated run-loop thread\n";
 
     requestInteractiveQos("transport thread");
     macfw::transport::signalEngineReady();
@@ -157,9 +273,7 @@ bool run() {
         });
 
         while (!gStopRequested && !audioFinished.load(std::memory_order_acquire)) {
-            // This run loop now services only FireWire callbacks and the control
-            // socket; all PCM/capture/TX work remains on the real-time worker.
-            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.00025, false);
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
             control.service();
         }
 
@@ -174,6 +288,7 @@ cleanup:
     lifecycle.stopIsochAndRestoreCmp();
     fcp.reset();
     lifecycle.removeDispatchers();
+    isochCallbackThread.stop();
     lifecycle.stop();
     return ok;
 }
