@@ -38,7 +38,17 @@ The same INPUT command succeeds outside streaming in `fw1814init`, so the comman
 
 Re-reading the current Linux BeBoB streaming engine clarified the missing condition: `snd_bebob_stream_start_duplex()` starts the host-to-device and device-to-host streams, with both CMP connections established, before the M-Audio special-firmware rate reassert is issued. Therefore the earlier macfw assumption that FW1814 startup could be modeled as an oPCR-only receive stream was incorrect.
 
-The next incremental macfw experiment deliberately changes only one variable: reserve a host-to-device companion ISO channel and connect iPCR[0] as well as oPCR[0], while still starting only the capture DMA. If this makes the INPUT rate reassert succeed, the following experiment will add an actual host-to-device no-data DMA stream.
+The next incremental experiment reserved a host-to-device companion ISO channel and connected iPCR[0] as well as oPCR[0], while still starting only the capture DMA. One run accepted both OUTPUT and INPUT rate CONTROLs but an immediate STATUS readback failed; this readback is not part of Linux `special_set_rate()` and was therefore removed from the startup success criterion.
+
+A subsequent clean run reproduced the full operational setup from bus reset through `init-48`, then ran the dual-CMP/no-readback diagnostic. Both PCRs connected and host RX started, but with companion TX DMA intentionally not running the result was:
+
+```text
+reassert OUTPUT 48000 Hz: PASS
+wait 100 ms
+reassert INPUT 48000 Hz:  FAIL
+```
+
+Both PCRs restored exactly afterward. This demonstrates that merely reserving/connecting both CMP directions is not a reliable substitute for actually starting the host-to-device ISO direction. The next experiment therefore runs a real looping NODATA host-to-device AMDTP stream before starting capture and issuing the special rate kick.
 
 ## Upstream Linux correlation
 
@@ -85,6 +95,8 @@ device -> host:  8 + 6 * 11 * 4 = 272 bytes
 host -> device:  8 + 6 *  7 * 4 = 176 bytes
 ```
 
+The NODATA companion itself transmits only the 8-byte CIP header on each scheduled cycle, with `DBS=7`, `FDF=0x02`, and `SYT=0xffff`. The larger 176-byte allocation only reserves the bandwidth required by the configured 6-PCM-plus-MIDI playback formation.
+
 ## macfw bring-up policy
 
 - Never send BridgeCo extended stream-format enumeration to FW1814.
@@ -92,9 +104,10 @@ host -> device:  8 + 6 *  7 * 4 = 176 bytes
 - Validate CMP and standard AV/C STATUS after the reset.
 - Establish the known-safe M-Audio baseline explicitly: internal clock + S/PDIF input/output + unlocked clock controls.
 - For ordinary sample-rate changes, program OUTPUT, wait 100 ms, then program INPUT and verify with INPUT PLUG SIGNAL FORMAT STATUS.
-- Model FW1814 stream startup as a duplex transport handshake: both CMP directions must be accounted for before the M-Audio special-firmware rate reassert.
+- Model FW1814 stream startup as a duplex transport handshake: both CMP directions and both host ISO directions must be accounted for before the M-Audio special-firmware rate reassert.
 - Keep application-level capture/playback concerns separate from the transport startup requirement; a capture-only client can still require a silent/no-data companion transport stream underneath.
-- Change one startup variable at a time during bring-up. First test dual CMP with capture DMA only; only if needed add host-to-device no-data DMA.
+- Start host-to-device playback transport before device-to-host capture transport, matching the proven BeBoB/macfw duplex ordering.
+- During bring-up, use the known-safe NODATA companion (`DBS=7`, `FDF=0x02`) rather than sample-bearing playback until device transmission is proven.
 - Always restore both PCRs exactly after experiments that connect them.
 - Keep the first transport baseline at 48 kHz, internal clock, S/PDIF digital mode.
 - Preserve the MIDI AM824 position but defer CoreMIDI exposure.
