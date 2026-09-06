@@ -5,14 +5,16 @@ FRAMEWORKS := -framework IOKit -framework CoreFoundation
 PROBE_DIR := ../../../fw410/tools/device/fwprobe
 BEBOB_PROBE_DIR := ../../../common/tools/bebobprobe
 BUS_RESET_DIR := ../../../common/tools/firewirebusreset
-AMDTP_CAPTURE_DIR := ../../../common/tools/amdtpcaptureprobe
+LIBMACFW := ../../../fw410/lib/libmacfw.a
+LIBMACFW_INCLUDE := ../../../fw410/lib/include
 BOOT_TOOL := fwboot1814
 INIT_TOOL := fw1814init
+CAPTURE48_TOOL := fw1814capture48
 
 .PHONY: fingerprint probe boot-tool boot-check boot \
 	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe \
 	init-tool init-check init-48 init-44 \
-	amdtp-capture-tool capture48-check capture48 capture48-raw clean
+	capture48-tool capture48-check capture48 capture48-raw clean
 
 probe:
 	$(MAKE) -C $(PROBE_DIR)
@@ -60,24 +62,29 @@ init-48: init-tool
 init-44: init-tool
 	./$(INIT_TOOL) 44100 --execute
 
-amdtp-capture-tool:
-	$(MAKE) -C $(AMDTP_CAPTURE_DIR)
+$(LIBMACFW):
+	$(MAKE) -C ../../../fw410/lib libmacfw.a
 
-# FW1814 special-firmware S/PDIF formation at 44.1/48 kHz:
-# device -> host = 10 PCM positions + 1 MIDI position, therefore DBS=11.
-# At 48 kHz the maximum packet is 8-byte CIP + 6 * 11 * 4 = 272 bytes.
-capture48-check: amdtp-capture-tool
-	$(AMDTP_CAPTURE_DIR)/amdtpcaptureprobe --product "FW 1814" --dbs 11 --payload 272
+capture48-tool: $(CAPTURE48_TOOL)
 
-capture48: amdtp-capture-tool
-	$(AMDTP_CAPTURE_DIR)/amdtpcaptureprobe --product "FW 1814" --dbs 11 --payload 272 --execute
+$(CAPTURE48_TOOL): fw1814capture48.cpp $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) $< $(LIBMACFW) $(FRAMEWORKS) -o $@
 
-capture48-raw: amdtp-capture-tool
-	$(AMDTP_CAPTURE_DIR)/amdtpcaptureprobe --product "FW 1814" --dbs 11 --payload 272 --execute --raw
+# FW1814 M-Audio special firmware does not start transmitting merely when
+# oPCR[0] is connected. The device-specific harness starts host RX, then
+# reasserts OUTPUT 48 kHz, waits 100 ms, and reasserts INPUT 48 kHz.
+# The expected S/PDIF formation is 10 PCM + 1 MIDI (DBS=11), max 272 bytes.
+capture48-check: capture48-tool
+	./$(CAPTURE48_TOOL)
+
+capture48: capture48-tool
+	./$(CAPTURE48_TOOL) --execute
+
+capture48-raw: capture48-tool
+	./$(CAPTURE48_TOOL) --execute --raw
 
 clean:
 	$(MAKE) -C $(PROBE_DIR) clean
 	$(MAKE) -C $(BEBOB_PROBE_DIR) clean
 	$(MAKE) -C $(BUS_RESET_DIR) clean
-	$(MAKE) -C $(AMDTP_CAPTURE_DIR) clean
-	rm -f $(BOOT_TOOL) $(INIT_TOOL)
+	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL)
