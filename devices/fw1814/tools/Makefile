@@ -125,7 +125,7 @@ dualcmp-wait: dualcmp-wait-tool
 	./$(DUALCMP_WAIT_TOOL) --execute
 
 dualcmp-wait-raw: dualcmp-wait-tool
-	./$(DUALCMP_TOOL) --execute --raw
+	./$(DUALCMP_WAIT_TOOL) --execute --raw
 
 # Full BeBoB transport-start diagnostic. Linux initializes these streams with
 # CIP_BLOCKING, so 48 kHz uses three 8-event data packets followed by one
