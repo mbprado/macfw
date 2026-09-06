@@ -13,12 +13,19 @@ inline constexpr std::uint32_t kInitialSampleRates[] = {
 };
 
 // Confirmed on the local development FW1814 on macOS, 2026-09-06.
-// The operational identity is intentionally not listed until the unit has been
-// booted from flash and fingerprinted in that personality.
+// Both personalities retain the same BeBoB unit specifier/SW-version pair;
+// the product string distinguishes bootloader vs operational firmware.
 inline constexpr IdentityMatch kIdentities[] = {
     {
         "FW 1814 Bootloader",
         Personality::Bootloader,
+        0x0000a02d,
+        0x00014001,
+        true,
+    },
+    {
+        "FW 1814",
+        Personality::Operational,
         0x0000a02d,
         0x00014001,
         true,
