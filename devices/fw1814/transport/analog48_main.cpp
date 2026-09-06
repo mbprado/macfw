@@ -246,8 +246,14 @@ cleanup:
     // No FCP/AVC is issued after a failed stream kick. Local ISO always stops;
     // PCR restore is attempted only while the original generation is valid.
     const bool restoreOk = lifecycle.stopIsochAndRestoreCmp();
+
+    // The FCP pseudo-address-space must be removed while its callback
+    // dispatcher is still installed. Then fully detach all ISO/CMP objects
+    // before closing the underlying IOFireWireLib device.
     fcp.reset();
     lifecycle.removeDispatchers();
+    lifecycle.stop();
+
     if (!restoreOk && ok) ok = false;
     device.close();
     return ok;
