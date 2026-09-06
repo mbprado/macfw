@@ -24,6 +24,16 @@ namespace macfw::fw1814 {
 // The caller owns the IOFireWireLib callback dispatcher. Call arm() only after
 // AddCallbackDispatcherToRunLoop() succeeds and call reset() before removing it.
 class FcpControl {
+private:
+    // Declare these before the public signatures that use them as template
+    // arguments; C++ class scope does not make a later declaration visible in
+    // an earlier member function return type.
+    static constexpr UInt16 kAddressHi = 0xffff;
+    static constexpr UInt32 kFcpCommandLo = 0xf0000b00;
+    static constexpr UInt32 kFcpResponseLo = 0xf0000d00;
+    static constexpr UInt32 kFcpResponseSize = 0x200;
+    static constexpr double kTimeoutSeconds = 1.0;
+
 public:
     FcpControl() = default;
     ~FcpControl() { reset(); }
@@ -127,12 +137,6 @@ public:
     UInt32 responseLength() const { return responseLength_; }
 
 private:
-    static constexpr UInt16 kAddressHi = 0xffff;
-    static constexpr UInt32 kFcpCommandLo = 0xf0000b00;
-    static constexpr UInt32 kFcpResponseLo = 0xf0000d00;
-    static constexpr UInt32 kFcpResponseSize = 0x200;
-    static constexpr double kTimeoutSeconds = 1.0;
-
     static int sfcForRate(unsigned rate) {
         static constexpr unsigned rates[] = {
             32000, 44100, 48000, 88200, 96000, 176400, 192000
