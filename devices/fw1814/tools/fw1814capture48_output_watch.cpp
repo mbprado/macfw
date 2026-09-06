@@ -234,6 +234,7 @@ bool run(bool execute, bool raw) {
     bool diagnosticComplete = false;
     std::uint32_t opcr0 = 0;
     std::uint32_t ipcr0 = 0;
+    UInt32 beforeOutput = 0;
 
     ResponseContext ctx;
     ctx.expectedNode = device.nodeID();
@@ -401,7 +402,7 @@ bool run(bool execute, bool raw) {
         std::cout << "blocking TX + RX DMA: started\n";
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false);
 
-        UInt32 beforeOutput = 0;
+        beforeOutput = 0;
         if (getGeneration(native, beforeOutput) != kIOReturnSuccess) {
             std::cout << "generation read before OUTPUT failed\n";
             goto cleanup_stream;
