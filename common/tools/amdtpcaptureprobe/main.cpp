@@ -151,6 +151,10 @@ bool run(const std::string& product,
     bool started = false;
     bool connected = false;
     bool ok = false;
+    std::vector<PositionStats> positions(expectedDbs);
+    std::uint64_t events = 0;
+    std::uint64_t malformed = 0;
+    std::size_t shown = 0;
 
     if ((*native)->AddCallbackDispatcherToRunLoop(native, CFRunLoopGetCurrent()) == kIOReturnSuccess)
         callbackDispatcher = true;
@@ -190,19 +194,15 @@ bool run(const std::string& product,
     std::cout << "capture: " << (ring.completed() ? "NuDCL burst completed" : "timeout before burst completion") << '\n';
     std::cout << "    touched slots: " << ring.touchedCount() << " / " << ring.packetCount() << '\n';
 
-    std::vector<PositionStats> positions(expectedDbs);
-    std::uint64_t events = 0;
-    std::uint64_t malformed = 0;
-    std::size_t shown = 0;
     for (std::size_t i = 0; i < ring.packetCount(); ++i) {
         const auto& slot = ring.slot(i);
         if (!slot.touched()) continue;
         const auto packet = slot.packet();
         if (shown < 12) {
-            const auto cip = packet.cip();
             std::cout << "    packet " << i
                       << ": len=" << slot.packetLength();
             if (packet.hasCip()) {
+                const auto cip = packet.cip();
                 std::cout << " CIP{dbs=" << static_cast<unsigned>(cip.dbs)
                           << " dbc=" << static_cast<unsigned>(cip.dbc)
                           << " fmt=0x" << std::hex << static_cast<unsigned>(cip.fmt)
