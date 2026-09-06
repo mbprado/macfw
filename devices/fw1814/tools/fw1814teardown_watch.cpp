@@ -71,7 +71,6 @@ bool run(bool execute) {
     UInt32 initialGeneration = 0;
     if (!readGeneration(native, initialGeneration)) {
         std::cout << "initial generation read failed\n";
-        device.close();
         return false;
     }
 
@@ -80,7 +79,6 @@ bool run(bool execute) {
     if (macfw::cmp::readOpcr0(device, opcr0) != kIOReturnSuccess ||
         macfw::cmp::readIpcr0(device, ipcr0) != kIOReturnSuccess) {
         std::cout << "PCR read failed\n";
-        device.close();
         return false;
     }
 
@@ -105,20 +103,17 @@ bool run(bool execute) {
 
     if (!macfw::cmp::ready(op) || !macfw::cmp::ready(ip)) {
         std::cout << "status: REFUSED - PCR0 offline or already connected\n";
-        device.close();
         return false;
     }
 
     if (!execute) {
         std::cout << "status: PASS - dry run only\n";
-        device.close();
         return true;
     }
 
     UInt32 cycleTime = 0;
     if ((*native)->GetCycleTime(native, &cycleTime) != kIOReturnSuccess) {
         std::cout << "GetCycleTime failed\n";
-        device.close();
         return false;
     }
     const UInt32 currentCycle = (cycleTime >> 12) & 0x1fffu;
@@ -138,7 +133,6 @@ bool run(bool execute) {
 
     if (!receiveRing || !transmitRing || !capture || !playback) {
         std::cout << "ISO resource creation failed\n";
-        device.close();
         return false;
     }
 
@@ -146,7 +140,6 @@ bool run(bool execute) {
     auto playbackChannel = playback.nativeChannel();
     if (!captureChannel || !playbackChannel) {
         std::cout << "ISO channel handle missing\n";
-        device.close();
         return false;
     }
 
@@ -156,7 +149,6 @@ bool run(bool execute) {
     if (kr != kIOReturnSuccess) {
         std::cout << "capture AddListener failed: 0x" << std::hex << kr
                   << std::dec << '\n';
-        device.close();
         return false;
     }
 
@@ -164,7 +156,6 @@ bool run(bool execute) {
     if (kr != kIOReturnSuccess) {
         std::cout << "playback SetTalker failed: 0x" << std::hex << kr
                   << std::dec << '\n';
-        device.close();
         return false;
     }
 
@@ -180,7 +171,6 @@ bool run(bool execute) {
     if ((*native)->AddIsochCallbackDispatcherToRunLoop(
             native, CFRunLoopGetCurrent()) != kIOReturnSuccess) {
         std::cout << "isoch callback dispatcher setup failed\n";
-        device.close();
         return false;
     }
     isochDispatcher = true;
@@ -330,8 +320,6 @@ local_cleanup:
         (*native)->TurnOffNotification(native);
     if (isochDispatcher)
         (*native)->RemoveIsochCallbackDispatcherFromRunLoop(native);
-
-    device.close();
 
     if (generationChanged) {
         std::cout << "result: BUS GENERATION CHANGED first at: "
