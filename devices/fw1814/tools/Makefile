@@ -12,13 +12,15 @@ INIT_TOOL := fw1814init
 CAPTURE48_TOOL := fw1814capture48
 DUALCMP_TOOL := fw1814capture48_dualcmp
 DUALCMP_WAIT_TOOL := fw1814capture48_dualcmp_wait
+DUPLEX_NODATA_TOOL := fw1814capture48_duplex_nodata
 
 .PHONY: fingerprint probe boot-tool boot-check boot \
 	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe \
 	init-tool init-check init-48 init-44 \
 	capture48-tool capture48-check capture48 capture48-raw \
 	dualcmp-tool dualcmp-check dualcmp dualcmp-raw \
-	dualcmp-wait-tool dualcmp-wait-check dualcmp-wait dualcmp-wait-raw clean
+	dualcmp-wait-tool dualcmp-wait-check dualcmp-wait dualcmp-wait-raw \
+	duplex-nodata-tool duplex-nodata-check duplex-nodata duplex-nodata-raw clean
 
 probe:
 	$(MAKE) -C $(PROBE_DIR)
@@ -84,10 +86,8 @@ capture48: capture48-tool
 capture48-raw: capture48-tool
 	./$(CAPTURE48_TOOL) --execute --raw
 
-# Incremental FW1814 startup diagnostic. Linux's BeBoB engine establishes both
-# CMP directions before its M-Audio special-firmware rate reassert. This test
-# reserves and connects both oPCR[0] and iPCR[0], starts ONLY capture DMA, and
-# deliberately does not send host->device packets yet.
+# Incremental FW1814 startup diagnostic: both CMP plugs connected, capture DMA
+# only. No host->device packets are sent.
 dualcmp-tool: $(DUALCMP_TOOL)
 
 $(DUALCMP_TOOL): fw1814capture48_dualcmp.cpp $(LIBMACFW)
@@ -102,11 +102,7 @@ dualcmp: dualcmp-tool
 dualcmp-raw: dualcmp-tool
 	./$(DUALCMP_TOOL) --execute --raw
 
-# Same dual-CMP experiment, but mirrors Linux special_set_rate more closely:
-# OUTPUT CONTROL -> 100 ms -> INPUT CONTROL, then wait for stream readiness.
-# The immediate INPUT STATUS query is intentionally omitted because Linux does
-# not make it part of the stream-start kick and the device can transiently stop
-# answering STATUS at exactly that point.
+# Same dual-CMP/capture-only experiment without an immediate STATUS readback.
 dualcmp-wait-tool: $(DUALCMP_WAIT_TOOL)
 
 $(DUALCMP_WAIT_TOOL): fw1814capture48_dualcmp_wait.cpp $(LIBMACFW)
@@ -121,8 +117,25 @@ dualcmp-wait: dualcmp-wait-tool
 dualcmp-wait-raw: dualcmp-wait-tool
 	./$(DUALCMP_WAIT_TOOL) --execute --raw
 
+# Full transport-start diagnostic: both CMP directions plus a real host->device
+# looping NODATA AMDTP stream (48 kHz FDF=0x02, DBS=7). Playback starts first,
+# then capture, then the M-Audio OUTPUT -> 100 ms -> INPUT rate kick.
+duplex-nodata-tool: $(DUPLEX_NODATA_TOOL)
+
+$(DUPLEX_NODATA_TOOL): fw1814capture48_duplex_nodata.cpp $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) $< $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+duplex-nodata-check: duplex-nodata-tool
+	./$(DUPLEX_NODATA_TOOL)
+
+duplex-nodata: duplex-nodata-tool
+	./$(DUPLEX_NODATA_TOOL) --execute
+
+duplex-nodata-raw: duplex-nodata-tool
+	./$(DUPLEX_NODATA_TOOL) --execute --raw
+
 clean:
 	$(MAKE) -C $(PROBE_DIR) clean
 	$(MAKE) -C $(BEBOB_PROBE_DIR) clean
 	$(MAKE) -C $(BUS_RESET_DIR) clean
-	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL)
+	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_NODATA_TOOL)
