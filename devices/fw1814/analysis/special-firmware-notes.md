@@ -48,7 +48,23 @@ wait 100 ms
 reassert INPUT 48000 Hz:  FAIL
 ```
 
-Both PCRs restored exactly afterward. This demonstrates that merely reserving/connecting both CMP directions is not a reliable substitute for actually starting the host-to-device ISO direction. The next experiment therefore runs a real looping NODATA host-to-device AMDTP stream before starting capture and issuing the special rate kick.
+Both PCRs restored exactly afterward. This demonstrates that merely reserving/connecting both CMP directions is not a reliable substitute for actually starting the host-to-device ISO direction.
+
+The following clean experiment then started an actual looping host-to-device NODATA DMA stream before capture. Both CMP directions and both host ISO directions were active, but the same failure remained:
+
+```text
+host->device NODATA DMA: started
+device->host receive DMA: started
+reassert OUTPUT 48000 Hz: PASS
+wait 100 ms
+reassert INPUT 48000 Hz:  FAIL
+```
+
+Both PCRs again restored exactly. Therefore host-to-device DMA activity by itself is also insufficient when the stream carries only NODATA packets.
+
+Re-checking the Linux AMDTP implementation exposed an important modeling error in the earlier macfw probes: BeBoB initializes these streams with `CIP_BLOCKING`. At 48 kHz, blocking mode does not transmit six events every IEEE 1394 cycle. Instead, each data-bearing packet carries the full eight-event SYT interval, with NODATA cycles inserted to preserve the 48 kHz average. Linux's AM824 output path explicitly fills PCM silence when no PCM substream is attached, so an idle playback stream still becomes data-bearing rather than remaining permanently NODATA.
+
+The next experiment therefore changes the transport packetization to a real blocking silent AM824 stream while keeping all device-control commands and startup ordering unchanged.
 
 ## Upstream Linux correlation
 
@@ -68,7 +84,9 @@ Important rules from that implementation:
 6. Linux schedules a FireWire bus reset for FW1814/ProjectMix after registration because these devices can otherwise have a FireWire gap-count mismatch that causes frequent transaction failures.
 7. When changing sample rate, Linux programs device OUTPUT first, waits 100 ms, then programs device INPUT because the second command is otherwise prone to failure.
 8. For M-Audio special firmware, after the CMP connections and AMDTP domain are started, Linux re-applies the current sample rate. Its source comment states that the customized firmware uses these commands to start transmitting the stream.
-9. The Linux BeBoB streaming engine reserves and starts both stream directions as one duplex domain before the M-Audio special rate reassert. This is distinct from whether an application is actively using both PCM directions; transport startup itself is duplex.
+9. The Linux BeBoB streaming engine starts host-to-device playback first, then device-to-host capture, before the special-firmware rate reassert.
+10. BeBoB initializes both streams with `CIP_BLOCKING`.
+11. In AM824 output processing, Linux writes MBLA silence (`0x40000000`) for PCM positions when no playback PCM substream is active and MIDI no-data values for idle MIDI positions.
 
 ## Reference 44.1/48 kHz formations
 
@@ -88,14 +106,23 @@ host -> device / playback:  12 PCM + 1 MIDI
 
 These are upstream reference formations. They have not yet been validated from received macfw isochronous packets on the local FW1814.
 
-At 48 kHz in the S/PDIF baseline, the corresponding maximum packet reservations used by the current bring-up probes are:
+For the initial 48 kHz S/PDIF baseline, `CIP_BLOCKING` means that maximum packets carry eight events, not six. The correct maximum packet reservations are therefore:
 
 ```text
-device -> host:  8 + 6 * 11 * 4 = 272 bytes
-host -> device:  8 + 6 *  7 * 4 = 176 bytes
+device -> host:  8 + 8 * 11 * 4 = 360 bytes
+host -> device:  8 + 8 *  7 * 4 = 232 bytes
 ```
 
-The NODATA companion itself transmits only the 8-byte CIP header on each scheduled cycle, with `DBS=7`, `FDF=0x02`, and `SYT=0xffff`. The larger 176-byte allocation only reserves the bandwidth required by the configured 6-PCM-plus-MIDI playback formation.
+At exactly 48 kHz the blocking playback sequence averages 48,000 events/s with three eight-event packets followed by one NODATA packet:
+
+```text
+cycle phase 0: 8 events
+cycle phase 1: 8 events
+cycle phase 2: 8 events
+cycle phase 3: NODATA
+```
+
+The current diagnostic fills each playback PCM slot with MBLA silence (`0x40000000`), the MIDI slot with no-data (`0x80000000`), advances DBC only across data-bearing packets, and computes SYT using the same 48 kHz blocking transfer-delay model already proven in macfw's FW410 transport.
 
 ## macfw bring-up policy
 
@@ -104,10 +131,11 @@ The NODATA companion itself transmits only the 8-byte CIP header on each schedul
 - Validate CMP and standard AV/C STATUS after the reset.
 - Establish the known-safe M-Audio baseline explicitly: internal clock + S/PDIF input/output + unlocked clock controls.
 - For ordinary sample-rate changes, program OUTPUT, wait 100 ms, then program INPUT and verify with INPUT PLUG SIGNAL FORMAT STATUS.
-- Model FW1814 stream startup as a duplex transport handshake: both CMP directions and both host ISO directions must be accounted for before the M-Audio special-firmware rate reassert.
-- Keep application-level capture/playback concerns separate from the transport startup requirement; a capture-only client can still require a silent/no-data companion transport stream underneath.
-- Start host-to-device playback transport before device-to-host capture transport, matching the proven BeBoB/macfw duplex ordering.
-- During bring-up, use the known-safe NODATA companion (`DBS=7`, `FDF=0x02`) rather than sample-bearing playback until device transmission is proven.
+- Model FW1814 stream startup as a BeBoB blocking transport handshake rather than as a six-events-per-cycle stream.
+- Start host-to-device playback transport before device-to-host capture transport.
+- Use the correct blocking-mode bandwidth reservations: 232 bytes playback and 360 bytes capture at 48 kHz/S/PDIF.
+- For an idle playback side, transmit valid timed AM824 silence plus the required NODATA cycles rather than an all-NODATA stream.
+- Keep application-level capture/playback concerns separate from the transport startup requirement.
 - Always restore both PCRs exactly after experiments that connect them.
 - Keep the first transport baseline at 48 kHz, internal clock, S/PDIF digital mode.
 - Preserve the MIDI AM824 position but defer CoreMIDI exposure.
