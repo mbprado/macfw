@@ -14,6 +14,7 @@ DUALCMP_TOOL := fw1814capture48_dualcmp
 DUALCMP_WAIT_TOOL := fw1814capture48_dualcmp_wait
 DUPLEX_BLOCKING_TOOL := fw1814capture48_duplex_blocking
 OUTPUT_WATCH_TOOL := fw1814capture48_output_watch
+TEARDOWN_WATCH_TOOL := fw1814teardown_watch
 
 .PHONY: fingerprint probe boot-tool boot-check boot \
 	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe \
@@ -22,7 +23,8 @@ OUTPUT_WATCH_TOOL := fw1814capture48_output_watch
 	dualcmp-tool dualcmp-check dualcmp dualcmp-raw \
 	dualcmp-wait-tool dualcmp-wait-check dualcmp-wait dualcmp-wait-raw \
 	duplex-blocking-tool duplex-blocking-check duplex-blocking duplex-blocking-raw \
-	output-watch-tool output-watch-check output-watch output-watch-raw clean
+	output-watch-tool output-watch-check output-watch output-watch-raw \
+	teardown-watch-tool teardown-watch-check teardown-watch clean
 
 probe:
 	$(MAKE) -C $(PROBE_DIR)
@@ -156,8 +158,23 @@ output-watch: output-watch-tool
 output-watch-raw: output-watch-tool
 	./$(OUTPUT_WATCH_TOOL) --execute --raw
 
+# Stepwise teardown diagnostic. It starts the same blocking duplex transport
+# but sends no AV/C rate CONTROL at all. Bus generation is sampled after each
+# teardown operation so we can locate the first operation that triggers the
+# observed generation increment.
+teardown-watch-tool: $(TEARDOWN_WATCH_TOOL)
+
+$(TEARDOWN_WATCH_TOOL): fw1814teardown_watch.cpp fw1814_blocking_tx.h $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814teardown_watch.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+teardown-watch-check: teardown-watch-tool
+	./$(TEARDOWN_WATCH_TOOL)
+
+teardown-watch: teardown-watch-tool
+	./$(TEARDOWN_WATCH_TOOL) --execute
+
 clean:
 	$(MAKE) -C $(PROBE_DIR) clean
 	$(MAKE) -C $(BEBOB_PROBE_DIR) clean
 	$(MAKE) -C $(BUS_RESET_DIR) clean
-	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(OUTPUT_WATCH_TOOL) fw1814capture48_duplex_nodata
+	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) fw1814capture48_duplex_nodata
