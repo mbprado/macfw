@@ -1,4 +1,4 @@
-#include "macfw/amdtp_nodata_transmit_ring.h"
+#include "fw1814_blocking_tx.h"
 #include "macfw/amdtp_receive_ring.h"
 #include "macfw/cmp.h"
 #include "macfw/firewire_device.h"
@@ -28,10 +28,13 @@ constexpr UInt32 kFcpResponseSize = 0x200;
 constexpr double kFcpTimeoutSeconds = 1.0;
 
 constexpr unsigned kRate = 48000;
-constexpr UInt32 kCaptureMaxPayload = 272;
-constexpr UInt32 kPlaybackMaxPayload = 176;
+// BeBoB initializes FW1814 with CIP_BLOCKING. At 48 kHz, each data-bearing
+// packet therefore carries the full 8-event SYT interval; NODATA cycles make
+// up the remaining bus cycles. These are Linux's corresponding max payloads.
+constexpr UInt32 kCaptureMaxPayload = 360;  // 8 + 8 * (10 PCM + 1 MIDI) * 4.
+constexpr UInt32 kPlaybackMaxPayload = 232; // 8 + 8 * ( 6 PCM + 1 MIDI) * 4.
 constexpr std::uint8_t kPlaybackDbs = 7;
-constexpr std::uint8_t kFdf48 = 0x02;
+constexpr std::uint8_t kPlaybackPcmChannels = 6;
 constexpr std::size_t kCapturePackets = 64;
 constexpr std::size_t kTxPackets = 128;
 constexpr UInt32 kCyclesPerSecond = 8000;
@@ -331,7 +334,7 @@ bool run(bool execute, bool raw) {
     {
         const auto op = macfw::cmp::decodePcr(opcr0);
         const auto ip = macfw::cmp::decodePcr(ipcr0);
-        std::cout << "duplex-NODATA preflight:\n"
+        std::cout << "duplex-blocking-silence preflight:\n"
                   << "    oPCR[0]: 0x" << std::hex << opcr0 << std::dec
                   << " online=" << (op.online ? "yes" : "no")
                   << " p2p=" << static_cast<unsigned>(op.p2pConnections) << '\n'
@@ -340,9 +343,9 @@ bool run(bool execute, bool raw) {
                   << " p2p=" << static_cast<unsigned>(ip.p2pConnections) << '\n'
                   << "    capture reservation:  " << kCaptureMaxPayload << " bytes\n"
                   << "    playback reservation: " << kPlaybackMaxPayload << " bytes\n"
-                  << "    playback NODATA: DBS=" << static_cast<unsigned>(kPlaybackDbs)
-                  << " FDF=0x" << std::hex << static_cast<unsigned>(kFdf48)
-                  << std::dec << '\n';
+                  << "    playback blocking: DBS=" << static_cast<unsigned>(kPlaybackDbs)
+                  << " PCM=" << static_cast<unsigned>(kPlaybackPcmChannels)
+                  << " pattern=8/8/8/NODATA\n";
         if (!macfw::cmp::ready(op) || !macfw::cmp::ready(ip)) {
             std::cout << "status: REFUSED - PCR0 offline or already connected\n";
             goto cleanup;
@@ -366,8 +369,9 @@ bool run(bool execute, bool raw) {
 
         auto receiveRing = macfw::AmdtpReceiveRing::create(
             device, kCapturePackets, kCaptureMaxPayload);
-        auto transmitRing = macfw::AmdtpNoDataTransmitRing::create(
-            device, firstTxCycle, kFdf48, kPlaybackDbs, kTxPackets);
+        auto transmitRing = macfw::fw1814::BlockingSilenceTransmitRing::create48k(
+            device, firstTxCycle, kPlaybackDbs,
+            kPlaybackPcmChannels, kTxPackets);
         auto capture = macfw::IsochAllocation::create(
             device, macfw::IsochAllocation::Direction::DeviceToHost,
             kCaptureMaxPayload);
@@ -473,7 +477,7 @@ bool run(bool execute, bool raw) {
             }
         }
         playbackStarted = true;
-        std::cout << "host->device NODATA DMA: started\n";
+        std::cout << "host->device blocking silent AMDTP DMA: started\n";
 
         {
             const IOReturn kr = (*captureChannel)->Start(captureChannel);
@@ -500,7 +504,7 @@ bool run(bool execute, bool raw) {
         dumpReceive(receiveRing, raw);
 
         success = receiveRing.touchedCount() > 0;
-        std::cout << "duplex-NODATA experiment: "
+        std::cout << "duplex-blocking-silence experiment: "
                   << (success ? "PACKETS RECEIVED" : "NO PACKETS") << '\n';
 
 cleanup_stream:
@@ -595,6 +599,6 @@ int main(int argc, char** argv) {
         }
     }
 
-    std::cout << "macfw fw1814capture48-duplex-nodata — full duplex startup diagnostic\n\n";
+    std::cout << "macfw fw1814capture48-duplex-blocking — full duplex startup diagnostic\n\n";
     return run(execute, raw) ? 0 : 1;
 }
