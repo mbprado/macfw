@@ -7,10 +7,15 @@ namespace macfw::fw1814 {
 
 // Hardware-confirmed 48 kHz / S/PDIF-mode stream geometry.
 // Digital positions deliberately remain unnamed until later cross-device tests.
+//
+// Capture is 10 PCM + 1 MIDI = 11 AM824 quadlets/event (DBS=11).
+// Playback is 6 PCM + 1 MIDI = 7 AM824 quadlets/event (DBS=7).
 inline constexpr std::size_t kCapturePcmPositions = 10;
 inline constexpr std::size_t kCaptureMidiPosition = 10;
+inline constexpr std::size_t kCaptureStreamPositions = 11;
 inline constexpr std::size_t kPlaybackPcmPositions = 6;
 inline constexpr std::size_t kPlaybackMidiPosition = 6;
+inline constexpr std::size_t kPlaybackStreamPositions = 7;
 
 inline constexpr std::size_t kAnalogInputCount = 8;
 inline constexpr std::size_t kAnalogOutputCount = 4;
