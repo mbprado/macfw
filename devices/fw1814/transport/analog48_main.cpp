@@ -30,7 +30,9 @@ constexpr const char* kProduct = "FW 1814";
 constexpr unsigned kRate = 48000;
 constexpr UInt32 kCaptureMaxPacket = 360;
 constexpr UInt32 kPlaybackMaxPacket = 232;
-constexpr std::size_t kCaptureSlots = 256;
+// Keep the first integrated engine on the exact receive-ring geometry that is
+// already hardware-proven by duplex-blocking-raw (touched slots: 64/64).
+constexpr std::size_t kCaptureSlots = 64;
 constexpr std::size_t kTxPackets = 128;
 constexpr std::size_t kTxHalfPackets = 64;
 constexpr std::size_t kPcmCapacityFrames = 16384;
@@ -225,6 +227,8 @@ bool run() {
                           << " (delta " << (captureFrames - lastCaptureFrames) << ')'
                           << " queued="
                           << macfw::fw1814::hal::capture::availableFrames(*captureShared.ring())
+                          << " rx-touched=" << rx.touchedCount() << '/' << rx.packetCount()
+                          << " chunks=" << rxStats.completedChunks
                           << " malformed=" << captureShared.ring()->malformedPackets.load()
                           << " invalid=" << captureShared.ring()->invalidLabels.load()
                           << " nodata=" << rxStats.noDataPackets
