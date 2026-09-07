@@ -31,9 +31,13 @@ constexpr const char* kProduct = "FW 1814";
 constexpr unsigned kRate = 48000;
 constexpr UInt32 kCaptureMaxPacket = 360;
 constexpr UInt32 kPlaybackMaxPacket = 232;
-// Keep the receive-ring geometry that is hardware-proven by
-// duplex-blocking-raw (touched slots: 64/64).
-constexpr std::size_t kCaptureSlots = 64;
+// Use the same production receive depth as the released FW410 path. The early
+// FW1814 bring-up temporarily used 64 slots only to match duplex-blocking-raw;
+// the later DBS=11 event-width fix resolved the actual capture decode problem.
+// A 64-slot cyclic ring can expose a slot-63 -> slot-0 publication race after
+// some reconnect phases, observed as one missing 8-frame data packet per ring
+// revolution (47 kHz decoded instead of 48 kHz).
+constexpr std::size_t kCaptureSlots = 256;
 // Hardware-validated dynamic playback geometry. Do not reduce without
 // arbitrary-frequency and real-audio regression testing.
 constexpr std::size_t kTxPackets = 640;
@@ -119,6 +123,8 @@ bool run() {
         std::cout << "FW1814 playback TX ring: " << kTxPackets
                   << " packets / " << kTxHalfPackets
                   << "-packet halves (80 ms / 40 ms)\n";
+        std::cout << "FW1814 capture RX ring: " << kCaptureSlots
+                  << " packets / 32-packet publication chunks\n";
 
         if (!lifecycle.prepare(device, rx, tx.nativeLocalPort(),
                                kCaptureMaxPacket, kPlaybackMaxPacket)) {
