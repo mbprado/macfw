@@ -1,5 +1,6 @@
 #include "../hal/include/macfw_fw1814_hal_shm.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -16,8 +17,14 @@
 
 namespace {
 
+using Clock = std::chrono::steady_clock;
+
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
+
+constexpr int kBootNoBootloader = 10;
+constexpr int kBootFailure = 11;
+constexpr int kBootGuardRefused = 12;
 
 std::string executableDirectory(const char* argv0) {
     char resolved[PATH_MAX] = {};
@@ -45,13 +52,25 @@ bool halPlaybackReady() {
     return ready;
 }
 
-int runChild(const std::string& path, const char* arg1, const char* arg2) {
+void sleepInterruptibly(std::chrono::milliseconds duration) {
+    const auto deadline = Clock::now() + duration;
+    while (!gStopRequested && Clock::now() < deadline) {
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - Clock::now());
+        std::this_thread::sleep_for(std::min(remaining, std::chrono::milliseconds(100)));
+    }
+}
+
+int runChild(const std::string& path,
+             const char* arg1 = nullptr,
+             const char* arg2 = nullptr) {
     const pid_t pid = fork();
     if (pid < 0) {
         std::fprintf(stderr, "FW1814 supervisor fork failed for %s: %s\n",
                      path.c_str(), std::strerror(errno));
         return 1;
     }
+
     if (pid == 0) {
         if (arg1 && arg2)
             execl(path.c_str(), path.c_str(), arg1, arg2, static_cast<char*>(nullptr));
@@ -63,13 +82,23 @@ int runChild(const std::string& path, const char* arg1, const char* arg2) {
     }
 
     int status = 0;
-    while (waitpid(pid, &status, 0) < 0) {
-        if (errno == EINTR) {
-            if (gStopRequested) kill(pid, SIGTERM);
-            continue;
+    for (;;) {
+        const pid_t r = waitpid(pid, &status, WNOHANG);
+        if (r == pid) break;
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            return 1;
         }
-        return 1;
+
+        if (gStopRequested) {
+            kill(pid, SIGTERM);
+            while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+
     if (WIFEXITED(status)) return WEXITSTATUS(status);
     if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
     return 1;
@@ -80,32 +109,91 @@ int runChild(const std::string& path, const char* arg1, const char* arg2) {
 int main(int argc, char** argv) {
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
+    setvbuf(stdout, nullptr, _IOLBF, 0);
+    setvbuf(stderr, nullptr, _IOLBF, 0);
 
     const std::string here = executableDirectory(argc > 0 ? argv[0] : nullptr);
     const std::string initPath = here + "/fw1814init";
+    const std::string bootPath = here + "/fwboot1814";
     const std::string enginePath = here + "/fw1814analog48";
 
-    std::printf("macfw fw1814supervisor — fixed 48 kHz transport supervisor\n");
-    std::printf("waiting for FW1814 HAL shared memory at 48000 Hz\n");
-    std::fflush(stdout);
+    std::printf("macfw fw1814supervisor — resilient fixed 48 kHz transport supervisor\n");
+    std::printf("automatic reconnect and guarded bootloader recovery: enabled\n");
 
-    while (!gStopRequested && !halPlaybackReady())
-        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    std::chrono::milliseconds retryDelay(250);
+    constexpr std::chrono::milliseconds kMaxRetryDelay(4000);
+    constexpr std::chrono::milliseconds kReenumerationDelay(1000);
+    constexpr std::chrono::milliseconds kPostEngineExitDelay(800);
 
-    if (gStopRequested) return 0;
+    while (!gStopRequested) {
+        if (!halPlaybackReady()) {
+            std::printf("FW1814 HAL shared memory not ready; waiting\n");
+            do {
+                sleepInterruptibly(std::chrono::milliseconds(250));
+            } while (!gStopRequested && !halPlaybackReady());
+            if (gStopRequested) break;
+            std::printf("FW1814 HAL shared memory ready at 48000 Hz\n");
+        }
 
-    std::printf("FW1814 HAL shared memory ready; applying validated init-48\n");
-    std::fflush(stdout);
-    const int initStatus = runChild(initPath, "48000", "--execute");
-    if (initStatus != 0) {
-        std::fprintf(stderr, "FW1814 init-48 failed with status %d\n", initStatus);
-        return initStatus;
+        std::printf("FW1814 applying validated init-48\n");
+        const int initStatus = runChild(initPath, "48000", "--execute");
+        if (gStopRequested) break;
+
+        if (initStatus != 0) {
+            std::fprintf(stderr,
+                         "FW1814 init-48 unavailable/failed with status %d; "
+                         "checking guarded bootloader personality\n",
+                         initStatus);
+
+            const int bootStatus = runChild(bootPath, "--execute");
+            if (gStopRequested) break;
+
+            if (bootStatus == 0) {
+                std::printf("FW1814 guarded boot cue issued; waiting for re-enumeration\n");
+                retryDelay = std::chrono::milliseconds(250);
+                sleepInterruptibly(kReenumerationDelay);
+                continue;
+            }
+
+            if (bootStatus == kBootGuardRefused) {
+                std::fprintf(stderr,
+                             "FW1814 bootloader guard refused candidate; no write performed; "
+                             "retrying in 2 s\n");
+                sleepInterruptibly(std::chrono::seconds(2));
+                continue;
+            }
+
+            if (bootStatus == kBootNoBootloader) {
+                std::printf("FW1814 operational/bootloader personality not ready; retrying in %lld ms\n",
+                            static_cast<long long>(retryDelay.count()));
+            } else if (bootStatus == kBootFailure) {
+                std::fprintf(stderr,
+                             "FW1814 guarded bootloader check failed; retrying in %lld ms\n",
+                             static_cast<long long>(retryDelay.count()));
+            } else {
+                std::fprintf(stderr,
+                             "FW1814 boot helper exited with status %d; retrying in %lld ms\n",
+                             bootStatus,
+                             static_cast<long long>(retryDelay.count()));
+            }
+
+            sleepInterruptibly(retryDelay);
+            retryDelay = std::min(retryDelay * 2, kMaxRetryDelay);
+            continue;
+        }
+
+        retryDelay = std::chrono::milliseconds(250);
+        std::printf("FW1814 init-48 PASS; starting analog transport engine\n");
+        const int engineStatus = runChild(enginePath);
+        if (gStopRequested) break;
+
+        std::fprintf(stderr,
+                     "FW1814 analog transport engine exited with status %d; "
+                     "waiting for FireWire re-enumeration\n",
+                     engineStatus);
+        sleepInterruptibly(kPostEngineExitDelay);
     }
 
-    std::printf("FW1814 init-48 PASS; starting analog transport engine\n");
-    std::fflush(stdout);
-    execl(enginePath.c_str(), enginePath.c_str(), static_cast<char*>(nullptr));
-    std::fprintf(stderr, "FW1814 supervisor exec failed for %s: %s\n",
-                 enginePath.c_str(), std::strerror(errno));
-    return 127;
+    std::printf("FW1814 supervisor stopping\n");
+    return 0;
 }
