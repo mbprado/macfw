@@ -104,6 +104,44 @@ int runChild(const std::string& path,
     return 1;
 }
 
+int runBusReset(const std::string& path) {
+    const pid_t pid = fork();
+    if (pid < 0) {
+        std::fprintf(stderr, "FW1814 supervisor fork failed for %s: %s\n",
+                     path.c_str(), std::strerror(errno));
+        return 1;
+    }
+
+    if (pid == 0) {
+        execl(path.c_str(), path.c_str(),
+              "--product", "FW 1814", "--execute",
+              static_cast<char*>(nullptr));
+        _exit(127);
+    }
+
+    int status = 0;
+    for (;;) {
+        const pid_t r = waitpid(pid, &status, WNOHANG);
+        if (r == pid) break;
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            return 1;
+        }
+
+        if (gStopRequested) {
+            kill(pid, SIGTERM);
+            while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return 1;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -115,15 +153,28 @@ int main(int argc, char** argv) {
     const std::string here = executableDirectory(argc > 0 ? argv[0] : nullptr);
     const std::string initPath = here + "/fw1814init";
     const std::string bootPath = here + "/fwboot1814";
+    const std::string busResetPath = here + "/firewirebusreset";
     const std::string enginePath = here + "/fw1814analog48";
 
     std::printf("macfw fw1814supervisor — resilient fixed 48 kHz transport supervisor\n");
     std::printf("automatic reconnect and guarded bootloader recovery: enabled\n");
+    std::printf("validated pre-transport FW1814 bus reset: enabled\n");
 
     std::chrono::milliseconds retryDelay(250);
     constexpr std::chrono::milliseconds kMaxRetryDelay(4000);
     constexpr std::chrono::milliseconds kReenumerationDelay(1000);
     constexpr std::chrono::milliseconds kPostEngineExitDelay(800);
+    constexpr std::chrono::milliseconds kCleanBusResetSettleDelay(3000);
+
+    // A physical disconnect/re-enumeration can leave the FW1814 playback side
+    // in a bad device-local stream state even though init-48 and all host-side
+    // transport diagnostics pass. Hardware testing showed that one guarded,
+    // product-scoped bus reset while the operational personality is confirmed,
+    // followed by a settle delay and a fresh init-48, reliably clears it.
+    //
+    // This flag is consumed before the reset is issued so the generation change
+    // caused by our own reset cannot recursively request another reset.
+    bool cleanBusResetRequired = true;
 
     while (!gStopRequested) {
         if (!halPlaybackReady()) {
@@ -183,13 +234,44 @@ int main(int argc, char** argv) {
         }
 
         retryDelay = std::chrono::milliseconds(250);
-        std::printf("FW1814 init-48 PASS; starting analog transport engine\n");
+
+        if (cleanBusResetRequired) {
+            std::printf("FW1814 operational init PASS; performing validated clean bus reset before transport\n");
+
+            // Consume the request before issuing BusReset(). Our own reset will
+            // change the FireWire generation; that generation change must not
+            // schedule another reset recursively.
+            cleanBusResetRequired = false;
+            const int resetStatus = runBusReset(busResetPath);
+            if (gStopRequested) break;
+
+            if (resetStatus != 0) {
+                cleanBusResetRequired = true;
+                std::fprintf(stderr,
+                             "FW1814 guarded bus reset failed with status %d; "
+                             "not starting transport; retrying in %lld ms\n",
+                             resetStatus,
+                             static_cast<long long>(retryDelay.count()));
+                sleepInterruptibly(retryDelay);
+                retryDelay = std::min(retryDelay * 2, kMaxRetryDelay);
+                continue;
+            }
+
+            std::printf("FW1814 clean bus reset PASS; waiting 3000 ms for re-enumeration before fresh init-48\n");
+            sleepInterruptibly(kCleanBusResetSettleDelay);
+            continue;
+        }
+
+        std::printf("FW1814 post-reset init-48 PASS; starting analog transport engine\n");
         const int engineStatus = runChild(enginePath);
         if (gStopRequested) break;
 
+        // Any engine exit outside supervisor shutdown means the next transport
+        // start must pass through the validated clean bus-reset sequence again.
+        cleanBusResetRequired = true;
         std::fprintf(stderr,
                      "FW1814 analog transport engine exited with status %d; "
-                     "waiting for FireWire re-enumeration\n",
+                     "clean bus reset required before next transport start\n",
                      engineStatus);
         sleepInterruptibly(kPostEngineExitDelay);
     }
