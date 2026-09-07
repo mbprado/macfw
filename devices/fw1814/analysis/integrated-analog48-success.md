@@ -2,7 +2,7 @@
 
 Date: 2026-09-07
 
-This records the first successful production-style dynamic full-duplex analog path for the M-Audio FireWire 1814 on macOS, including clean CoreAudio playback and capture through the FW1814 HAL.
+This records the first successful production-style dynamic full-duplex analog path for the M-Audio FireWire 1814 on macOS, including clean CoreAudio playback and capture through the FW1814 HAL and hardware-validated automatic recovery after disconnect, reboot, and interface power cycling.
 
 ## Scope
 
@@ -37,13 +37,15 @@ The correlated FCP layer is now used instead of accepting the first FCP response
 
 ## Dynamic capture success
 
-The receive ring uses the hardware-proven 64-slot geometry. With the corrected 11-quadlet event width (10 PCM + 1 MIDI), the live capture path ran at exactly 48 kHz.
+The production capture engine uses a 256-slot receive ring with metadata publication in 32-slot chunks. The earlier 64-slot geometry was useful during bring-up because it exactly matched the first hardware-proven raw duplex test, but the final production path returned to 256 slots once the real DBS=11 event-width bug was understood.
 
-Representative 2-second statistics while streaming:
+With the corrected 11-quadlet event width (10 PCM + 1 MIDI), the live capture path runs at 48 kHz.
+
+Representative steady-state statistics while streaming:
 
 ```text
-capture delta: 96000 frames
-rx-touched:    64/64
+capture delta: 96000 frames / 2 s
+rx-touched:    256/256
 malformed:     0
 invalid:       0
 dbc-gap:       0
@@ -174,19 +176,71 @@ physical analog input
 
 Playback and capture remain clean together after the 640/320 TX-ring geometry fix.
 
+## Automatic recovery success
+
+The first automatic supervisor could recover device enumeration after disconnect, including guarded bootloader-to-operational recovery, but the recovered playback stream could intermittently return in a persistent broken device-side state. A service/engine restart without a FireWire bus reset did not clear that state.
+
+A manual recovery sequence proved reliable:
+
+```text
+stop FW1814 launchd service
+wait 3 s
+perform guarded product-scoped FireWire bus reset
+wait 3 s
+start FW1814 launchd service
+fresh init-48
+start transport
+```
+
+The supervisor now implements the equivalent lifecycle automatically and safely:
+
+```text
+physical disconnect / reboot / interface power cycle
+    -> recover bootloader/operational personality
+    -> init-48 succeeds, proving the operational personality is ready
+    -> perform one guarded product-scoped FW1814 bus reset
+    -> consume the reset-required state before issuing the reset
+    -> wait 3000 ms for re-enumeration
+    -> run a fresh init-48 on the new generation
+    -> start fw1814analog48
+```
+
+The reset helper matches only product `FW 1814`, opens the known device, calls `BusReset()`, and performs no further device transactions on the stale generation before closing.
+
+The supervisor deliberately consumes its reset-required flag before issuing the reset, so the bus reset that it requested cannot recursively trigger another pre-transport reset.
+
+Hardware validation after this change:
+
+```text
+disconnect/reconnect:   consistently returns clean
+macOS reboot:           consistently returns clean
+FW1814 power off/on:    consistently returns clean
+playback after recovery: clean
+capture after recovery:  clean
+```
+
+Recovery takes longer than the earlier immediate restart path because it intentionally includes the additional bus reset and re-enumeration settle period. The extra delay is accepted because it consistently returns the device to the known-good playback state.
+
+This bus reset is therefore part of the validated FW1814 special-firmware lifecycle and should not be removed merely as a startup optimization without equivalent repeated disconnect/reboot/power-cycle hardware validation.
+
 ## Proven milestone
 
-The FW1814 now has a hardware-proven dynamic 48 kHz full-duplex analog transport and working fixed-48k CoreAudio HAL integration:
+The FW1814 now has a hardware-proven dynamic 48 kHz full-duplex analog transport, working fixed-48k CoreAudio HAL integration, and reliable automatic lifecycle recovery:
 
 - 4 verified analog playback channels;
 - 8 verified analog capture channels;
 - correct 48 kHz blocking AMDTP cadence;
 - clean arbitrary-frequency playback with 640/320 TX geometry;
+- production capture with 256-slot RX geometry;
 - clean real CoreAudio playback;
 - clean CoreAudio capture in a normal recording application;
 - continuous 48 kHz capture;
+- dedicated realtime audio-service scheduling;
 - generation-safe teardown;
 - correlated FCP rate controls;
-- fixed-48k AudioServerPlugIn visible to macOS as a 4-out / 8-in FireWire device.
+- fixed-48k AudioServerPlugIn visible to macOS as a 4-out / 8-in FireWire device;
+- automatic guarded bootloader recovery;
+- automatic product-scoped clean bus reset before recovered transport start;
+- hardware-validated recovery after disconnect/reconnect, macOS reboot, and FW1814 power off/on.
 
-The next integration step is automatic FW1814 transport supervision at fixed 48 kHz. 44.1 kHz support remains a separate later transport task and must use the correct blocking cadence for that rate rather than assuming the 48 kHz pattern.
+The fixed-48k analog path can now be treated as the stable FW1814 baseline. The next major transport task is native 44.1 kHz support. Its blocking cadence must be derived and validated independently rather than assuming the 48 kHz packet pattern. Digital exact L/R mapping, headphone source routing, and MIDI remain deferred as documented elsewhere.
