@@ -30,15 +30,15 @@ std::string executableDirectory(const char* argv0) {
 }
 
 bool halPlaybackReady() {
-    const int fd = shm_open(macfw::fw1814::hal::kShmName, O_RDWR, 0);
+    const int fd = shm_open(macfw::fw1814::hal::kPlaybackShmName, O_RDWR, 0);
     if (fd < 0) return false;
 
-    void* p = mmap(nullptr, sizeof(macfw::fw1814::hal::SharedPcmRing),
+    void* p = mmap(nullptr, sizeof(macfw::fw1814::hal::SharedPlaybackRing),
                    PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     close(fd);
     if (p == MAP_FAILED) return false;
 
-    auto* ring = static_cast<macfw::fw1814::hal::SharedPcmRing*>(p);
+    auto* ring = static_cast<macfw::fw1814::hal::SharedPlaybackRing*>(p);
     const bool ready = macfw::fw1814::hal::valid(*ring) &&
                        ring->sampleRate.load(std::memory_order_acquire) == 48000;
     munmap(p, sizeof(*ring));
