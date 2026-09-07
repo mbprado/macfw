@@ -50,10 +50,6 @@ bool initPlayback() {
         return false;
     }
 
-    // Match the already-working FW410 HAL creation path: shm_open ->
-    // ftruncate -> mmap. fchmod is unnecessary for this temporary same-user
-    // producer/consumer test and was the only extra syscall in the FW1814
-    // initializer.
     const std::size_t bytes = sizeof(macfw::fw1814::hal::SharedPlaybackRing);
     if (ftruncate(fd, static_cast<off_t>(bytes)) != 0) {
         std::cerr << "ftruncate(" << name << ", " << bytes << ") failed: "
@@ -117,18 +113,22 @@ bool tone(unsigned output) {
         return false;
     }
 
-    constexpr std::size_t kChunkFrames = 240; // 5 ms at 48 kHz
+    constexpr std::size_t kChunkFrames = 960; // 20 ms generation chunk
+    constexpr std::size_t kTotalFrames = 48000 * 3;
     constexpr double kFrequency = 500.0;
     constexpr double kAmplitude = 0.06309573444801933; // -24 dBFS peak
-    constexpr unsigned kChunks = 600; // 3 seconds
     std::vector<float> block(
         kChunkFrames * macfw::fw1814::hal::kOutputChannels, 0.0f);
     std::uint64_t sampleIndex = 0;
+    std::size_t produced = 0;
 
     std::cout << "500 Hz / -24 dBFS -> physical Analog Output " << output
-              << " for 3 seconds\n";
-    for (unsigned chunk = 0; chunk < kChunks; ++chunk) {
-        for (std::size_t frame = 0; frame < kChunkFrames; ++frame) {
+              << " for 3 seconds (buffered producer)\n";
+
+    while (produced < kTotalFrames) {
+        const std::size_t framesThisChunk =
+            std::min(kChunkFrames, kTotalFrames - produced);
+        for (std::size_t frame = 0; frame < framesThisChunk; ++frame) {
             std::fill_n(block.data() + frame * macfw::fw1814::hal::kOutputChannels,
                         macfw::fw1814::hal::kOutputChannels, 0.0f);
             const double phase = 2.0 * kPi * kFrequency *
@@ -138,16 +138,39 @@ bool tone(unsigned output) {
         }
 
         std::size_t offset = 0;
-        while (offset < kChunkFrames) {
+        while (offset < framesThisChunk) {
+            const std::size_t used = macfw::fw1814::hal::availableFrames(*m.ring);
+            const std::size_t free = used >= macfw::fw1814::hal::kCapacityFrames
+                ? 0
+                : macfw::fw1814::hal::kCapacityFrames - used;
+            if (free == 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+            const std::size_t request =
+                std::min(free, framesThisChunk - offset);
             const std::size_t wrote = macfw::fw1814::hal::write(
                 *m.ring,
                 block.data() + offset * macfw::fw1814::hal::kOutputChannels,
-                kChunkFrames - offset);
+                request);
             offset += wrote;
-            if (offset < kChunkFrames)
+            if (wrote == 0)
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        produced += framesThisChunk;
+    }
+
+    // Wait until the engine has consumed the complete queued tone so command
+    // completion corresponds to audible completion, not merely producer EOF.
+    const std::uint64_t targetRead =
+        m.ring->writeFrame.load(std::memory_order_acquire);
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (m.ring->readFrame.load(std::memory_order_acquire) < targetRead &&
+           std::chrono::steady_clock::now() < deadline) {
+        if (m.ring->active.load(std::memory_order_acquire) == 0)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
     return true;
 }
@@ -167,10 +190,6 @@ bool captureMeter(unsigned seconds) {
     auto nextPrint = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
 
     while (std::chrono::steady_clock::now() < end) {
-        // Match the intended HAL contract: merely announcing read callbacks is
-        // enough for the producer to notice a consumer. Do not drain capture
-        // before active=1, otherwise the producer can never accumulate its
-        // required prefill.
         m.ring->halReadCalls.fetch_add(1, std::memory_order_relaxed);
         m.ring->halRequestedFrames.fetch_add(kFrames, std::memory_order_relaxed);
 
