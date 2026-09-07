@@ -9,10 +9,11 @@ HAL_INCLUDE := ../hal/include
 
 ANALOG48 := fw1814analog48
 SHM_TEST := fw1814shmtest
+SUPERVISOR := fw1814supervisor
 
-.PHONY: all analog48 shm-test clean
+.PHONY: all analog48 shm-test supervisor clean
 
-all: $(ANALOG48) $(SHM_TEST)
+all: $(ANALOG48) $(SHM_TEST) $(SUPERVISOR)
 
 $(LIBMACFW):
 	$(MAKE) -C ../../../fw410/lib libmacfw.a
@@ -28,9 +29,14 @@ $(SHM_TEST): shm_test.cpp ../hal/include/macfw_fw1814_hal_shm.h \
 	../hal/include/macfw_fw1814_capture_shm.h
 	$(CXX) $(CXXFLAGS) -I$(DEVICE_INCLUDE) -I$(HAL_INCLUDE) shm_test.cpp -o $@
 
+$(SUPERVISOR): supervisor_main.cpp ../hal/include/macfw_fw1814_hal_shm.h
+	$(CXX) $(CXXFLAGS) -I$(DEVICE_INCLUDE) -I$(HAL_INCLUDE) supervisor_main.cpp -o $@
+
 analog48: $(ANALOG48)
 
 shm-test: $(SHM_TEST)
 
+supervisor: $(SUPERVISOR)
+
 clean:
-	rm -f $(ANALOG48) $(SHM_TEST)
+	rm -f $(ANALOG48) $(SHM_TEST) $(SUPERVISOR)
