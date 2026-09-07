@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 
 namespace macfw::fw1814::transport {
 
@@ -15,6 +16,8 @@ public:
         std::uint64_t dataPacketsRefilled = 0;
         std::uint64_t framesFromBuffer = 0;
         std::uint64_t framesSilenced = 0;
+        std::uint64_t dclsPublished = 0;
+        std::uint64_t publishFailures = 0;
         std::uint64_t lateCyclePolls = 0;
     };
 
@@ -38,9 +41,13 @@ public:
 
     bool prime() {
         if (!valid()) return false;
-        const auto first = tx_->refill(*pcm_, 0, halfPackets_);
-        const auto second = tx_->refill(*pcm_, halfPackets_, halfPackets_);
-        if (first.dataPacketsRefilled == 0 || second.dataPacketsRefilled == 0)
+        // The DCL program is not running yet, so bank 0 can be populated
+        // directly without a runtime modification notification.
+        const auto first = tx_->refill(*pcm_, 0, halfPackets_, false);
+        const auto second = tx_->refill(*pcm_, halfPackets_, halfPackets_, false);
+        if (first.publishResult != kIOReturnSuccess ||
+            second.publishResult != kIOReturnSuccess ||
+            first.dataPacketsRefilled == 0 || second.dataPacketsRefilled == 0)
             return false;
         accumulate(first);
         accumulate(second);
@@ -49,7 +56,7 @@ public:
     }
 
     void service(UInt32 currentCycle) {
-        if (!valid() || !primed_) return;
+        if (!valid() || !primed_ || failed_) return;
         currentCycle %= kCyclesPerSecond;
         const UInt32 delta = cycleDelta(currentCycle, lastCycle_);
         lastCycle_ = currentCycle;
@@ -66,13 +73,29 @@ public:
         while (lastHalfNumber_ < halfNumber) {
             const std::size_t consumedHalf =
                 static_cast<std::size_t>(lastHalfNumber_ & 1u);
-            accumulate(tx_->refill(*pcm_, consumedHalf * halfPackets_, halfPackets_));
+            const auto refill = tx_->refill(
+                *pcm_, consumedHalf * halfPackets_, halfPackets_, true);
+            accumulate(refill);
+            if (refill.publishResult != kIOReturnSuccess) {
+                ++stats_.publishFailures;
+                failed_ = true;
+                std::fprintf(stderr,
+                             "FW1814 TX NuDCL publish failed: 0x%08x\n",
+                             static_cast<unsigned>(refill.publishResult));
+                return;
+            }
+            if (!livePublishAnnounced_ && refill.dclsPublished != 0) {
+                livePublishAnnounced_ = true;
+                std::fprintf(stdout,
+                             "FW1814 TX live NuDCL double-buffer updates active\n");
+            }
             ++lastHalfNumber_;
         }
     }
 
     const Stats& stats() const { return stats_; }
     bool streamReached() const { return streamReached_; }
+    bool healthy() const { return !failed_; }
 
 private:
     static constexpr UInt32 kCyclesPerSecond = 8000;
@@ -86,6 +109,7 @@ private:
         stats_.dataPacketsRefilled += refill.dataPacketsRefilled;
         stats_.framesFromBuffer += refill.framesFromBuffer;
         stats_.framesSilenced += refill.framesSilenced;
+        stats_.dclsPublished += refill.dclsPublished;
     }
 
     BlockingPcmTransmitRing48k* tx_ = nullptr;
@@ -99,6 +123,8 @@ private:
     std::uint64_t lastHalfNumber_ = 0;
     bool streamReached_ = false;
     bool primed_ = false;
+    bool failed_ = false;
+    bool livePublishAnnounced_ = false;
     Stats stats_{};
 };
 
