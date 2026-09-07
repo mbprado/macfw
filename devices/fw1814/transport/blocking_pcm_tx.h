@@ -12,19 +12,11 @@
 #include <cstring>
 #include <sys/mman.h>
 #include <utility>
-#include <vector>
 
 namespace macfw::fw1814::transport {
 
 // Live 48-kHz host->FW1814 transmitter for the hardware-proven S/PDIF-mode
 // formation: 6 PCM + 1 MIDI (DBS=7), CIP_BLOCKING, 8/8/8/NODATA cadence.
-//
-// Live packets are double-buffered.  The OHCI program always references one
-// payload bank while userspace fills the other bank.  Once a consumed half of
-// the ring has been prepared, SetDCLRanges() plus the v5 local-port
-// kFWNuDCLModifyNotification atomically publishes the new ranges to the
-// running NuDCL program.  This avoids changing bytes that DMA may still be
-// fetching from the currently active packet buffer.
 class BlockingPcmTransmitRing48k {
 public:
     struct RefillResult {
@@ -33,8 +25,6 @@ public:
         std::size_t framesRequested = 0;
         std::size_t framesFromBuffer = 0;
         std::size_t framesSilenced = 0;
-        std::size_t dclsPublished = 0;
-        IOReturn publishResult = kIOReturnSuccess;
     };
 
     BlockingPcmTransmitRing48k() = default;
@@ -73,8 +63,6 @@ public:
             return ring;
         }
         std::memset(ring.storage_, 0, ring.mappedBytes_);
-        ring.dcls_.assign(packetCount, nullptr);
-        ring.activeBank_.assign(packetCount, 0);
 
         std::uint8_t dbc = 0;
         for (std::size_t i = 0; i < packetCount; ++i) {
@@ -82,39 +70,33 @@ public:
             const UInt32 cycle = static_cast<UInt32>(
                 (ring.firstCycle_ + i) % kCyclesPerSecond);
             auto& slot = ring.storage_[i];
+            auto* payload = slot.payload;
+
+            putBe32(payload, (static_cast<std::uint32_t>(kDbs) << 16) | dbc);
             slot.dataBearing = phase != 3u;
 
-            for (std::size_t bank = 0; bank < kPayloadBanks; ++bank) {
-                auto* payload = slot.payload[bank];
-                putBe32(payload,
-                        (static_cast<std::uint32_t>(kDbs) << 16) | dbc);
-
-                if (!slot.dataBearing) {
-                    putBe32(payload + 4, 0x9002ffffu);
-                    continue;
-                }
-
-                const std::uint32_t sytOffset =
-                    static_cast<std::uint32_t>(phase) * 1024u;
-                const std::uint16_t syt = computeSyt(cycle, sytOffset);
-                putBe32(payload + 4,
-                        0x90020000u | static_cast<std::uint32_t>(syt));
-
-                std::size_t offset = 8;
-                for (std::size_t event = 0;
-                     event < kEventsPerDataPacket; ++event) {
-                    for (std::size_t ch = 0; ch < kPcmChannels; ++ch) {
-                        putBe32(payload + offset, 0x40000000u);
-                        offset += 4;
-                    }
-                    putBe32(payload + offset, 0x80000000u); // MIDI no-data
-                    offset += 4;
-                }
+            if (!slot.dataBearing) {
+                putBe32(payload + 4, 0x9002ffffu);
+                slot.length = 8;
+                continue;
             }
 
-            slot.length = slot.dataBearing ? kMaxPacketBytes : 8;
-            if (slot.dataBearing)
-                dbc = static_cast<std::uint8_t>(dbc + kEventsPerDataPacket);
+            const std::uint32_t sytOffset =
+                static_cast<std::uint32_t>(phase) * 1024u;
+            const std::uint16_t syt = computeSyt(cycle, sytOffset);
+            putBe32(payload + 4, 0x90020000u | static_cast<std::uint32_t>(syt));
+
+            std::size_t offset = 8;
+            for (std::size_t event = 0; event < kEventsPerDataPacket; ++event) {
+                for (std::size_t ch = 0; ch < kPcmChannels; ++ch) {
+                    putBe32(payload + offset, 0x40000000u);
+                    offset += 4;
+                }
+                putBe32(payload + offset, 0x80000000u); // MIDI no-data
+                offset += 4;
+            }
+            slot.length = static_cast<UInt32>(offset);
+            dbc = static_cast<std::uint8_t>(dbc + kEventsPerDataPacket);
         }
 
         ring.pool_ = (*native)->CreateNuDCLPool(
@@ -130,17 +112,15 @@ public:
         NuDCLRef last = nullptr;
         for (std::size_t i = 0; i < packetCount; ++i) {
             IOVirtualRange range = {
-                reinterpret_cast<IOVirtualAddress>(ring.storage_[i].payload[0]),
+                reinterpret_cast<IOVirtualAddress>(ring.storage_[i].payload),
                 ring.storage_[i].length
             };
-            auto dcl = (*ring.pool_)->AllocateSendPacket(
-                ring.pool_, nullptr, 1, &range);
+            auto dcl = (*ring.pool_)->AllocateSendPacket(ring.pool_, nullptr, 1, &range);
             if (!dcl) {
                 ring.reset();
                 return ring;
             }
             const NuDCLRef ref = reinterpret_cast<NuDCLRef>(dcl);
-            ring.dcls_[i] = ref;
             if (!first) first = ref;
             last = ref;
         }
@@ -164,38 +144,23 @@ public:
             native, true, program,
             kFWDCLCycleEvent, ring.firstCycle_, 0x1fffu,
             nullptr, 0, &mapped, 1,
-            CFUUIDGetUUIDBytes(kIOFireWireLocalIsochPortInterfaceID_v5));
+            CFUUIDGetUUIDBytes(kIOFireWireLocalIsochPortInterfaceID));
         if (!ring.localPort_)
             ring.reset();
         return ring;
     }
 
-    // publishRunning=false is used only while priming before the NuDCL program
-    // starts.  At that point bank 0 can be edited directly.  Live refills
-    // always prepare the inactive bank and publish new DCL ranges through the
-    // v5 local-port notification API.
     RefillResult refill(macfw::PcmRingBuffer& pcm,
                         std::size_t firstPacket,
-                        std::size_t packetCount,
-                        bool publishRunning = true) {
+                        std::size_t packetCount) {
         RefillResult result{};
-        if (!storage_ || !pool_ || !localPort_ || packetCount_ == 0 ||
-            dcls_.size() != packetCount_ || activeBank_.size() != packetCount_ ||
-            !pcm.valid() || pcm.channelCount() != kPcmChannels ||
-            firstPacket >= packetCount_ || packetCount == 0) {
-            result.publishResult = kIOReturnBadArgument;
+        if (!storage_ || packetCount_ == 0 || !pcm.valid() ||
+            pcm.channelCount() != kPcmChannels || firstPacket >= packetCount_ ||
+            packetCount == 0)
             return result;
-        }
 
         const std::size_t end = std::min(packetCount_, firstPacket + packetCount);
         std::int32_t frames[kEventsPerDataPacket * kPcmChannels]{};
-        std::vector<void*> modifiedDcls;
-        std::vector<std::size_t> modifiedIndices;
-        if (publishRunning) {
-            modifiedDcls.reserve(end - firstPacket);
-            modifiedIndices.reserve(end - firstPacket);
-        }
-
         for (std::size_t i = firstPacket; i < end; ++i) {
             ++result.packetsVisited;
             if (!storage_[i].dataBearing) continue;
@@ -204,11 +169,6 @@ public:
             result.framesRequested += rr.framesRequested;
             result.framesFromBuffer += rr.framesFromBuffer;
             result.framesSilenced += rr.framesSilenced;
-
-            const std::uint8_t bank = publishRunning
-                ? static_cast<std::uint8_t>(activeBank_[i] ^ 1u)
-                : activeBank_[i];
-            auto* payload = storage_[i].payload[bank];
 
             for (std::size_t event = 0; event < kEventsPerDataPacket; ++event) {
                 for (std::size_t ch = 0; ch < kPcmChannels; ++ch) {
@@ -219,41 +179,13 @@ public:
                         (static_cast<std::uint32_t>(sample) & 0x00ffffffu);
                     const std::size_t off = 8 +
                         (event * kDbs + ch) * sizeof(std::uint32_t);
-                    putBe32(payload + off, word);
+                    putBe32(storage_[i].payload + off, word);
                 }
             }
             ++result.dataPacketsRefilled;
-
-            if (publishRunning) {
-                IOVirtualRange range = {
-                    reinterpret_cast<IOVirtualAddress>(payload),
-                    storage_[i].length
-                };
-                const IOReturn setResult =
-                    (*pool_)->SetDCLRanges(dcls_[i], 1, &range);
-                if (setResult != kIOReturnSuccess) {
-                    result.publishResult = setResult;
-                    return result;
-                }
-                modifiedDcls.push_back(reinterpret_cast<void*>(dcls_[i]));
-                modifiedIndices.push_back(i);
-            }
         }
 
         std::atomic_thread_fence(std::memory_order_release);
-
-        if (publishRunning && !modifiedDcls.empty()) {
-            result.publishResult = (*localPort_)->Notify(
-                localPort_, kFWNuDCLModifyNotification,
-                modifiedDcls.data(), static_cast<UInt32>(modifiedDcls.size()));
-            if (result.publishResult != kIOReturnSuccess)
-                return result;
-
-            for (const auto index : modifiedIndices)
-                activeBank_[index] ^= 1u;
-            result.dclsPublished = modifiedDcls.size();
-        }
-
         return result;
     }
 
@@ -270,7 +202,6 @@ private:
     static constexpr std::size_t kPcmChannels = 6;
     static constexpr std::size_t kDbs = 7;
     static constexpr std::size_t kEventsPerDataPacket = 8;
-    static constexpr std::size_t kPayloadBanks = 2;
     static constexpr UInt32 kMaxPacketBytes =
         8 + kEventsPerDataPacket * kDbs * sizeof(std::uint32_t); // 232
     static constexpr std::uint32_t kTicksPerCycle = 3072u;
@@ -281,7 +212,7 @@ private:
     struct StorageSlot {
         UInt32 length = 0;
         bool dataBearing = false;
-        alignas(16) std::uint8_t payload[kPayloadBanks][kMaxPacketBytes]{};
+        std::uint8_t payload[kMaxPacketBytes]{};
     };
 
     static void putBe32(std::uint8_t* p, std::uint32_t v) {
@@ -312,8 +243,6 @@ private:
             munmap(storage_, mappedBytes_);
             storage_ = nullptr;
         }
-        dcls_.clear();
-        activeBank_.clear();
         packetCount_ = 0;
         mappedBytes_ = 0;
         firstCycle_ = 0;
@@ -321,8 +250,6 @@ private:
 
     void moveFrom(BlockingPcmTransmitRing48k&& other) noexcept {
         storage_ = other.storage_;
-        dcls_ = std::move(other.dcls_);
-        activeBank_ = std::move(other.activeBank_);
         packetCount_ = other.packetCount_;
         mappedBytes_ = other.mappedBytes_;
         firstCycle_ = other.firstCycle_;
@@ -337,8 +264,6 @@ private:
     }
 
     StorageSlot* storage_ = nullptr;
-    std::vector<NuDCLRef> dcls_;
-    std::vector<std::uint8_t> activeBank_;
     std::size_t packetCount_ = 0;
     std::size_t mappedBytes_ = 0;
     UInt32 firstCycle_ = 0;
