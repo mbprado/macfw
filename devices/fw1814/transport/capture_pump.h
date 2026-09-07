@@ -79,13 +79,19 @@ private:
             if (!packet.hasCip()) continue;
             const auto h = packet.cip();
 
+            // FW1814 NODATA packets are eight-byte CIP-only packets and were
+            // observed with DBS=2. Classify them by NODATA semantics before
+            // applying the DBS=11 data-packet validator.
             if (packet.length == 8) {
                 if (h.syt == 0xffffu) ++stats_.noDataPackets;
                 continue;
             }
 
-            constexpr std::size_t kEventBytes = kCapturePcmPositions * 4;
-            if (h.dbs != kCapturePcmPositions || h.fmt != 0x10 ||
+            // Capture formation is 10 PCM + 1 MIDI = 11 quadlets per AM824
+            // event. kCapturePcmPositions is intentionally only the PCM count;
+            // the complete event/DBS width is kCaptureStreamPositions.
+            constexpr std::size_t kEventBytes = kCaptureStreamPositions * 4;
+            if (h.dbs != kCaptureStreamPositions || h.fmt != 0x10 ||
                 h.fdf != 0x02 || packet.dataLength() == 0 ||
                 packet.dataLength() % kEventBytes != 0) {
                 out.malformedPackets.fetch_add(1, std::memory_order_relaxed);
@@ -219,7 +225,7 @@ private:
                 decoded[base + physical] = value;
                 peaks[physical] = std::max(peaks[physical], std::fabs(value));
             }
-            p += kCapturePcmPositions * 4;
+            p += kCaptureStreamPositions * 4;
         }
 
         for (std::size_t ch = 0; ch < meterPeaks_.size(); ++ch)
