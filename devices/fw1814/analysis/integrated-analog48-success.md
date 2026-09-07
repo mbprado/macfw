@@ -2,7 +2,7 @@
 
 Date: 2026-09-07
 
-This records the first successful production-style dynamic full-duplex analog path for the M-Audio FireWire 1814 on macOS.
+This records the first successful production-style dynamic full-duplex analog path for the M-Audio FireWire 1814 on macOS, including the first clean CoreAudio playback through the FW1814 HAL.
 
 ## Scope
 
@@ -67,7 +67,7 @@ This independently confirms the production decoder/remap path preserves the prev
 
 ## Dynamic playback success
 
-All four physical analog outputs were already confirmed through the dynamic SHM -> PCM -> AMDTP path.
+All four physical analog outputs were confirmed through the dynamic SHM -> PCM -> AMDTP path.
 
 The physical order remains:
 
@@ -78,29 +78,103 @@ Analog Output 3 <- raw PCM position 0
 Analog Output 4 <- raw PCM position 1
 ```
 
-A temporary distortion observed during early dynamic playback testing was traced to the SHM test producer, not the FireWire scheduler: it wrote 240-frame bursts while the transport refilled 384-frame halves, causing zero-fill inside active tone periods.
+A first temporary distortion during dynamic playback testing was traced to the SHM test producer: it wrote 240-frame bursts while the transport refilled 384-frame halves, causing zero-fill inside active tone periods. After buffering the producer ahead, a 3-second 500 Hz tone delivered exactly 144000 audio frames and sounded clean.
 
-After changing the test producer to buffer ahead, a 3-second tone delivered exactly 144000 audio frames and sounded clean. `tx-late` remained stable, confirming the distortion was not caused by missed DCL refill deadlines.
-
-Representative result:
+A second distortion remained for arbitrary audio. The important diagnostic pattern was frequency-dependent:
 
 ```text
-tx-audio: 144000 frames after one 3-second tone
-tx-late:  2 and stable
+500 Hz:    clean
+437.5 Hz:  clean
+440 Hz:    distorted
+523.25 Hz: very distorted
+Glass.aiff: distorted
 ```
 
-Idle `tx-silence` continues to increase outside active playback by design.
+The same distortion occurred with direct-SHM test tones, which excluded CoreAudio, the HAL, sample-rate conversion, source bit depth, channel interleaving, and level clipping.
+
+The key observation was that 500 Hz and 437.5 Hz are phase-aligned with the full 128-packet loop duration, while 440 Hz and 523.25 Hz are not. This isolated the artifact to reuse of the short live TX NuDCL payload ring at the full-ring boundary.
+
+### Final TX geometry fix
+
+The original dynamic FW1814 playback geometry was:
+
+```text
+128 packets total
+64-packet halves
+16 ms full loop
+8 ms per half
+```
+
+The released FW410 production 48 kHz engine already uses a much longer live TX ring:
+
+```text
+640 packets total
+320-packet halves
+80 ms full loop
+40 ms per half
+```
+
+FW1814 was changed to the same 640/320 geometry while preserving all FW1814-specific blocking-mode packet rules, DBC, SYT, packet sizes, mixer state, AV/C controls and CMP behavior.
+
+After this change, all three decisive playback tests were hardware-confirmed clean:
+
+```text
+440 Hz direct SHM:     clean
+523.25 Hz direct SHM:  clean
+Glass.aiff CoreAudio:  clean
+```
+
+Therefore the distortion was caused by the short 128-packet live payload-reuse interval, not by HAL/CoreAudio sample handling or the FW1814 protocol itself.
+
+The validated production geometry is now:
+
+```text
+FW1814 playback TX ring: 640 packets / 320-packet halves (80 ms / 40 ms)
+```
+
+Do not reduce this geometry without a new arbitrary-frequency / real-audio regression test.
+
+## CoreAudio HAL success
+
+The first FW1814 AudioServerPlugIn is hardware-validated at fixed 48 kHz. macOS reports:
+
+```text
+M-Audio FireWire 1814
+Input Channels:  8
+Output Channels: 4
+Current SampleRate: 48000
+Transport: FireWire
+Manufacturer: macfw
+```
+
+The HAL itself performs no FireWire access. It exchanges playback and capture through the FW1814 SHM ABI while `fw1814analog48` remains the sole FireWire owner.
+
+Clean CoreAudio playback has now been confirmed end-to-end:
+
+```text
+CoreAudio application
+ -> FW1814 HAL
+ -> playback SHM
+ -> fw1814analog48
+ -> blocking AMDTP
+ -> FireWire
+ -> physical analog output
+```
+
+CoreAudio-facing capture SHM and physical Input 1 decoding were also confirmed through the capture consumer path.
 
 ## Proven milestone
 
-The FW1814 now has a hardware-proven dynamic 48 kHz full-duplex analog transport suitable for connection to a CoreAudio HAL layer:
+The FW1814 now has a hardware-proven dynamic 48 kHz full-duplex analog transport and first working CoreAudio HAL integration:
 
 - 4 verified analog playback channels;
 - 8 verified analog capture channels;
-- correct blocking AMDTP cadence;
-- continuous dynamic PCM playback;
+- correct 48 kHz blocking AMDTP cadence;
+- clean arbitrary-frequency playback with 640/320 TX geometry;
+- clean real CoreAudio playback;
 - continuous 48 kHz capture;
 - generation-safe teardown;
-- correlated FCP rate controls.
+- correlated FCP rate controls;
+- fixed-48k AudioServerPlugIn visible to macOS as a 4-out / 8-in FireWire device.
 
-The next integration step is a 48 kHz-only AudioServerPlugIn exposing these 4 output and 8 input channels while keeping the FireWire transport process manual for the first CoreAudio validation.
+Next steps are CoreAudio capture validation from a normal recording application, then automatic FW1814 transport supervision. 44.1 kHz support remains a separate later transport task and must use the correct blocking cadence for that rate rather than assuming the 48 kHz pattern.
