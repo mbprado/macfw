@@ -19,8 +19,9 @@ $(LIBMACFW):
 	$(MAKE) -C ../../../fw410/lib libmacfw.a
 
 $(ANALOG48): analog48_main.cpp blocking_pcm_tx.h pcm_stream48.h capture_pump.h \
-	duplex_lifecycle.h playback_pump.h shared_io.h ../channel_map.h ../fcp_control.h \
-	../special_mixer.h ../hal/include/macfw_fw1814_hal_shm.h \
+	duplex_lifecycle.h playback_pump.h realtime_service.h shared_io.h \
+	../channel_map.h ../fcp_control.h ../special_mixer.h \
+	../hal/include/macfw_fw1814_hal_shm.h \
 	../hal/include/macfw_fw1814_capture_shm.h $(LIBMACFW)
 	$(CXX) $(CXXFLAGS) -I$(LIBMACFW_INCLUDE) -I$(DEVICE_INCLUDE) -I$(HAL_INCLUDE) \
 		analog48_main.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
