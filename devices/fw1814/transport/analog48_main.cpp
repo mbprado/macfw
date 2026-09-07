@@ -316,6 +316,12 @@ int main() {
     gStopRequested = 0;
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
+    // launchd redirects stdout/stderr to regular files, so C++ iostreams are
+    // not terminal-line-buffered. Flush every insertion while this runtime is
+    // still in diagnostic bring-up so scheduling/recovery failures are visible
+    // immediately in /Library/Logs/macfw-fw1814-transport.log.
+    std::cout.setf(std::ios::unitbuf);
+    std::cerr.setf(std::ios::unitbuf);
     std::cout << "macfw fw1814analog48 — experimental 48 kHz analog full-duplex engine\n";
     return run() ? 0 : 1;
 }
