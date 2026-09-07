@@ -96,8 +96,9 @@ bool openCapture(CaptureMapping& m) {
     return macfw::fw1814::hal::capture::valid(*m.ring);
 }
 
-bool tone(unsigned output) {
-    if (output < 1 || output > macfw::fw1814::hal::kOutputChannels)
+bool tone(unsigned output, double frequency = 500.0) {
+    if (output < 1 || output > macfw::fw1814::hal::kOutputChannels ||
+        !std::isfinite(frequency) || frequency <= 0.0 || frequency >= 24000.0)
         return false;
     PlaybackMapping m;
     if (!openPlayback(m)) {
@@ -115,14 +116,13 @@ bool tone(unsigned output) {
 
     constexpr std::size_t kChunkFrames = 960; // 20 ms generation chunk
     constexpr std::size_t kTotalFrames = 48000 * 3;
-    constexpr double kFrequency = 500.0;
     constexpr double kAmplitude = 0.06309573444801933; // -24 dBFS peak
     std::vector<float> block(
         kChunkFrames * macfw::fw1814::hal::kOutputChannels, 0.0f);
     std::uint64_t sampleIndex = 0;
     std::size_t produced = 0;
 
-    std::cout << "500 Hz / -24 dBFS -> physical Analog Output " << output
+    std::cout << frequency << " Hz / -24 dBFS -> physical Analog Output " << output
               << " for 3 seconds (buffered producer)\n";
 
     while (produced < kTotalFrames) {
@@ -131,7 +131,7 @@ bool tone(unsigned output) {
         for (std::size_t frame = 0; frame < framesThisChunk; ++frame) {
             std::fill_n(block.data() + frame * macfw::fw1814::hal::kOutputChannels,
                         macfw::fw1814::hal::kOutputChannels, 0.0f);
-            const double phase = 2.0 * kPi * kFrequency *
+            const double phase = 2.0 * kPi * frequency *
                 static_cast<double>(sampleIndex++) / 48000.0;
             block[frame * macfw::fw1814::hal::kOutputChannels + (output - 1)] =
                 static_cast<float>(std::sin(phase) * kAmplitude);
@@ -232,7 +232,7 @@ bool captureMeter(unsigned seconds) {
 void usage(const char* argv0) {
     std::cerr << "usage:\n"
               << "  " << argv0 << " --init\n"
-              << "  " << argv0 << " --tone <1..4>\n"
+              << "  " << argv0 << " --tone <1..4> [frequency-hz]\n"
               << "  " << argv0 << " --capture-meter [seconds]\n";
 }
 
@@ -246,9 +246,11 @@ int main(int argc, char** argv) {
     const std::string arg = argv[1];
     if (arg == "--init" && argc == 2)
         return initPlayback() ? 0 : 1;
-    if (arg == "--tone" && argc == 3) {
+    if (arg == "--tone" && (argc == 3 || argc == 4)) {
         try {
-            return tone(static_cast<unsigned>(std::stoul(argv[2]))) ? 0 : 1;
+            const unsigned output = static_cast<unsigned>(std::stoul(argv[2]));
+            const double frequency = argc == 4 ? std::stod(argv[3]) : 500.0;
+            return tone(output, frequency) ? 0 : 1;
         } catch (...) {
             usage(argv[0]);
             return 64;
