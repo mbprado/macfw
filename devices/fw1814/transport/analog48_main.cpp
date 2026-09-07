@@ -167,6 +167,7 @@ bool run() {
         playbackActive = true;
 
         CapturePump48k capturePump;
+        PlaybackPumpStats playbackPumpStats;
         std::vector<float> audio(
             4096 * macfw::fw1814::hal::kOutputChannels, 0.0f);
         std::vector<std::int32_t> mapped(
@@ -188,7 +189,8 @@ bool run() {
             CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.00025, false);
 
             capturePump.service(rx, *captureShared.ring());
-            drainPlayback(*playbackShared.ring(), pcm, audio, mapped);
+            drainPlayback(*playbackShared.ring(), pcm, audio, mapped,
+                          &playbackPumpStats);
 
             UInt32 nowCycleTime = 0;
             if ((*device.nativeHandle())->GetCycleTime(
@@ -218,12 +220,19 @@ bool run() {
                     captureShared.ring()->decodedFrames.load(std::memory_order_acquire);
                 const auto& txStats = streamer.stats();
                 const auto& rxStats = capturePump.stats();
+                const auto* pb = playbackShared.ring();
                 std::cout << "FW1814 out-shared="
-                          << macfw::fw1814::hal::availableFrames(*playbackShared.ring())
+                          << macfw::fw1814::hal::availableFrames(*pb)
                           << " pcm=" << pcm.availableFrames()
                           << " tx-audio=" << txStats.framesFromBuffer
                           << " tx-silence=" << txStats.framesSilenced
                           << " tx-late=" << txStats.lateCyclePolls
+                          << " hal-calls=" << pb->doIOCalls.load(std::memory_order_relaxed)
+                          << " hal-frames=" << pb->doIOFrames.load(std::memory_order_relaxed)
+                          << " hal-drop=" << pb->droppedFrames.load(std::memory_order_relaxed)
+                          << " in-peak=" << playbackPumpStats.peakAbs
+                          << " clip=" << playbackPumpStats.clippedSamples
+                          << " nonfinite=" << playbackPumpStats.nonFiniteSamples
                           << " | capture=" << captureFrames
                           << " (delta " << (captureFrames - lastCaptureFrames) << ')'
                           << " queued="
