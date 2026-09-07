@@ -69,49 +69,26 @@ public:
         const std::size_t bytes =
             sizeof(macfw::fw1814::hal::capture::SharedCaptureRing);
 
-        // The transport owns this versioned capture object. Reuse it when its
-        // ABI size is already correct; macOS can reject an unnecessary
-        // ftruncate() on an existing POSIX SHM object with EINVAL. If the
-        // object is stale/wrong-sized, replace it before any consumer is active.
-        fd_ = shm_open(name, O_CREAT | O_RDWR, 0666);
+        // The HAL normally owns creation of this persistent capture object so
+        // coreaudiod can keep one stable mapping. For standalone transport tests
+        // we may create it only when it does not exist. Never unlink/replace an
+        // existing object: that would split already-mapped consumers from the
+        // producer. macOS may report POSIX SHM st_size rounded up to a VM page,
+        // so any existing size >= the ABI size is valid.
+        bool created = false;
+        fd_ = shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0666);
+        if (fd_ >= 0) {
+            created = true;
+        } else if (errno == EEXIST) {
+            fd_ = shm_open(name, O_RDWR, 0);
+        }
         if (fd_ < 0) {
             std::fprintf(stderr, "FW1814 capture shm_open(%s) failed: %s\n",
                          name, std::strerror(errno));
             return false;
         }
 
-        struct stat st{};
-        if (fstat(fd_, &st) != 0) {
-            const int savedErrno = errno;
-            std::fprintf(stderr, "FW1814 capture fstat(%s) failed: %s\n",
-                         name, std::strerror(savedErrno));
-            reset();
-            return false;
-        }
-
-        if (st.st_size < 0 || static_cast<std::size_t>(st.st_size) != bytes) {
-            const auto oldSize = st.st_size;
-            close(fd_);
-            fd_ = -1;
-
-            if (shm_unlink(name) != 0 && errno != ENOENT) {
-                const int savedErrno = errno;
-                std::fprintf(stderr,
-                             "FW1814 capture shm_unlink(%s) failed while repairing size %lld -> %zu: %s\n",
-                             name, static_cast<long long>(oldSize), bytes,
-                             std::strerror(savedErrno));
-                return false;
-            }
-
-            fd_ = shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0666);
-            if (fd_ < 0) {
-                const int savedErrno = errno;
-                std::fprintf(stderr,
-                             "FW1814 capture recreate shm_open(%s) failed: %s\n",
-                             name, std::strerror(savedErrno));
-                return false;
-            }
-
+        if (created) {
             if (ftruncate(fd_, static_cast<off_t>(bytes)) != 0) {
                 const int savedErrno = errno;
                 std::fprintf(stderr,
@@ -121,10 +98,22 @@ public:
                 shm_unlink(name);
                 return false;
             }
-
-            std::fprintf(stdout,
-                         "FW1814 capture SHM recreated: %s (%lld -> %zu bytes)\n",
-                         name, static_cast<long long>(oldSize), bytes);
+        } else {
+            struct stat st{};
+            if (fstat(fd_, &st) != 0) {
+                const int savedErrno = errno;
+                std::fprintf(stderr, "FW1814 capture fstat(%s) failed: %s\n",
+                             name, std::strerror(savedErrno));
+                reset();
+                return false;
+            }
+            if (st.st_size < 0 || static_cast<std::size_t>(st.st_size) < bytes) {
+                std::fprintf(stderr,
+                             "FW1814 capture SHM too small: %s reports %lld bytes, need at least %zu; refusing to replace a possibly mapped object\n",
+                             name, static_cast<long long>(st.st_size), bytes);
+                reset();
+                return false;
+            }
         }
 
         void* p = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
@@ -142,9 +131,10 @@ public:
         ring_->active.store(0, std::memory_order_release);
 
         std::fprintf(stdout,
-                     "FW1814 capture SHM ready: %s (%zu bytes, %u Hz, %u channels)\n",
+                     "FW1814 capture SHM ready: %s (%zu-byte ABI, %u Hz, %u channels%s)\n",
                      name, bytes, sampleRate,
-                     macfw::fw1814::hal::capture::kInputChannels);
+                     macfw::fw1814::hal::capture::kInputChannels,
+                     created ? ", created" : ", reused");
         return true;
     }
 
