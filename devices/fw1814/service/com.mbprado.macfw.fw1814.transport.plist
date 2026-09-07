@@ -10,6 +10,12 @@
         <string>/Library/Application Support/macfw/fw1814/bin/fw1814supervisor</string>
     </array>
 
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MACFW_VERBOSE</key>
+        <string>1</string>
+    </dict>
+
     <key>RunAtLoad</key>
     <true/>
 
