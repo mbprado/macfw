@@ -5,6 +5,7 @@
 #include "duplex_lifecycle.h"
 #include "pcm_stream48.h"
 #include "playback_pump.h"
+#include "realtime_service.h"
 #include "shared_io.h"
 
 #include "macfw/amdtp_receive_ring.h"
@@ -30,20 +31,18 @@ constexpr const char* kProduct = "FW 1814";
 constexpr unsigned kRate = 48000;
 constexpr UInt32 kCaptureMaxPacket = 360;
 constexpr UInt32 kPlaybackMaxPacket = 232;
-// Keep the first integrated engine on the exact receive-ring geometry that is
-// already hardware-proven by duplex-blocking-raw (touched slots: 64/64).
+// Keep the receive-ring geometry that is hardware-proven by
+// duplex-blocking-raw (touched slots: 64/64).
 constexpr std::size_t kCaptureSlots = 64;
-// Dynamic playback needs substantially more time between consuming a half and
-// OHCI looping back to the same mapped payloads. Match the released FW410
-// production geometry: 640 cycles total, refilled in 320-cycle halves.
-// At 48 kHz blocking mode this is 80 ms total / 40 ms per half. The 3/1
-// data/NODATA cadence, DBC, SYT and maximum packet size are unchanged.
+// Hardware-validated dynamic playback geometry. Do not reduce without
+// arbitrary-frequency and real-audio regression testing.
 constexpr std::size_t kTxPackets = 640;
 constexpr std::size_t kTxHalfPackets = 320;
 constexpr std::size_t kPcmCapacityFrames = 16384;
 constexpr std::size_t kCapturePrefillFrames = 512;
 constexpr UInt32 kCycleLead = 256;
 constexpr UInt32 kCyclesPerSecond = 8000;
+constexpr std::uint64_t kAudioServicePeriodNs = 250000;
 
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
@@ -85,6 +84,7 @@ bool run() {
     bool playbackActive = false;
     macfw::fw1814::FcpControl fcp;
     DuplexLifecycle lifecycle;
+    IsochCallbackRunLoopThread isochCallbackThread;
 
     if (!macfw::fw1814::applyStraightAnalogPlaybackRouting(device))
         goto cleanup;
@@ -125,12 +125,18 @@ bool run() {
             std::cerr << "FW1814 duplex lifecycle prepare failed\n";
             goto cleanup;
         }
+        // FCP/general callbacks stay on the engine main thread. Isoch callbacks
+        // move to their own user-interactive run-loop thread below.
         if (!lifecycle.addCallbackDispatcher()) {
             std::cerr << "FW1814 callback dispatcher setup failed\n";
             goto cleanup;
         }
         if (!fcp.arm(device)) {
             std::cerr << "FW1814 FCP response handler setup failed\n";
+            goto cleanup;
+        }
+        if (!isochCallbackThread.prepare()) {
+            std::cerr << "FW1814 dedicated isoch callback thread setup failed\n";
             goto cleanup;
         }
 
@@ -141,14 +147,16 @@ bool run() {
             goto cleanup;
         }
 
-        if (!lifecycle.startIsoch()) {
+        if (!lifecycle.startIsoch(isochCallbackThread.runLoop())) {
             std::cerr << "FW1814 duplex ISO/CMP start failed\n";
             goto cleanup;
         }
+        isochCallbackThread.startPumping();
 
         std::cout << "FW1814 duplex ISO started: playback ch="
                   << lifecycle.playbackChannel()
                   << " capture ch=" << lifecycle.captureChannel() << '\n';
+        std::cout << "FW1814 isoch callback dispatcher: dedicated run-loop thread\n";
         std::cout << "FW1814 ISO settle: 50 ms\n";
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.050, false);
 
@@ -181,84 +189,110 @@ bool run() {
         std::vector<std::int32_t> mapped(
             4096 * macfw::fw1814::kPlaybackPcmPositions, 0);
 
-        bool captureReady = false;
-        const bool verbose = std::getenv("MACFW_VERBOSE") != nullptr;
-        CFAbsoluteTime lastGenerationCheck = CFAbsoluteTimeGetCurrent();
-        CFAbsoluteTime lastStatus = lastGenerationCheck;
-        std::uint64_t lastCaptureFrames = 0;
-
         std::cout << "FW1814 analog engine ONLINE\n"
                   << "    CoreAudio-facing outputs: Analog 1-4\n"
                   << "    CoreAudio-facing inputs:  Analog 1-8\n"
                   << "    digital/MIDI/headphone routing: deferred\n"
+                  << "    audio service: dedicated Mach-paced thread (250 us)\n"
                   << "    Ctrl-C to stop\n";
 
-        while (!gStopRequested) {
-            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.00025, false);
+        std::atomic<bool> audioFinished{false};
+        bool audioOk = false;
 
-            capturePump.service(rx, *captureShared.ring());
-            drainPlayback(*playbackShared.ring(), pcm, audio, mapped,
-                          &playbackPumpStats);
-
-            UInt32 nowCycleTime = 0;
-            if ((*device.nativeHandle())->GetCycleTime(
-                    device.nativeHandle(), &nowCycleTime) == kIOReturnSuccess)
-                streamer.service(cycleCount(nowCycleTime));
-
-            capturePump.service(rx, *captureShared.ring());
-
-            if (!captureReady &&
-                captureShared.activateForConsumer(kCapturePrefillFrames)) {
-                captureReady = true;
-                std::cout << "FW1814 capture consumer detected; live capture enabled\n";
+        std::thread audioThread([&] {
+            requestInteractiveQos("FW1814 audio service thread");
+            requestAudioTimeConstraint();
+            MachPacer pacer(kAudioServicePeriodNs);
+            if (!pacer.valid()) {
+                std::cerr << "FW1814 Mach pacing setup failed\n";
+                audioFinished.store(true, std::memory_order_release);
+                return;
             }
 
-            const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
-            if (now - lastGenerationCheck >= 0.25) {
-                if (!lifecycle.generationStillValid()) {
-                    std::cerr << "FW1814 FireWire generation changed during streaming; "
-                                 "requesting engine restart\n";
-                    goto cleanup;
+            bool captureReady = false;
+            const bool verbose = std::getenv("MACFW_VERBOSE") != nullptr;
+            CFAbsoluteTime lastGenerationCheck = CFAbsoluteTimeGetCurrent();
+            CFAbsoluteTime lastStatus = lastGenerationCheck;
+            std::uint64_t lastCaptureFrames = 0;
+
+            while (!gStopRequested) {
+                pacer.wait();
+
+                capturePump.service(rx, *captureShared.ring());
+                drainPlayback(*playbackShared.ring(), pcm, audio, mapped,
+                              &playbackPumpStats);
+
+                UInt32 nowCycleTime = 0;
+                if ((*device.nativeHandle())->GetCycleTime(
+                        device.nativeHandle(), &nowCycleTime) == kIOReturnSuccess)
+                    streamer.service(cycleCount(nowCycleTime));
+
+                capturePump.service(rx, *captureShared.ring());
+
+                if (!captureReady &&
+                    captureShared.activateForConsumer(kCapturePrefillFrames)) {
+                    captureReady = true;
+                    std::cout << "FW1814 capture consumer detected; live capture enabled\n";
                 }
-                lastGenerationCheck = now;
+
+                const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+                if (now - lastGenerationCheck >= 0.25) {
+                    if (!lifecycle.generationStillValid()) {
+                        std::cerr << "FW1814 FireWire generation changed during streaming; "
+                                     "requesting engine restart\n";
+                        audioFinished.store(true, std::memory_order_release);
+                        return;
+                    }
+                    lastGenerationCheck = now;
+                }
+
+                if (verbose && now - lastStatus >= 2.0) {
+                    const auto captureFrames =
+                        captureShared.ring()->decodedFrames.load(std::memory_order_acquire);
+                    const auto& txStats = streamer.stats();
+                    const auto& rxStats = capturePump.stats();
+                    const auto* pb = playbackShared.ring();
+                    std::cout << "FW1814 out-shared="
+                              << macfw::fw1814::hal::availableFrames(*pb)
+                              << " pcm=" << pcm.availableFrames()
+                              << " tx-audio=" << txStats.framesFromBuffer
+                              << " tx-silence=" << txStats.framesSilenced
+                              << " tx-late=" << txStats.lateCyclePolls
+                              << " hal-calls=" << pb->doIOCalls.load(std::memory_order_relaxed)
+                              << " hal-frames=" << pb->doIOFrames.load(std::memory_order_relaxed)
+                              << " hal-drop=" << pb->droppedFrames.load(std::memory_order_relaxed)
+                              << " in-peak=" << playbackPumpStats.peakAbs
+                              << " clip=" << playbackPumpStats.clippedSamples
+                              << " nonfinite=" << playbackPumpStats.nonFiniteSamples
+                              << " | capture=" << captureFrames
+                              << " (delta " << (captureFrames - lastCaptureFrames) << ')'
+                              << " queued="
+                              << macfw::fw1814::hal::capture::availableFrames(*captureShared.ring())
+                              << " rx-touched=" << rx.touchedCount() << '/' << rx.packetCount()
+                              << " chunks=" << rxStats.completedChunks
+                              << " malformed=" << captureShared.ring()->malformedPackets.load()
+                              << " invalid=" << captureShared.ring()->invalidLabels.load()
+                              << " nodata=" << rxStats.noDataPackets
+                              << " dbc-gap=" << rxStats.dbcDiscontinuities
+                              << " reorder=" << rxStats.reorderedPackets
+                              << " stale=" << rxStats.stalePackets << '\n';
+                    lastCaptureFrames = captureFrames;
+                    lastStatus = now;
+                }
             }
 
-            if (verbose && now - lastStatus >= 2.0) {
-                const auto captureFrames =
-                    captureShared.ring()->decodedFrames.load(std::memory_order_acquire);
-                const auto& txStats = streamer.stats();
-                const auto& rxStats = capturePump.stats();
-                const auto* pb = playbackShared.ring();
-                std::cout << "FW1814 out-shared="
-                          << macfw::fw1814::hal::availableFrames(*pb)
-                          << " pcm=" << pcm.availableFrames()
-                          << " tx-audio=" << txStats.framesFromBuffer
-                          << " tx-silence=" << txStats.framesSilenced
-                          << " tx-late=" << txStats.lateCyclePolls
-                          << " hal-calls=" << pb->doIOCalls.load(std::memory_order_relaxed)
-                          << " hal-frames=" << pb->doIOFrames.load(std::memory_order_relaxed)
-                          << " hal-drop=" << pb->droppedFrames.load(std::memory_order_relaxed)
-                          << " in-peak=" << playbackPumpStats.peakAbs
-                          << " clip=" << playbackPumpStats.clippedSamples
-                          << " nonfinite=" << playbackPumpStats.nonFiniteSamples
-                          << " | capture=" << captureFrames
-                          << " (delta " << (captureFrames - lastCaptureFrames) << ')'
-                          << " queued="
-                          << macfw::fw1814::hal::capture::availableFrames(*captureShared.ring())
-                          << " rx-touched=" << rx.touchedCount() << '/' << rx.packetCount()
-                          << " chunks=" << rxStats.completedChunks
-                          << " malformed=" << captureShared.ring()->malformedPackets.load()
-                          << " invalid=" << captureShared.ring()->invalidLabels.load()
-                          << " nodata=" << rxStats.noDataPackets
-                          << " dbc-gap=" << rxStats.dbcDiscontinuities
-                          << " reorder=" << rxStats.reorderedPackets
-                          << " stale=" << rxStats.stalePackets << '\n';
-                lastCaptureFrames = captureFrames;
-                lastStatus = now;
-            }
-        }
+            audioOk = true;
+            audioFinished.store(true, std::memory_order_release);
+        });
 
-        ok = true;
+        // Keep the FireWire general callback dispatcher alive independently of
+        // the realtime audio service. This is the same scheduling separation
+        // used by the released FW410 runtime.
+        while (!gStopRequested && !audioFinished.load(std::memory_order_acquire))
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+
+        audioThread.join();
+        ok = audioOk;
     }
 
 cleanup:
@@ -268,6 +302,7 @@ cleanup:
     const bool restoreOk = lifecycle.stopIsochAndRestoreCmp();
     fcp.reset();
     lifecycle.removeDispatchers();
+    isochCallbackThread.stop();
     lifecycle.stop();
 
     if (!restoreOk && ok) ok = false;
