@@ -33,8 +33,13 @@ constexpr UInt32 kPlaybackMaxPacket = 232;
 // Keep the first integrated engine on the exact receive-ring geometry that is
 // already hardware-proven by duplex-blocking-raw (touched slots: 64/64).
 constexpr std::size_t kCaptureSlots = 64;
-constexpr std::size_t kTxPackets = 128;
-constexpr std::size_t kTxHalfPackets = 64;
+// Dynamic playback needs substantially more time between consuming a half and
+// OHCI looping back to the same mapped payloads. Match the released FW410
+// production geometry: 640 cycles total, refilled in 320-cycle halves.
+// At 48 kHz blocking mode this is 80 ms total / 40 ms per half. The 3/1
+// data/NODATA cadence, DBC, SYT and maximum packet size are unchanged.
+constexpr std::size_t kTxPackets = 640;
+constexpr std::size_t kTxHalfPackets = 320;
 constexpr std::size_t kPcmCapacityFrames = 16384;
 constexpr std::size_t kCapturePrefillFrames = 512;
 constexpr UInt32 kCycleLead = 256;
