@@ -116,6 +116,9 @@ bool run() {
             std::cerr << "FW1814 playback stream prime failed\n";
             goto cleanup;
         }
+        std::cout << "FW1814 playback TX ring: " << kTxPackets
+                  << " packets / " << kTxHalfPackets
+                  << "-packet halves (80 ms / 40 ms)\n";
 
         if (!lifecycle.prepare(device, rx, tx.nativeLocalPort(),
                                kCaptureMaxPacket, kPlaybackMaxPacket)) {
