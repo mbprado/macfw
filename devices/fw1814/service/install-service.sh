@@ -17,13 +17,14 @@ LOG="/Library/Logs/macfw-fw1814-transport.log"
 SUPERVISOR="$FW1814_DIR/transport/fw1814supervisor"
 ENGINE="$FW1814_DIR/transport/fw1814analog48"
 INIT="$FW1814_DIR/tools/fw1814init"
+BOOT="$FW1814_DIR/tools/fwboot1814"
 
-for file in "$SUPERVISOR" "$ENGINE" "$INIT"; do
+for file in "$SUPERVISOR" "$ENGINE" "$INIT" "$BOOT"; do
     if [[ ! -x "$file" ]]; then
         echo "error: required FW1814 runtime binary is missing or not executable: $file" >&2
         echo "build with:" >&2
         echo "  make -C devices/fw1814/transport clean all" >&2
-        echo "  make -C devices/fw1814/tools fw1814init" >&2
+        echo "  make -C devices/fw1814/tools init-tool boot-tool" >&2
         exit 1
     fi
 done
@@ -34,6 +35,7 @@ install -d -o root -g wheel -m 0755 "$BIN_DIR"
 install -o root -g wheel -m 0755 "$SUPERVISOR" "$BIN_DIR/fw1814supervisor"
 install -o root -g wheel -m 0755 "$ENGINE" "$BIN_DIR/fw1814analog48"
 install -o root -g wheel -m 0755 "$INIT" "$BIN_DIR/fw1814init"
+install -o root -g wheel -m 0755 "$BOOT" "$BIN_DIR/fwboot1814"
 
 install -o root -g wheel -m 0644 \
     "$SCRIPT_DIR/com.mbprado.macfw.fw1814.transport.plist" "$LAUNCHD_PLIST"
@@ -48,4 +50,5 @@ launchctl kickstart -k system/$LABEL
 
 echo "installed macfw FW1814 transport runtime: $INSTALL_ROOT"
 echo "loaded launchd service: $LABEL"
+echo "automatic reconnect + guarded bootloader recovery: enabled"
 echo "log: $LOG"
