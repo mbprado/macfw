@@ -2,7 +2,7 @@
 
 Date: 2026-09-07
 
-This records the first successful production-style dynamic full-duplex analog path for the M-Audio FireWire 1814 on macOS, including the first clean CoreAudio playback through the FW1814 HAL.
+This records the first successful production-style dynamic full-duplex analog path for the M-Audio FireWire 1814 on macOS, including clean CoreAudio playback and capture through the FW1814 HAL.
 
 ## Scope
 
@@ -149,7 +149,7 @@ Manufacturer: macfw
 
 The HAL itself performs no FireWire access. It exchanges playback and capture through the FW1814 SHM ABI while `fw1814analog48` remains the sole FireWire owner.
 
-Clean CoreAudio playback has now been confirmed end-to-end:
+Clean CoreAudio playback has been confirmed end-to-end:
 
 ```text
 CoreAudio application
@@ -161,20 +161,32 @@ CoreAudio application
  -> physical analog output
 ```
 
-CoreAudio-facing capture SHM and physical Input 1 decoding were also confirmed through the capture consumer path.
+Clean CoreAudio capture has also been confirmed from a normal recording application:
+
+```text
+physical analog input
+ -> FireWire AMDTP capture
+ -> fw1814analog48
+ -> capture SHM
+ -> FW1814 HAL
+ -> CoreAudio recording application
+```
+
+Playback and capture remain clean together after the 640/320 TX-ring geometry fix.
 
 ## Proven milestone
 
-The FW1814 now has a hardware-proven dynamic 48 kHz full-duplex analog transport and first working CoreAudio HAL integration:
+The FW1814 now has a hardware-proven dynamic 48 kHz full-duplex analog transport and working fixed-48k CoreAudio HAL integration:
 
 - 4 verified analog playback channels;
 - 8 verified analog capture channels;
 - correct 48 kHz blocking AMDTP cadence;
 - clean arbitrary-frequency playback with 640/320 TX geometry;
 - clean real CoreAudio playback;
+- clean CoreAudio capture in a normal recording application;
 - continuous 48 kHz capture;
 - generation-safe teardown;
 - correlated FCP rate controls;
 - fixed-48k AudioServerPlugIn visible to macOS as a 4-out / 8-in FireWire device.
 
-Next steps are CoreAudio capture validation from a normal recording application, then automatic FW1814 transport supervision. 44.1 kHz support remains a separate later transport task and must use the correct blocking cadence for that rate rather than assuming the 48 kHz pattern.
+The next integration step is automatic FW1814 transport supervision at fixed 48 kHz. 44.1 kHz support remains a separate later transport task and must use the correct blocking cadence for that rate rather than assuming the 48 kHz pattern.
