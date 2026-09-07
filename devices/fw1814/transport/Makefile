@@ -10,10 +10,11 @@ HAL_INCLUDE := ../hal/include
 ANALOG48 := fw1814analog48
 SHM_TEST := fw1814shmtest
 SUPERVISOR := fw1814supervisor
+DUPLEX44_PROBE := fw1814duplex44
 
-.PHONY: all analog48 shm-test supervisor clean
+.PHONY: all analog48 shm-test supervisor duplex44-probe clean
 
-all: $(ANALOG48) $(SHM_TEST) $(SUPERVISOR)
+all: $(ANALOG48) $(SHM_TEST) $(SUPERVISOR) $(DUPLEX44_PROBE)
 
 $(LIBMACFW):
 	$(MAKE) -C ../../../fw410/lib libmacfw.a
@@ -33,11 +34,18 @@ $(SHM_TEST): shm_test.cpp ../hal/include/macfw_fw1814_hal_shm.h \
 $(SUPERVISOR): supervisor_main.cpp ../hal/include/macfw_fw1814_hal_shm.h
 	$(CXX) $(CXXFLAGS) -I$(DEVICE_INCLUDE) -I$(HAL_INCLUDE) supervisor_main.cpp -o $@
 
+$(DUPLEX44_PROBE): ../tools/fw1814duplex44.cpp blocking_pcm_tx44.h \
+	duplex_lifecycle.h realtime_service.h ../fcp_control.h $(LIBMACFW)
+	$(CXX) $(CXXFLAGS) -I$(LIBMACFW_INCLUDE) -I$(DEVICE_INCLUDE) -I$(HAL_INCLUDE) \
+		../tools/fw1814duplex44.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
+
 analog48: $(ANALOG48)
 
 shm-test: $(SHM_TEST)
 
 supervisor: $(SUPERVISOR)
 
+duplex44-probe: $(DUPLEX44_PROBE)
+
 clean:
-	rm -f $(ANALOG48) $(SHM_TEST) $(SUPERVISOR)
+	rm -f $(ANALOG48) $(SHM_TEST) $(SUPERVISOR) $(DUPLEX44_PROBE)
