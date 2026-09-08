@@ -23,6 +23,10 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 
+bool supportedRate(std::uint32_t rate) {
+    return rate == 44100 || rate == 48000;
+}
+
 struct PlaybackMapping {
     int fd = -1;
     macfw::fw1814::hal::SharedPlaybackRing* ring = nullptr;
@@ -41,7 +45,8 @@ struct CaptureMapping {
     }
 };
 
-bool initPlayback() {
+bool initPlayback(std::uint32_t rate) {
+    if (!supportedRate(rate)) return false;
     const char* name = macfw::fw1814::hal::kPlaybackShmName;
     const int fd = shm_open(name, O_CREAT | O_RDWR, 0666);
     if (fd < 0) {
@@ -67,12 +72,12 @@ bool initPlayback() {
     }
 
     auto* ring = static_cast<macfw::fw1814::hal::SharedPlaybackRing*>(p);
-    macfw::fw1814::hal::initialize(*ring, 48000);
+    macfw::fw1814::hal::initialize(*ring, rate);
     munmap(p, bytes);
     close(fd);
     std::cout << "initialized " << name
-              << " as 48000 Hz / 4 physical analog outputs (" << bytes
-              << " bytes)\n";
+              << " as " << rate << " Hz / 4 physical analog outputs ("
+              << bytes << " bytes)\n";
     return true;
 }
 
@@ -98,15 +103,21 @@ bool openCapture(CaptureMapping& m) {
 
 bool tone(unsigned output, double frequency = 500.0) {
     if (output < 1 || output > macfw::fw1814::hal::kOutputChannels ||
-        !std::isfinite(frequency) || frequency <= 0.0 || frequency >= 24000.0)
+        !std::isfinite(frequency) || frequency <= 0.0)
         return false;
     PlaybackMapping m;
     if (!openPlayback(m)) {
-        std::cerr << "playback SHM unavailable; run --init first\n";
+        std::cerr << "playback SHM unavailable; run --init [44100|48000] first\n";
         return false;
     }
-    if (m.ring->sampleRate.load(std::memory_order_acquire) != 48000) {
-        std::cerr << "playback SHM is not 48000 Hz\n";
+    const std::uint32_t rate =
+        m.ring->sampleRate.load(std::memory_order_acquire);
+    if (!supportedRate(rate)) {
+        std::cerr << "playback SHM has unsupported sample rate " << rate << " Hz\n";
+        return false;
+    }
+    if (frequency >= static_cast<double>(rate) / 2.0) {
+        std::cerr << "tone frequency must be below Nyquist for " << rate << " Hz\n";
         return false;
     }
     if (m.ring->active.load(std::memory_order_acquire) == 0) {
@@ -114,15 +125,16 @@ bool tone(unsigned output, double frequency = 500.0) {
         return false;
     }
 
-    constexpr std::size_t kChunkFrames = 960; // 20 ms generation chunk
-    constexpr std::size_t kTotalFrames = 48000 * 3;
+    const std::size_t kChunkFrames = static_cast<std::size_t>(rate / 50); // 20 ms
+    const std::size_t kTotalFrames = static_cast<std::size_t>(rate) * 3;
     constexpr double kAmplitude = 0.06309573444801933; // -24 dBFS peak
     std::vector<float> block(
         kChunkFrames * macfw::fw1814::hal::kOutputChannels, 0.0f);
     std::uint64_t sampleIndex = 0;
     std::size_t produced = 0;
 
-    std::cout << frequency << " Hz / -24 dBFS -> physical Analog Output " << output
+    std::cout << frequency << " Hz / -24 dBFS / " << rate
+              << " Hz -> physical Analog Output " << output
               << " for 3 seconds (buffered producer)\n";
 
     while (produced < kTotalFrames) {
@@ -132,7 +144,7 @@ bool tone(unsigned output, double frequency = 500.0) {
             std::fill_n(block.data() + frame * macfw::fw1814::hal::kOutputChannels,
                         macfw::fw1814::hal::kOutputChannels, 0.0f);
             const double phase = 2.0 * kPi * frequency *
-                static_cast<double>(sampleIndex++) / 48000.0;
+                static_cast<double>(sampleIndex++) / static_cast<double>(rate);
             block[frame * macfw::fw1814::hal::kOutputChannels + (output - 1)] =
                 static_cast<float>(std::sin(phase) * kAmplitude);
         }
@@ -160,8 +172,6 @@ bool tone(unsigned output, double frequency = 500.0) {
         produced += framesThisChunk;
     }
 
-    // Wait until the engine has consumed the complete queued tone so command
-    // completion corresponds to audible completion, not merely producer EOF.
     const std::uint64_t targetRead =
         m.ring->writeFrame.load(std::memory_order_acquire);
     const auto deadline =
@@ -178,7 +188,7 @@ bool tone(unsigned output, double frequency = 500.0) {
 bool captureMeter(unsigned seconds) {
     CaptureMapping m;
     if (!openCapture(m)) {
-        std::cerr << "capture SHM unavailable; start fw1814analog48 first\n";
+        std::cerr << "capture SHM unavailable; start fw1814analog44/48 first\n";
         return false;
     }
 
@@ -220,6 +230,7 @@ bool captureMeter(unsigned seconds) {
             std::cout << " queued="
                       << macfw::fw1814::hal::capture::availableFrames(*m.ring)
                       << " active=" << (active ? 1 : 0)
+                      << " rate=" << m.ring->sampleRate.load(std::memory_order_relaxed)
                       << '\n';
             peaks.fill(0.0f);
             nextPrint += std::chrono::milliseconds(500);
@@ -231,7 +242,7 @@ bool captureMeter(unsigned seconds) {
 
 void usage(const char* argv0) {
     std::cerr << "usage:\n"
-              << "  " << argv0 << " --init\n"
+              << "  " << argv0 << " --init [44100|48000]\n"
               << "  " << argv0 << " --tone <1..4> [frequency-hz]\n"
               << "  " << argv0 << " --capture-meter [seconds]\n";
 }
@@ -244,8 +255,17 @@ int main(int argc, char** argv) {
         return 64;
     }
     const std::string arg = argv[1];
-    if (arg == "--init" && argc == 2)
-        return initPlayback() ? 0 : 1;
+    if (arg == "--init" && (argc == 2 || argc == 3)) {
+        try {
+            const std::uint32_t rate = argc == 3
+                ? static_cast<std::uint32_t>(std::stoul(argv[2]))
+                : 48000u;
+            return initPlayback(rate) ? 0 : 1;
+        } catch (...) {
+            usage(argv[0]);
+            return 64;
+        }
+    }
     if (arg == "--tone" && (argc == 3 || argc == 4)) {
         try {
             const unsigned output = static_cast<unsigned>(std::stoul(argv[2]));
