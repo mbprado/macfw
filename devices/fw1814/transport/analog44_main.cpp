@@ -14,8 +14,8 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/firewire/IOFireWireLib.h>
 
-#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
@@ -33,11 +33,15 @@ constexpr UInt32 kPlaybackMaxPacket = 232;
 constexpr std::size_t kCaptureSlots = 256;
 constexpr std::size_t kTxPackets = 640;
 constexpr std::size_t kTxHalfPackets = 320;
+// Match the hardware-clean native 44.1 tone probe for this diagnostic.  Its
+// preloaded 262144-frame PCM ring removes concurrent small-ring pressure from
+// the comparison, leaving the SHM float conversion as the only added stage.
 constexpr std::size_t kPcmCapacityFrames = 262144;
 constexpr std::size_t kCapturePrefillFrames = 512;
 constexpr UInt32 kCycleLead = 2048;
 constexpr UInt32 kCyclesPerSecond = 8000;
 constexpr std::uint64_t kAudioServicePeriodNs = 250000;
+constexpr double kPi = 3.14159265358979323846;
 constexpr std::size_t kPrimePcmFrames = 441 * 8;
 constexpr std::size_t kWarmupPcmFrames = 2 * kRate;
 
@@ -52,20 +56,36 @@ UInt32 cycleDelta(UInt32 newer, UInt32 older) {
     return (newer + kCyclesPerSecond - older) % kCyclesPerSecond;
 }
 
-bool preloadPcmSilence(macfw::PcmRingBuffer& pcm,
-                       const std::vector<std::int32_t>& silence,
-                       std::size_t framesToWrite) {
-    if (!pcm.valid() || silence.empty() ||
-        silence.size() % pcm.channelCount() != 0)
+bool preloadDiagnosticAudio(macfw::PcmRingBuffer& pcm,
+                            double frequency,
+                            std::size_t frames) {
+    if (!pcm.valid() || !std::isfinite(frequency) || frequency < 0.0 ||
+        frequency >= static_cast<double>(kRate) / 2.0 || frames == 0 ||
+        frames > pcm.capacityFrames())
         return false;
-    const std::size_t scratchFrames = silence.size() / pcm.channelCount();
-    while (framesToWrite != 0) {
-        const std::size_t frames = std::min(framesToWrite, scratchFrames);
-        if (pcm.write(silence.data(), frames) != frames)
-            return false;
-        framesToWrite -= frames;
+
+    constexpr double amplitude = 0.06309573444801933; // -24 dBFS peak
+    std::vector<std::int32_t> samples(
+        frames * macfw::fw1814::kPlaybackPcmPositions, 0);
+    const std::size_t position =
+        macfw::fw1814::kPlaybackPositionForAnalogOutput[0];
+    if (frequency > 0.0) {
+        for (std::size_t frame = 0; frame < frames; ++frame) {
+            const double phase = 2.0 * kPi * frequency *
+                static_cast<double>(frame) / static_cast<double>(kRate);
+            samples[frame * macfw::fw1814::kPlaybackPcmPositions + position] =
+                static_cast<std::int32_t>(
+                    std::sin(phase) * amplitude * 8388607.0);
+        }
     }
-    return true;
+    const std::size_t written = pcm.write(samples.data(), frames);
+    std::cout << "FW1814 44.1 diagnostic PCM preload: " << written << '/'
+              << frames << " frames, ";
+    if (frequency == 0.0)
+        std::cout << "digital silence\n";
+    else
+        std::cout << frequency << " Hz on Analog Output 1\n";
+    return written == frames;
 }
 
 bool serviceTxFor(IOFireWireLibDeviceRef native,
@@ -132,11 +152,29 @@ bool run() {
 
         macfw::PcmRingBuffer pcm(kPcmCapacityFrames,
                                  macfw::fw1814::kPlaybackPcmPositions);
-        std::vector<std::int32_t> warmupSilence(
-            4096 * macfw::fw1814::kPlaybackPcmPositions, 0);
-        if (!preloadPcmSilence(pcm, warmupSilence, kWarmupPcmFrames)) {
-            std::cerr << "FW1814 44.1 PCM-silence prime failed\n";
-            goto cleanup;
+        if (const char* diagnosticTone =
+                std::getenv("MACFW_44_PRELOAD_TONE_HZ")) {
+            const double frequency = std::strtod(diagnosticTone, nullptr);
+            if (!preloadDiagnosticAudio(pcm, frequency, 5 * kRate)) {
+                std::cerr << "FW1814 44.1 diagnostic audio preload failed\n";
+                goto cleanup;
+            }
+        } else if (std::getenv("MACFW_44_PRIME_SILENCE")) {
+            if (!preloadDiagnosticAudio(pcm, 0.0, kPrimePcmFrames)) {
+                std::cerr << "FW1814 44.1 prime-silence diagnostic failed\n";
+                goto cleanup;
+            }
+        } else {
+            const char* diagnosticFrames =
+                std::getenv("MACFW_44_PRIME_SILENCE_FRAMES");
+            const std::size_t frames = diagnosticFrames
+                ? static_cast<std::size_t>(
+                      std::strtoull(diagnosticFrames, nullptr, 10))
+                : kWarmupPcmFrames;
+            if (!preloadDiagnosticAudio(pcm, 0.0, frames)) {
+                std::cerr << "FW1814 44.1 silence preload failed\n";
+                goto cleanup;
+            }
         }
         auto rx = macfw::AmdtpReceiveRing::create(
             device, kCaptureSlots, kCaptureMaxPacket);
@@ -243,15 +281,8 @@ bool run() {
         }
         std::cout << "FW1814 post-start INPUT rate readback: 44100 Hz PASS\n";
 
-        // Linux snd-bebob starts the duplex AMDTP domain, reapplies the rate
-        // for M-Audio special firmware, and then waits for stream readiness.
-        // Hardware testing shows that FW1814 native 44.1 playback likewise
-        // needs two seconds of uninterrupted PCM-backed silence before client
-        // audio is admitted.  Count frames rather than wall time so NODATA
-        // cycles do not shorten the warm-up.
-        const std::uint64_t liveWarmupTarget =
-            kWarmupPcmFrames - kPrimePcmFrames;
-        playbackShared.ring()->active.store(0, std::memory_order_release);
+        playbackShared.ring()->active.store(1, std::memory_order_release);
+        playbackActive = true;
 
         CapturePump44100 capturePump;
         PlaybackPumpStats playbackPumpStats;
@@ -260,8 +291,19 @@ bool run() {
         std::vector<std::int32_t> mapped(
             4096 * macfw::fw1814::kPlaybackPcmPositions, 0);
 
+        std::cout << "FW1814 44.1 analog engine ONLINE\n"
+                  << "    CoreAudio-facing outputs: Analog 1-4\n"
+                  << "    CoreAudio-facing inputs:  Analog 1-8\n"
+                  << "    digital/MIDI/headphone routing: deferred\n"
+                  << "    audio service: dedicated Mach-paced thread (250 us)\n"
+                  << "    Ctrl-C to stop\n";
+
         std::atomic<bool> audioFinished{false};
         bool audioOk = false;
+        const bool playbackOnlyDiagnostic =
+            std::getenv("MACFW_44_PLAYBACK_ONLY") != nullptr;
+        if (playbackOnlyDiagnostic)
+            std::cout << "FW1814 44.1 diagnostic: capture pumping disabled\n";
 
         std::thread audioThread([&] {
             requestInteractiveQos("FW1814 44.1 audio service thread");
@@ -274,62 +316,33 @@ bool run() {
             }
 
             bool captureReady = false;
-            bool warmupComplete = false;
             const bool verbose = std::getenv("MACFW_VERBOSE") != nullptr;
             CFAbsoluteTime lastGenerationCheck = CFAbsoluteTimeGetCurrent();
             CFAbsoluteTime lastStatus = lastGenerationCheck;
-            const CFAbsoluteTime warmupDeadline = lastGenerationCheck + 4.0;
             std::uint64_t lastCaptureFrames = 0;
 
             while (!gStopRequested) {
                 pacer.wait();
 
-                capturePump.service(rx, *captureShared.ring());
-                if (warmupComplete) {
-                    drainPlayback(*playbackShared.ring(), pcm, audio, mapped,
-                                  &playbackPumpStats);
-                }
+                if (!playbackOnlyDiagnostic)
+                    capturePump.service(rx, *captureShared.ring());
+                drainPlayback(*playbackShared.ring(), pcm, audio, mapped,
+                              &playbackPumpStats);
 
                 UInt32 serviceCycleTime = 0;
                 if ((*native)->GetCycleTime(native, &serviceCycleTime) == kIOReturnSuccess)
                     streamer.service(cycleCount(serviceCycleTime));
 
-                capturePump.service(rx, *captureShared.ring());
+                if (!playbackOnlyDiagnostic)
+                    capturePump.service(rx, *captureShared.ring());
 
-                const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
-                if (!warmupComplete &&
-                    streamer.stats().framesFromBuffer >= liveWarmupTarget) {
-                    if (pcm.availableFrames() != 0) {
-                        std::cerr << "FW1814 44.1 PCM-silence warm-up did not drain exactly\n";
-                        audioFinished.store(true, std::memory_order_release);
-                        return;
-                    }
-                    warmupComplete = true;
-                    playbackShared.ring()->active.store(
-                        1, std::memory_order_release);
-                    playbackActive = true;
-                    std::cout << "FW1814 44.1 PCM-silence warm-up: "
-                              << (kPrimePcmFrames +
-                                  streamer.stats().framesFromBuffer)
-                              << " frames PASS\n"
-                              << "FW1814 44.1 analog engine ONLINE\n"
-                              << "    CoreAudio-facing outputs: Analog 1-4\n"
-                              << "    CoreAudio-facing inputs:  Analog 1-8\n"
-                              << "    digital/MIDI/headphone routing: deferred\n"
-                              << "    audio service: dedicated Mach-paced thread (250 us)\n"
-                              << "    Ctrl-C to stop\n";
-                } else if (!warmupComplete && now >= warmupDeadline) {
-                    std::cerr << "FW1814 44.1 PCM-silence warm-up timed out\n";
-                    audioFinished.store(true, std::memory_order_release);
-                    return;
-                }
-
-                if (!captureReady &&
+                if (!playbackOnlyDiagnostic && !captureReady &&
                     captureShared.activateForConsumer(kCapturePrefillFrames)) {
                     captureReady = true;
                     std::cout << "FW1814 44.1 capture consumer detected; live capture enabled\n";
                 }
 
+                const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
                 if (now - lastGenerationCheck >= 0.25) {
                     if (!lifecycle.generationStillValid()) {
                         std::cerr << "FW1814 FireWire generation changed during 44.1 streaming; requesting engine restart\n";
@@ -374,7 +387,7 @@ bool run() {
                 }
             }
 
-            audioOk = warmupComplete;
+            audioOk = true;
             audioFinished.store(true, std::memory_order_release);
         });
 
