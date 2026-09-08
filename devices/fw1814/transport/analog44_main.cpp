@@ -240,6 +240,10 @@ bool run() {
 
         std::atomic<bool> audioFinished{false};
         bool audioOk = false;
+        const bool playbackOnlyDiagnostic =
+            std::getenv("MACFW_44_PLAYBACK_ONLY") != nullptr;
+        if (playbackOnlyDiagnostic)
+            std::cout << "FW1814 44.1 diagnostic: capture pumping disabled\n";
 
         std::thread audioThread([&] {
             requestInteractiveQos("FW1814 44.1 audio service thread");
@@ -260,7 +264,8 @@ bool run() {
             while (!gStopRequested) {
                 pacer.wait();
 
-                capturePump.service(rx, *captureShared.ring());
+                if (!playbackOnlyDiagnostic)
+                    capturePump.service(rx, *captureShared.ring());
                 drainPlayback(*playbackShared.ring(), pcm, audio, mapped,
                               &playbackPumpStats);
 
@@ -268,9 +273,10 @@ bool run() {
                 if ((*native)->GetCycleTime(native, &serviceCycleTime) == kIOReturnSuccess)
                     streamer.service(cycleCount(serviceCycleTime));
 
-                capturePump.service(rx, *captureShared.ring());
+                if (!playbackOnlyDiagnostic)
+                    capturePump.service(rx, *captureShared.ring());
 
-                if (!captureReady &&
+                if (!playbackOnlyDiagnostic && !captureReady &&
                     captureShared.activateForConsumer(kCapturePrefillFrames)) {
                     captureReady = true;
                     std::cout << "FW1814 44.1 capture consumer detected; live capture enabled\n";
