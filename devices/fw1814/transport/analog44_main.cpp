@@ -42,6 +42,7 @@ constexpr UInt32 kCycleLead = 2048;
 constexpr UInt32 kCyclesPerSecond = 8000;
 constexpr std::uint64_t kAudioServicePeriodNs = 250000;
 constexpr double kPi = 3.14159265358979323846;
+constexpr std::size_t kPrimePcmFrames = 441 * 8;
 
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
@@ -54,12 +55,14 @@ UInt32 cycleDelta(UInt32 newer, UInt32 older) {
     return (newer + kCyclesPerSecond - older) % kCyclesPerSecond;
 }
 
-bool preloadDiagnosticAudio(macfw::PcmRingBuffer& pcm, double frequency) {
+bool preloadDiagnosticAudio(macfw::PcmRingBuffer& pcm,
+                            double frequency,
+                            std::size_t frames) {
     if (!pcm.valid() || !std::isfinite(frequency) || frequency < 0.0 ||
-        frequency >= static_cast<double>(kRate) / 2.0)
+        frequency >= static_cast<double>(kRate) / 2.0 || frames == 0 ||
+        frames > pcm.capacityFrames())
         return false;
 
-    constexpr std::size_t frames = 5 * kRate;
     constexpr double amplitude = 0.06309573444801933; // -24 dBFS peak
     std::vector<std::int32_t> samples(
         frames * macfw::fw1814::kPlaybackPcmPositions, 0);
@@ -151,8 +154,13 @@ bool run() {
         if (const char* diagnosticTone =
                 std::getenv("MACFW_44_PRELOAD_TONE_HZ")) {
             const double frequency = std::strtod(diagnosticTone, nullptr);
-            if (!preloadDiagnosticAudio(pcm, frequency)) {
+            if (!preloadDiagnosticAudio(pcm, frequency, 5 * kRate)) {
                 std::cerr << "FW1814 44.1 diagnostic audio preload failed\n";
+                goto cleanup;
+            }
+        } else if (std::getenv("MACFW_44_PRIME_SILENCE")) {
+            if (!preloadDiagnosticAudio(pcm, 0.0, kPrimePcmFrames)) {
+                std::cerr << "FW1814 44.1 prime-silence diagnostic failed\n";
                 goto cleanup;
             }
         }
