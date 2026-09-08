@@ -36,7 +36,8 @@ std::string executableDirectory(const char* argv0) {
     return ".";
 }
 
-bool halPlaybackReady() {
+bool requestedSampleRate(std::uint32_t& rate) {
+    rate = 0;
     const int fd = shm_open(macfw::fw1814::hal::kPlaybackShmName, O_RDWR, 0);
     if (fd < 0) return false;
 
@@ -46,8 +47,13 @@ bool halPlaybackReady() {
     if (p == MAP_FAILED) return false;
 
     auto* ring = static_cast<macfw::fw1814::hal::SharedPlaybackRing*>(p);
-    const bool ready = macfw::fw1814::hal::valid(*ring) &&
-                       ring->sampleRate.load(std::memory_order_acquire) == 48000;
+    bool ready = macfw::fw1814::hal::valid(*ring);
+    if (ready) {
+        const std::uint32_t requested =
+            ring->sampleRate.load(std::memory_order_acquire);
+        ready = requested == 44100 || requested == 48000;
+        if (ready) rate = requested;
+    }
     munmap(p, sizeof(*ring));
     return ready;
 }
@@ -88,6 +94,56 @@ int runChild(const std::string& path,
         if (r < 0) {
             if (errno == EINTR) continue;
             return 1;
+        }
+
+        if (gStopRequested) {
+            kill(pid, SIGTERM);
+            while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return 1;
+}
+
+int runEngine(const std::string& path,
+              std::uint32_t startedRate,
+              bool& rateChangeRequested) {
+    rateChangeRequested = false;
+    const pid_t pid = fork();
+    if (pid < 0) {
+        std::fprintf(stderr, "FW1814 supervisor fork failed for %s: %s\n",
+                     path.c_str(), std::strerror(errno));
+        return 1;
+    }
+
+    if (pid == 0) {
+        execl(path.c_str(), path.c_str(), static_cast<char*>(nullptr));
+        _exit(127);
+    }
+
+    int status = 0;
+    for (;;) {
+        const pid_t r = waitpid(pid, &status, WNOHANG);
+        if (r == pid) break;
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            return 1;
+        }
+
+        std::uint32_t requestedRate = 0;
+        if (!gStopRequested && requestedSampleRate(requestedRate) &&
+            requestedRate != startedRate) {
+            std::printf("FW1814 rate request changed: %u -> %u Hz; stopping current transport\n",
+                        startedRate, requestedRate);
+            rateChangeRequested = true;
+            kill(pid, SIGTERM);
+            while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+            break;
         }
 
         if (gStopRequested) {
@@ -154,9 +210,10 @@ int main(int argc, char** argv) {
     const std::string initPath = here + "/fw1814init";
     const std::string bootPath = here + "/fwboot1814";
     const std::string busResetPath = here + "/firewirebusreset";
-    const std::string enginePath = here + "/fw1814analog48";
+    const std::string engine48Path = here + "/fw1814analog48";
+    const std::string engine44Path = here + "/fw1814analog44";
 
-    std::printf("macfw fw1814supervisor — resilient fixed 48 kHz transport supervisor\n");
+    std::printf("macfw fw1814supervisor — resilient 44.1/48 kHz transport supervisor\n");
     std::printf("automatic reconnect and guarded bootloader recovery: enabled\n");
     std::printf("validated pre-transport FW1814 bus reset: enabled\n");
 
@@ -177,24 +234,27 @@ int main(int argc, char** argv) {
     bool cleanBusResetRequired = true;
 
     while (!gStopRequested) {
-        if (!halPlaybackReady()) {
+        std::uint32_t requestedRate = 0;
+        if (!requestedSampleRate(requestedRate)) {
             std::printf("FW1814 HAL shared memory not ready; waiting\n");
             do {
                 sleepInterruptibly(std::chrono::milliseconds(250));
-            } while (!gStopRequested && !halPlaybackReady());
+            } while (!gStopRequested && !requestedSampleRate(requestedRate));
             if (gStopRequested) break;
-            std::printf("FW1814 HAL shared memory ready at 48000 Hz\n");
+            std::printf("FW1814 HAL shared memory ready at %u Hz\n",
+                        requestedRate);
         }
 
-        std::printf("FW1814 applying validated init-48\n");
-        const int initStatus = runChild(initPath, "48000", "--execute");
+        const char* rateArg = requestedRate == 44100 ? "44100" : "48000";
+        std::printf("FW1814 applying validated init-%s\n", rateArg);
+        const int initStatus = runChild(initPath, rateArg, "--execute");
         if (gStopRequested) break;
 
         if (initStatus != 0) {
             std::fprintf(stderr,
-                         "FW1814 init-48 unavailable/failed with status %d; "
+                         "FW1814 init-%s unavailable/failed with status %d; "
                          "checking guarded bootloader personality\n",
-                         initStatus);
+                         rateArg, initStatus);
 
             const int bootStatus = runChild(bootPath, "--execute");
             if (gStopRequested) break;
@@ -235,6 +295,12 @@ int main(int argc, char** argv) {
 
         retryDelay = std::chrono::milliseconds(250);
 
+        std::uint32_t latestRate = 0;
+        if (!requestedSampleRate(latestRate) || latestRate != requestedRate) {
+            std::printf("FW1814 rate request changed during init; restarting selection\n");
+            continue;
+        }
+
         if (cleanBusResetRequired) {
             std::printf("FW1814 operational init PASS; performing validated clean bus reset before transport\n");
 
@@ -257,22 +323,35 @@ int main(int argc, char** argv) {
                 continue;
             }
 
-            std::printf("FW1814 clean bus reset PASS; waiting 3000 ms for re-enumeration before fresh init-48\n");
+            std::printf("FW1814 clean bus reset PASS; waiting 3000 ms for re-enumeration before fresh init-%s\n",
+                        rateArg);
             sleepInterruptibly(kCleanBusResetSettleDelay);
             continue;
         }
 
-        std::printf("FW1814 post-reset init-48 PASS; starting analog transport engine\n");
-        const int engineStatus = runChild(enginePath);
+        const std::string& enginePath =
+            requestedRate == 44100 ? engine44Path : engine48Path;
+        std::printf("FW1814 post-reset init-%s PASS; starting %s\n",
+                    rateArg, requestedRate == 44100
+                        ? "44.1 kHz analog transport engine"
+                        : "48 kHz analog transport engine");
+        bool rateChangeRequested = false;
+        const int engineStatus =
+            runEngine(enginePath, requestedRate, rateChangeRequested);
         if (gStopRequested) break;
 
         // Any engine exit outside supervisor shutdown means the next transport
         // start must pass through the validated clean bus-reset sequence again.
         cleanBusResetRequired = true;
-        std::fprintf(stderr,
-                     "FW1814 analog transport engine exited with status %d; "
-                     "clean bus reset required before next transport start\n",
-                     engineStatus);
+        if (rateChangeRequested) {
+            std::printf("FW1814 controlled rate handoff requested; "
+                        "clean bus reset required before next transport start\n");
+        } else {
+            std::fprintf(stderr,
+                         "FW1814 analog transport engine exited with status %d; "
+                         "clean bus reset required before next transport start\n",
+                         engineStatus);
+        }
         sleepInterruptibly(kPostEngineExitDelay);
     }
 

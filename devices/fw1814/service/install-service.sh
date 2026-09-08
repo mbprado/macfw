@@ -15,12 +15,13 @@ LABEL="com.mbprado.macfw.fw1814.transport"
 LOG="/Library/Logs/macfw-fw1814-transport.log"
 
 SUPERVISOR="$FW1814_DIR/transport/fw1814supervisor"
-ENGINE="$FW1814_DIR/transport/fw1814analog48"
+ENGINE48="$FW1814_DIR/transport/fw1814analog48"
+ENGINE44="$FW1814_DIR/transport/fw1814analog44"
 INIT="$FW1814_DIR/tools/fw1814init"
 BOOT="$FW1814_DIR/tools/fwboot1814"
 BUS_RESET="$FW1814_DIR/../../common/tools/firewirebusreset/firewirebusreset"
 
-for file in "$SUPERVISOR" "$ENGINE" "$INIT" "$BOOT" "$BUS_RESET"; do
+for file in "$SUPERVISOR" "$ENGINE48" "$ENGINE44" "$INIT" "$BOOT" "$BUS_RESET"; do
     if [[ ! -x "$file" ]]; then
         echo "error: required FW1814 runtime binary is missing or not executable: $file" >&2
         echo "build with:" >&2
@@ -34,7 +35,8 @@ launchctl bootout system/$LABEL >/dev/null 2>&1 || true
 
 install -d -o root -g wheel -m 0755 "$BIN_DIR"
 install -o root -g wheel -m 0755 "$SUPERVISOR" "$BIN_DIR/fw1814supervisor"
-install -o root -g wheel -m 0755 "$ENGINE" "$BIN_DIR/fw1814analog48"
+install -o root -g wheel -m 0755 "$ENGINE48" "$BIN_DIR/fw1814analog48"
+install -o root -g wheel -m 0755 "$ENGINE44" "$BIN_DIR/fw1814analog44"
 install -o root -g wheel -m 0755 "$INIT" "$BIN_DIR/fw1814init"
 install -o root -g wheel -m 0755 "$BOOT" "$BIN_DIR/fwboot1814"
 install -o root -g wheel -m 0755 "$BUS_RESET" "$BIN_DIR/firewirebusreset"
@@ -53,5 +55,6 @@ launchctl kickstart -k system/$LABEL
 echo "installed macfw FW1814 transport runtime: $INSTALL_ROOT"
 echo "loaded launchd service: $LABEL"
 echo "automatic reconnect + guarded bootloader recovery: enabled"
+echo "automatic 44.1/48 kHz transport selection: enabled"
 echo "validated clean bus reset before transport recovery: enabled"
 echo "log: $LOG"
