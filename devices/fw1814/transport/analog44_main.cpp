@@ -163,6 +163,14 @@ bool run() {
                 std::cerr << "FW1814 44.1 prime-silence diagnostic failed\n";
                 goto cleanup;
             }
+        } else if (const char* diagnosticFrames =
+                       std::getenv("MACFW_44_PRIME_SILENCE_FRAMES")) {
+            const std::size_t frames = static_cast<std::size_t>(
+                std::strtoull(diagnosticFrames, nullptr, 10));
+            if (!preloadDiagnosticAudio(pcm, 0.0, frames)) {
+                std::cerr << "FW1814 44.1 sized prime-silence diagnostic failed\n";
+                goto cleanup;
+            }
         }
         auto rx = macfw::AmdtpReceiveRing::create(
             device, kCaptureSlots, kCaptureMaxPacket);
