@@ -2,7 +2,7 @@
 
 The FW1814 is the second macfw device target.
 
-## Initial scope
+## Current scope
 
 The first bring-up intentionally mirrors the proven FW410 release scope:
 
@@ -24,6 +24,11 @@ FW1814 development is also the beginning of macfw's explicit multi-device layout
 - FW1814-specific stream geometry, clock/digital-mode handling, control protocol and GUI live under `devices/fw1814/`;
 - the released FW410 implementation remains the regression reference while this extraction happens.
 
-The FW1814 profile is currently **experimental** and contains no active installer/runtime identity match. The first task is to fingerprint the real development unit on macOS using read-only operations.
+The experimental FW1814 profile now has hardware-validated analog full-duplex
+transport and CoreAudio integration at both 44.1 and 48 kHz. Audio MIDI Setup
+can switch the nominal rate in either direction, the supervisor selects the
+matching transport engine, and disconnect/reconnect recovery restores the
+previously selected rate.
 
-See `analysis/bringup-plan.md`.
+See `analysis/dynamic-rate-switching-success.md` for the current validated
+checkpoint and `analysis/bringup-plan.md` for the original bring-up sequence.
