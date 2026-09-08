@@ -91,6 +91,23 @@ bool openPlayback(PlaybackMapping& m) {
     return macfw::fw1814::hal::valid(*m.ring);
 }
 
+bool setPlaybackRate(std::uint32_t rate) {
+    if (!supportedRate(rate)) return false;
+    PlaybackMapping m;
+    if (!openPlayback(m)) {
+        std::cerr << "playback SHM unavailable; HAL should create it first\n";
+        return false;
+    }
+    const auto w = m.ring->writeFrame.load(std::memory_order_acquire);
+    m.ring->readFrame.store(w, std::memory_order_release);
+    m.ring->active.store(0, std::memory_order_release);
+    m.ring->sampleRate.store(rate, std::memory_order_release);
+    std::cout << "updated existing " << macfw::fw1814::hal::kPlaybackShmName
+              << " in place to " << rate
+              << " Hz; backlog discarded, no resize/unlink performed\n";
+    return true;
+}
+
 bool openCapture(CaptureMapping& m) {
     m.fd = shm_open(macfw::fw1814::hal::capture::kShmName, O_RDWR, 0);
     if (m.fd < 0) return false;
@@ -107,7 +124,7 @@ bool tone(unsigned output, double frequency = 500.0) {
         return false;
     PlaybackMapping m;
     if (!openPlayback(m)) {
-        std::cerr << "playback SHM unavailable; run --init [44100|48000] first\n";
+        std::cerr << "playback SHM unavailable; run --init [44100|48000] only for standalone SHM creation\n";
         return false;
     }
     const std::uint32_t rate =
@@ -242,7 +259,8 @@ bool captureMeter(unsigned seconds) {
 
 void usage(const char* argv0) {
     std::cerr << "usage:\n"
-              << "  " << argv0 << " --init [44100|48000]\n"
+              << "  " << argv0 << " --init [44100|48000]   # standalone creation only\n"
+              << "  " << argv0 << " --set-rate <44100|48000>\n"
               << "  " << argv0 << " --tone <1..4> [frequency-hz]\n"
               << "  " << argv0 << " --capture-meter [seconds]\n";
 }
@@ -261,6 +279,15 @@ int main(int argc, char** argv) {
                 ? static_cast<std::uint32_t>(std::stoul(argv[2]))
                 : 48000u;
             return initPlayback(rate) ? 0 : 1;
+        } catch (...) {
+            usage(argv[0]);
+            return 64;
+        }
+    }
+    if (arg == "--set-rate" && argc == 3) {
+        try {
+            const std::uint32_t rate = static_cast<std::uint32_t>(std::stoul(argv[2]));
+            return setPlaybackRate(rate) ? 0 : 1;
         } catch (...) {
             usage(argv[0]);
             return 64;
