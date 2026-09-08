@@ -21,13 +21,15 @@ namespace {
 constexpr AudioObjectID kDeviceID = 2;
 constexpr AudioObjectID kOutputStreamID = 3;
 constexpr AudioObjectID kInputStreamID = 4;
-constexpr Float64 kSampleRate = 48000.0;
+constexpr Float64 kRate44100 = 44100.0;
+constexpr Float64 kRate48000 = 48000.0;
 constexpr UInt32 kOutputChannels = macfw::fw1814::hal::kOutputChannels;
 constexpr UInt32 kInputChannels = macfw::fw1814::hal::capture::kInputChannels;
 
 AudioServerPlugInHostRef gHost = nullptr;
 std::atomic<UInt32> gRefCount{1};
 std::atomic<UInt32> gRunningClients{0};
+std::atomic<std::uint32_t> gSampleRate{48000};
 UInt64 gStartHostTime = 0;
 mach_timebase_info_data_t gTimebase{};
 
@@ -42,6 +44,10 @@ static AudioServerPlugInDriverInterface* gInterfacePtr = &gInterface;
 bool IsKnownObject(AudioObjectID id) {
     return id == kAudioObjectPlugInObject || id == kDeviceID ||
            id == kOutputStreamID || id == kInputStreamID;
+}
+
+bool IsSupportedRate(std::uint32_t rate) {
+    return rate == 44100 || rate == 48000;
 }
 
 int OpenStableShm(const char* name, std::size_t bytes) {
@@ -115,9 +121,23 @@ bool MapPlaybackRing() {
     }
 
     gPlaybackRing = static_cast<macfw::fw1814::hal::SharedPlaybackRing*>(p);
-    if (!macfw::fw1814::hal::valid(*gPlaybackRing))
-        macfw::fw1814::hal::initialize(*gPlaybackRing, 48000);
-    gPlaybackRing->sampleRate.store(48000, std::memory_order_release);
+    if (!macfw::fw1814::hal::valid(*gPlaybackRing)) {
+        macfw::fw1814::hal::initialize(
+            *gPlaybackRing, gSampleRate.load(std::memory_order_relaxed));
+    } else {
+        const std::uint32_t persistedRate =
+            gPlaybackRing->sampleRate.load(std::memory_order_acquire);
+        if (IsSupportedRate(persistedRate)) {
+            gSampleRate.store(persistedRate, std::memory_order_relaxed);
+        } else {
+            const auto w =
+                gPlaybackRing->writeFrame.load(std::memory_order_acquire);
+            gPlaybackRing->readFrame.store(w, std::memory_order_release);
+            gPlaybackRing->active.store(0, std::memory_order_release);
+            gPlaybackRing->sampleRate.store(48000, std::memory_order_release);
+            gSampleRate.store(48000, std::memory_order_relaxed);
+        }
+    }
     return true;
 }
 
@@ -149,15 +169,16 @@ bool MapCaptureRing() {
 
     gCaptureRing = static_cast<macfw::fw1814::hal::capture::SharedCaptureRing*>(p);
     if (!macfw::fw1814::hal::capture::valid(*gCaptureRing)) {
-        macfw::fw1814::hal::capture::initialize(*gCaptureRing, 48000);
+        macfw::fw1814::hal::capture::initialize(
+            *gCaptureRing, gSampleRate.load(std::memory_order_relaxed));
         gCaptureRing->active.store(0, std::memory_order_release);
     }
     return true;
 }
 
-AudioStreamBasicDescription Format(UInt32 channels) {
+AudioStreamBasicDescription Format(Float64 rate, UInt32 channels) {
     AudioStreamBasicDescription f{};
-    f.mSampleRate = kSampleRate;
+    f.mSampleRate = rate;
     f.mFormatID = kAudioFormatLinearPCM;
     f.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
     f.mBytesPerPacket = sizeof(Float32) * channels;
@@ -168,8 +189,13 @@ AudioStreamBasicDescription Format(UInt32 channels) {
     return f;
 }
 
-AudioStreamBasicDescription OutputFormat() { return Format(kOutputChannels); }
-AudioStreamBasicDescription InputFormat() { return Format(kInputChannels); }
+AudioStreamBasicDescription OutputFormat(Float64 rate) {
+    return Format(rate, kOutputChannels);
+}
+
+AudioStreamBasicDescription InputFormat(Float64 rate) {
+    return Format(rate, kInputChannels);
+}
 
 bool ScopeIsOutput(AudioObjectPropertyScope scope) {
     return scope == kAudioObjectPropertyScopeOutput;
@@ -192,6 +218,15 @@ OSStatus CopyScalar(UInt32 inSize, UInt32* outSize, void* outData, const T& valu
 
 OSStatus CopyString(UInt32 inSize, UInt32* outSize, void* outData, CFStringRef value) {
     return CopyScalar(inSize, outSize, outData, value);
+}
+
+void Notify(AudioObjectID object,
+            AudioObjectPropertySelector selector,
+            AudioObjectPropertyScope scope = kAudioObjectPropertyScopeGlobal) {
+    if (!gHost) return;
+    AudioObjectPropertyAddress address{
+        selector, scope, kAudioObjectPropertyElementMain};
+    gHost->PropertiesChanged(gHost, object, 1, &address);
 }
 
 HRESULT STDMETHODCALLTYPE QueryInterface(void*, REFIID uuid, LPVOID* outInterface) {
@@ -266,8 +301,36 @@ OSStatus STDMETHODCALLTYPE PerformDeviceConfigurationChange(AudioServerPlugInDri
                                                             void*) {
     if (device != kDeviceID)
         return kAudioHardwareBadObjectError;
-    return action == 48000 ? kAudioHardwareNoError
-                           : kAudioHardwareIllegalOperationError;
+    if (action != 44100 && action != 48000)
+        return kAudioHardwareIllegalOperationError;
+
+    const auto rate = static_cast<std::uint32_t>(action);
+    gSampleRate.store(rate, std::memory_order_release);
+
+    if (gPlaybackRing) {
+        const auto w =
+            gPlaybackRing->writeFrame.load(std::memory_order_acquire);
+        gPlaybackRing->readFrame.store(w, std::memory_order_release);
+        gPlaybackRing->active.store(0, std::memory_order_release);
+        // Publish the rate last: this is the supervisor's handoff trigger.
+        gPlaybackRing->sampleRate.store(rate, std::memory_order_release);
+    }
+
+    if (gCaptureRing) {
+        const auto w =
+            gCaptureRing->writeFrame.load(std::memory_order_acquire);
+        gCaptureRing->readFrame.store(w, std::memory_order_release);
+        gCaptureRing->active.store(0, std::memory_order_release);
+        // Keep the old capture rate until the new transport reinitializes the
+        // ring. ReadInput zero-fills while it does not match gSampleRate.
+    }
+
+    Notify(kDeviceID, kAudioDevicePropertyNominalSampleRate);
+    Notify(kOutputStreamID, kAudioStreamPropertyVirtualFormat);
+    Notify(kOutputStreamID, kAudioStreamPropertyPhysicalFormat);
+    Notify(kInputStreamID, kAudioStreamPropertyVirtualFormat);
+    Notify(kInputStreamID, kAudioStreamPropertyPhysicalFormat);
+    return kAudioHardwareNoError;
 }
 
 OSStatus STDMETHODCALLTYPE AbortDeviceConfigurationChange(AudioServerPlugInDriverRef,
@@ -355,8 +418,10 @@ OSStatus STDMETHODCALLTYPE IsPropertySettable(AudioServerPlugInDriverRef driver,
         return kAudioHardwareUnknownPropertyError;
 
     *outSettable =
-        (object == kOutputStreamID || object == kInputStreamID) &&
-        address->mSelector == kAudioStreamPropertyIsActive;
+        (object == kDeviceID &&
+         address->mSelector == kAudioDevicePropertyNominalSampleRate) ||
+        ((object == kOutputStreamID || object == kInputStreamID) &&
+         address->mSelector == kAudioStreamPropertyIsActive);
     return kAudioHardwareNoError;
 }
 
@@ -401,7 +466,7 @@ UInt32 PropertySize(AudioObjectID object,
             case kAudioDevicePropertyNominalSampleRate:
                 return sizeof(Float64);
             case kAudioDevicePropertyAvailableNominalSampleRates:
-                return sizeof(AudioValueRange);
+                return 2 * sizeof(AudioValueRange);
             default:
                 return sizeof(UInt32);
         }
@@ -416,7 +481,7 @@ UInt32 PropertySize(AudioObjectID object,
                 return sizeof(AudioStreamBasicDescription);
             case kAudioStreamPropertyAvailableVirtualFormats:
             case kAudioStreamPropertyAvailablePhysicalFormats:
-                return sizeof(AudioStreamRangedDescription);
+                return 2 * sizeof(AudioStreamRangedDescription);
             default:
                 return sizeof(UInt32);
         }
@@ -582,12 +647,17 @@ OSStatus STDMETHODCALLTYPE GetPropertyData(AudioServerPlugInDriverRef driver,
             case kAudioDevicePropertyZeroTimeStampPeriod:
                 return CopyScalar(inSize, outSize, outData, static_cast<UInt32>(512));
             case kAudioDevicePropertyNominalSampleRate:
-                return CopyScalar(inSize, outSize, outData, kSampleRate);
+                return CopyScalar(
+                    inSize, outSize, outData,
+                    static_cast<Float64>(
+                        gSampleRate.load(std::memory_order_acquire)));
             case kAudioDevicePropertyAvailableNominalSampleRates: {
-                if (inSize < sizeof(AudioValueRange))
+                if (inSize < 2 * sizeof(AudioValueRange))
                     return kAudioHardwareBadPropertySizeError;
-                *static_cast<AudioValueRange*>(outData) = {kSampleRate, kSampleRate};
-                *outSize = sizeof(AudioValueRange);
+                auto* rates = static_cast<AudioValueRange*>(outData);
+                rates[0] = {kRate44100, kRate44100};
+                rates[1] = {kRate48000, kRate48000};
+                *outSize = 2 * sizeof(AudioValueRange);
                 return kAudioHardwareNoError;
             }
             default:
@@ -597,7 +667,10 @@ OSStatus STDMETHODCALLTYPE GetPropertyData(AudioServerPlugInDriverRef driver,
 
     if (object == kOutputStreamID || object == kInputStreamID) {
         const bool isInput = object == kInputStreamID;
-        const auto format = isInput ? InputFormat() : OutputFormat();
+        const Float64 rate = static_cast<Float64>(
+            gSampleRate.load(std::memory_order_acquire));
+        const auto format =
+            isInput ? InputFormat(rate) : OutputFormat(rate);
 
         switch (selector) {
             case kAudioObjectPropertyOwnedObjects:
@@ -620,11 +693,22 @@ OSStatus STDMETHODCALLTYPE GetPropertyData(AudioServerPlugInDriverRef driver,
                 return CopyScalar(inSize, outSize, outData, format);
             case kAudioStreamPropertyAvailableVirtualFormats:
             case kAudioStreamPropertyAvailablePhysicalFormats: {
-                if (inSize < sizeof(AudioStreamRangedDescription))
+                if (inSize < 2 * sizeof(AudioStreamRangedDescription))
                     return kAudioHardwareBadPropertySizeError;
-                *static_cast<AudioStreamRangedDescription*>(outData) =
-                    {format, {kSampleRate, kSampleRate}};
-                *outSize = sizeof(AudioStreamRangedDescription);
+                auto* formats =
+                    static_cast<AudioStreamRangedDescription*>(outData);
+                if (isInput) {
+                    formats[0] = {
+                        InputFormat(kRate44100), {kRate44100, kRate44100}};
+                    formats[1] = {
+                        InputFormat(kRate48000), {kRate48000, kRate48000}};
+                } else {
+                    formats[0] = {
+                        OutputFormat(kRate44100), {kRate44100, kRate44100}};
+                    formats[1] = {
+                        OutputFormat(kRate48000), {kRate48000, kRate48000}};
+                }
+                *outSize = 2 * sizeof(AudioStreamRangedDescription);
                 return kAudioHardwareNoError;
             }
             default:
@@ -647,6 +731,23 @@ OSStatus STDMETHODCALLTYPE SetPropertyData(AudioServerPlugInDriverRef driver,
         return kAudioHardwareIllegalOperationError;
     if (!HasProperty(driver, object, pid, address))
         return kAudioHardwareUnknownPropertyError;
+
+    if (object == kDeviceID &&
+        address->mSelector == kAudioDevicePropertyNominalSampleRate) {
+        if (inSize != sizeof(Float64))
+            return kAudioHardwareBadPropertySizeError;
+        const Float64 rate = *static_cast<const Float64*>(inData);
+        if (rate != kRate44100 && rate != kRate48000)
+            return kAudioHardwareIllegalOperationError;
+        if (static_cast<std::uint32_t>(rate) ==
+            gSampleRate.load(std::memory_order_acquire))
+            return kAudioHardwareNoError;
+        if (!gHost)
+            return kAudioHardwareIllegalOperationError;
+        gHost->RequestDeviceConfigurationChange(
+            gHost, kDeviceID, static_cast<UInt64>(rate), nullptr);
+        return kAudioHardwareNoError;
+    }
 
     if ((object == kOutputStreamID || object == kInputStreamID) &&
         address->mSelector == kAudioStreamPropertyIsActive) {
@@ -672,9 +773,10 @@ OSStatus STDMETHODCALLTYPE StartIO(AudioServerPlugInDriverRef,
             return kAudioHardwareUnspecifiedError;
         }
 
-        gPlaybackRing->sampleRate.store(48000, std::memory_order_release);
+        gPlaybackRing->sampleRate.store(
+            gSampleRate.load(std::memory_order_acquire),
+            std::memory_order_release);
         gPlaybackRing->startIOCalls.fetch_add(1, std::memory_order_relaxed);
-        gPlaybackRing->active.store(1, std::memory_order_release);
     }
 
     return kAudioHardwareNoError;
@@ -694,7 +796,6 @@ OSStatus STDMETHODCALLTYPE StopIO(AudioServerPlugInDriverRef,
 
     if (old == 1 && gPlaybackRing) {
         gPlaybackRing->stopIOCalls.fetch_add(1, std::memory_order_relaxed);
-        gPlaybackRing->active.store(0, std::memory_order_release);
     }
 
     return kAudioHardwareNoError;
@@ -710,14 +811,16 @@ OSStatus STDMETHODCALLTYPE GetZeroTimeStamp(AudioServerPlugInDriverRef,
         return kAudioHardwareIllegalOperationError;
 
     const UInt64 now = mach_absolute_time();
+    const long double rate = static_cast<long double>(
+        gSampleRate.load(std::memory_order_acquire));
     const long double ns =
         static_cast<long double>(now - gStartHostTime) *
         gTimebase.numer / gTimebase.denom;
-    const long double frames = ns * kSampleRate / 1000000000.0L;
+    const long double frames = ns * rate / 1000000000.0L;
     constexpr UInt64 period = 512;
     const UInt64 frame = static_cast<UInt64>(frames) / period * period;
     const long double frameNs =
-        static_cast<long double>(frame) * 1000000000.0L / kSampleRate;
+        static_cast<long double>(frame) * 1000000000.0L / rate;
 
     *sampleTime = static_cast<Float64>(frame);
     *hostTime = gStartHostTime +
@@ -770,13 +873,10 @@ OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef,
         gPlaybackRing->doIOCalls.fetch_add(1, std::memory_order_relaxed);
         gPlaybackRing->doIOFrames.fetch_add(frames, std::memory_order_relaxed);
 
-        // This HAL build still exposes a fixed 48 kHz CoreAudio clock.  The
-        // manual 44.1 kHz transport diagnostic changes the shared-ring rate in
-        // place and supplies its own buffered test tone.  Do not let the 48 kHz
-        // CoreAudio producer race that diagnostic producer on this SPSC ring.
-        // Native CoreAudio 44.1 kHz output will be enabled separately when the
-        // HAL clock/format implementation is made rate-aware.
-        if (gPlaybackRing->sampleRate.load(std::memory_order_acquire) != 48000)
+        const std::uint32_t rate =
+            gSampleRate.load(std::memory_order_acquire);
+        if (gPlaybackRing->active.load(std::memory_order_acquire) == 0 ||
+            gPlaybackRing->sampleRate.load(std::memory_order_acquire) != rate)
             return kAudioHardwareNoError;
 
         macfw::fw1814::hal::write(
@@ -804,7 +904,9 @@ OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef,
                                                    std::memory_order_relaxed);
 
         std::size_t got = 0;
-        if (gCaptureRing->active.load(std::memory_order_acquire) != 0) {
+        if (gCaptureRing->active.load(std::memory_order_acquire) != 0 &&
+            gCaptureRing->sampleRate.load(std::memory_order_acquire) ==
+                gSampleRate.load(std::memory_order_acquire)) {
             got = macfw::fw1814::hal::capture::read(
                 *gCaptureRing, out, frames);
             gCaptureRing->halFramesFromRing.fetch_add(got,
