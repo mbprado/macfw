@@ -54,8 +54,8 @@ UInt32 cycleDelta(UInt32 newer, UInt32 older) {
     return (newer + kCyclesPerSecond - older) % kCyclesPerSecond;
 }
 
-bool preloadDiagnosticTone(macfw::PcmRingBuffer& pcm, double frequency) {
-    if (!pcm.valid() || !std::isfinite(frequency) || frequency <= 0.0 ||
+bool preloadDiagnosticAudio(macfw::PcmRingBuffer& pcm, double frequency) {
+    if (!pcm.valid() || !std::isfinite(frequency) || frequency < 0.0 ||
         frequency >= static_cast<double>(kRate) / 2.0)
         return false;
 
@@ -65,17 +65,22 @@ bool preloadDiagnosticTone(macfw::PcmRingBuffer& pcm, double frequency) {
         frames * macfw::fw1814::kPlaybackPcmPositions, 0);
     const std::size_t position =
         macfw::fw1814::kPlaybackPositionForAnalogOutput[0];
-    for (std::size_t frame = 0; frame < frames; ++frame) {
-        const double phase = 2.0 * kPi * frequency *
-            static_cast<double>(frame) / static_cast<double>(kRate);
-        samples[frame * macfw::fw1814::kPlaybackPcmPositions + position] =
-            static_cast<std::int32_t>(
-                std::sin(phase) * amplitude * 8388607.0);
+    if (frequency > 0.0) {
+        for (std::size_t frame = 0; frame < frames; ++frame) {
+            const double phase = 2.0 * kPi * frequency *
+                static_cast<double>(frame) / static_cast<double>(kRate);
+            samples[frame * macfw::fw1814::kPlaybackPcmPositions + position] =
+                static_cast<std::int32_t>(
+                    std::sin(phase) * amplitude * 8388607.0);
+        }
     }
     const std::size_t written = pcm.write(samples.data(), frames);
     std::cout << "FW1814 44.1 diagnostic PCM preload: " << written << '/'
-              << frames << " frames, " << frequency
-              << " Hz on Analog Output 1\n";
+              << frames << " frames, ";
+    if (frequency == 0.0)
+        std::cout << "digital silence\n";
+    else
+        std::cout << frequency << " Hz on Analog Output 1\n";
     return written == frames;
 }
 
@@ -146,8 +151,8 @@ bool run() {
         if (const char* diagnosticTone =
                 std::getenv("MACFW_44_PRELOAD_TONE_HZ")) {
             const double frequency = std::strtod(diagnosticTone, nullptr);
-            if (!preloadDiagnosticTone(pcm, frequency)) {
-                std::cerr << "FW1814 44.1 diagnostic tone preload failed\n";
+            if (!preloadDiagnosticAudio(pcm, frequency)) {
+                std::cerr << "FW1814 44.1 diagnostic audio preload failed\n";
                 goto cleanup;
             }
         }
