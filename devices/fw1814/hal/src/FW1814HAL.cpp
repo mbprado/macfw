@@ -769,6 +769,16 @@ OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef,
 
         gPlaybackRing->doIOCalls.fetch_add(1, std::memory_order_relaxed);
         gPlaybackRing->doIOFrames.fetch_add(frames, std::memory_order_relaxed);
+
+        // This HAL build still exposes a fixed 48 kHz CoreAudio clock.  The
+        // manual 44.1 kHz transport diagnostic changes the shared-ring rate in
+        // place and supplies its own buffered test tone.  Do not let the 48 kHz
+        // CoreAudio producer race that diagnostic producer on this SPSC ring.
+        // Native CoreAudio 44.1 kHz output will be enabled separately when the
+        // HAL clock/format implementation is made rate-aware.
+        if (gPlaybackRing->sampleRate.load(std::memory_order_acquire) != 48000)
+            return kAudioHardwareNoError;
+
         macfw::fw1814::hal::write(
             *gPlaybackRing, static_cast<const Float32*>(mainBuffer), frames);
         return kAudioHardwareNoError;
