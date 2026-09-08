@@ -52,32 +52,28 @@ UInt32 cycleDelta(UInt32 newer, UInt32 older) {
     return (newer + kCyclesPerSecond - older) % kCyclesPerSecond;
 }
 
-bool topUpPcmSilence(macfw::PcmRingBuffer& pcm,
-                     const std::vector<std::int32_t>& silence) {
+bool preloadPcmSilence(macfw::PcmRingBuffer& pcm,
+                       const std::vector<std::int32_t>& silence,
+                       std::size_t framesToWrite) {
     if (!pcm.valid() || silence.empty() ||
         silence.size() % pcm.channelCount() != 0)
         return false;
     const std::size_t scratchFrames = silence.size() / pcm.channelCount();
-    while (pcm.freeFrames() != 0) {
-        const std::size_t frames =
-            std::min(pcm.freeFrames(), scratchFrames);
+    while (framesToWrite != 0) {
+        const std::size_t frames = std::min(framesToWrite, scratchFrames);
         if (pcm.write(silence.data(), frames) != frames)
             return false;
+        framesToWrite -= frames;
     }
     return true;
 }
 
 bool serviceTxFor(IOFireWireLibDeviceRef native,
                   macfw::fw1814::transport::BlockingPcmStream44100& streamer,
-                  double seconds,
-                  macfw::PcmRingBuffer* warmupPcm = nullptr,
-                  const std::vector<std::int32_t>* silence = nullptr) {
+                  double seconds) {
     if (!native || seconds < 0.0) return false;
     const CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + seconds;
     while (!gStopRequested && CFAbsoluteTimeGetCurrent() < deadline) {
-        if (warmupPcm && silence &&
-            !topUpPcmSilence(*warmupPcm, *silence))
-            return false;
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.00025, false);
         UInt32 cycleTime = 0;
         if ((*native)->GetCycleTime(native, &cycleTime) != kIOReturnSuccess)
@@ -138,7 +134,7 @@ bool run() {
                                  macfw::fw1814::kPlaybackPcmPositions);
         std::vector<std::int32_t> warmupSilence(
             4096 * macfw::fw1814::kPlaybackPcmPositions, 0);
-        if (!topUpPcmSilence(pcm, warmupSilence)) {
+        if (!preloadPcmSilence(pcm, warmupSilence, kWarmupPcmFrames)) {
             std::cerr << "FW1814 44.1 PCM-silence prime failed\n";
             goto cleanup;
         }
@@ -217,8 +213,7 @@ bool run() {
                   << std::setprecision(3) << startupWait
                   << " s through scheduled first-cycle start\n"
                   << std::defaultfloat;
-        if (!serviceTxFor(native, streamer, startupWait,
-                          &pcm, &warmupSilence))
+        if (!serviceTxFor(native, streamer, startupWait))
             goto cleanup;
 
         std::cout << "FW1814 special 44.1 stream kick: OUTPUT 44100 Hz\n";
@@ -228,8 +223,7 @@ bool run() {
         }
 
         std::cout << "FW1814 special 44.1 stream kick: servicing TX for 100 ms before INPUT\n";
-        if (!serviceTxFor(native, streamer, 0.100,
-                          &pcm, &warmupSilence))
+        if (!serviceTxFor(native, streamer, 0.100))
             goto cleanup;
 
         std::cout << "FW1814 special 44.1 stream kick: INPUT 44100 Hz\n";
@@ -238,8 +232,7 @@ bool run() {
             goto cleanup;
         }
 
-        if (!serviceTxFor(native, streamer, 0.050,
-                          &pcm, &warmupSilence))
+        if (!serviceTxFor(native, streamer, 0.050))
             goto cleanup;
 
         unsigned readback = 0;
@@ -262,8 +255,7 @@ bool run() {
         while (!gStopRequested &&
                streamer.stats().framesFromBuffer < liveWarmupTarget &&
                CFAbsoluteTimeGetCurrent() < warmupDeadline) {
-            if (!serviceTxFor(native, streamer, 0.010,
-                              &pcm, &warmupSilence))
+            if (!serviceTxFor(native, streamer, 0.010))
                 goto cleanup;
         }
         if (streamer.stats().framesFromBuffer < liveWarmupTarget) {
@@ -273,7 +265,10 @@ bool run() {
         std::cout << "FW1814 44.1 PCM-silence warm-up: "
                   << (kPrimePcmFrames + streamer.stats().framesFromBuffer)
                   << " frames PASS\n";
-        pcm.reset();
+        if (pcm.availableFrames() != 0) {
+            std::cerr << "FW1814 44.1 PCM-silence warm-up did not drain exactly\n";
+            goto cleanup;
+        }
 
         playbackShared.ring()->active.store(1, std::memory_order_release);
         playbackActive = true;
