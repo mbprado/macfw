@@ -32,7 +32,10 @@ constexpr UInt32 kPlaybackMaxPacket = 232;
 constexpr std::size_t kCaptureSlots = 256;
 constexpr std::size_t kTxPackets = 640;
 constexpr std::size_t kTxHalfPackets = 320;
-constexpr std::size_t kPcmCapacityFrames = 16384;
+// Match the hardware-clean native 44.1 tone probe for this diagnostic.  Its
+// preloaded 262144-frame PCM ring removes concurrent small-ring pressure from
+// the comparison, leaving the SHM float conversion as the only added stage.
+constexpr std::size_t kPcmCapacityFrames = 262144;
 constexpr std::size_t kCapturePrefillFrames = 512;
 constexpr UInt32 kCycleLead = 2048;
 constexpr UInt32 kCyclesPerSecond = 8000;
