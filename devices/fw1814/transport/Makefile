@@ -11,10 +11,11 @@ ANALOG48 := fw1814analog48
 SHM_TEST := fw1814shmtest
 SUPERVISOR := fw1814supervisor
 DUPLEX44_PROBE := fw1814duplex44
+TONE44_PROBE := fw1814tone44
 
-.PHONY: all analog48 shm-test supervisor duplex44-probe clean
+.PHONY: all analog48 shm-test supervisor duplex44-probe tone44-probe clean
 
-all: $(ANALOG48) $(SHM_TEST) $(SUPERVISOR) $(DUPLEX44_PROBE)
+all: $(ANALOG48) $(SHM_TEST) $(SUPERVISOR) $(DUPLEX44_PROBE) $(TONE44_PROBE)
 
 $(LIBMACFW):
 	$(MAKE) -C ../../../fw410/lib libmacfw.a
@@ -39,6 +40,12 @@ $(DUPLEX44_PROBE): ../tools/fw1814duplex44.cpp blocking_pcm_tx44.h \
 	$(CXX) $(CXXFLAGS) -I$(LIBMACFW_INCLUDE) -I$(DEVICE_INCLUDE) -I$(HAL_INCLUDE) \
 		../tools/fw1814duplex44.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
 
+$(TONE44_PROBE): ../tools/fw1814tone44.cpp blocking_pcm_tx44.h \
+	duplex_lifecycle.h realtime_service.h ../channel_map.h ../fcp_control.h \
+	../special_mixer.h $(LIBMACFW)
+	$(CXX) $(CXXFLAGS) -I$(LIBMACFW_INCLUDE) -I$(DEVICE_INCLUDE) -I$(HAL_INCLUDE) \
+		../tools/fw1814tone44.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
+
 analog48: $(ANALOG48)
 
 shm-test: $(SHM_TEST)
@@ -47,5 +54,7 @@ supervisor: $(SUPERVISOR)
 
 duplex44-probe: $(DUPLEX44_PROBE)
 
+tone44-probe: $(TONE44_PROBE)
+
 clean:
-	rm -f $(ANALOG48) $(SHM_TEST) $(SUPERVISOR) $(DUPLEX44_PROBE)
+	rm -f $(ANALOG48) $(SHM_TEST) $(SUPERVISOR) $(DUPLEX44_PROBE) $(TONE44_PROBE)
