@@ -15,9 +15,10 @@ The experimental FW1814 profile currently provides:
 - a transport-owned routing-control API and authoritative write-only register
   cache for the future GUI;
 - experimental runtime assignment of software returns 1/2 and 3/4 to Mixer
-  buses 1/2 and 3/4.
+  buses 1/2 and 3/4;
+- experimental Mixer/AUX source selection for Analog Outputs 1/2 and 3/4.
 
-S/PDIF, ADAT, 88.2/96/176.4/192 kHz, analog/digital input routing, output-source selection, levels, headphone controls and the native control panel remain under development. MIDI is intentionally deferred until the audio/control surface is complete.
+S/PDIF, ADAT, 88.2/96/176.4/192 kHz, analog/digital input routing, levels, headphone controls and the native control panel remain under development. MIDI is intentionally deferred until the audio/control surface is complete.
 
 ## Architecture
 
@@ -57,8 +58,12 @@ The active transport owns `/tmp/macfw-fw1814-control.sock`; clients never open F
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" mixer-route get sw1/2 1/2
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" mixer-route set sw1/2 3/4 on
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" mixer-route set sw1/2 3/4 off
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-state get
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-source get 3/4
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-source set 3/4 aux
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-source set 3/4 mixer
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" capabilities get
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" engine get
 ```
 
-Only the already-established `MIX_STM_IN` register is writable through this first experimental command set. A changed route returns to the proven straight-through baseline when the engine restarts; persistence is deliberately deferred until the routing behavior is hardware-validated. See [`analysis/routing-control-development.md`](analysis/routing-control-development.md) for the enabled subset and test sequence.
+Only the already-established `MIX_STM_IN` and `SRC_ANA_OUT` registers are writable through this experimental command set. A changed route returns to the proven straight-through baseline when the engine restarts; persistence is deliberately deferred until each routing behavior is hardware-validated. See [`analysis/routing-control-development.md`](analysis/routing-control-development.md) for the enabled subset and test sequence.

@@ -234,6 +234,68 @@ private:
               "\n");
     }
 
+    void handleOutput(const std::string& command) {
+        using Model = macfw::fw1814::SpecialMixerRoutingModel;
+        if (command == "OUTPUT GET") {
+            std::string output = "OK";
+            for (std::size_t pair = 0;
+                 pair < Model::kAnalogOutputPairCount; ++pair) {
+                const auto source = routing_.analogOutputSource(
+                    static_cast<Model::AnalogOutputPair>(pair));
+                output += source == Model::OutputSource::Aux ? " 1" : " 0";
+            }
+            reply(output + " " + hex32(routing_.srcAnalogOut()) + "\n");
+            return;
+        }
+
+        const std::string getPrefix = "OUTPUT SOURCE GET ";
+        const std::string setPrefix = "OUTPUT SOURCE SET ";
+        const bool setting = command.rfind(setPrefix, 0) == 0;
+        const bool getting = command.rfind(getPrefix, 0) == 0;
+        if (!setting && !getting) {
+            reply("ERR unknown-command\n");
+            return;
+        }
+
+        const std::string arguments = command.substr(
+            setting ? setPrefix.size() : getPrefix.size());
+        std::istringstream input(arguments);
+        unsigned pair = 0;
+        unsigned source = 0;
+        std::string extra;
+        if (!(input >> pair) || (setting && !(input >> source)) ||
+            (input >> extra) || pair >= Model::kAnalogOutputPairCount ||
+            source > 1) {
+            reply("ERR invalid-output-source\n");
+            return;
+        }
+
+        const auto pairId = static_cast<Model::AnalogOutputPair>(pair);
+        if (getting) {
+            const auto cached = routing_.analogOutputSource(pairId);
+            reply("OK " + std::to_string(pair) + " " +
+                  (cached == Model::OutputSource::Aux ? "1" : "0") +
+                  "\n");
+            return;
+        }
+
+        Model desired = routing_;
+        desired.setAnalogOutputSource(
+            pairId, source == 0 ? Model::OutputSource::Mixer
+                                : Model::OutputSource::Aux);
+        if (desired.srcAnalogOut() != routing_.srcAnalogOut()) {
+            const WriteResult result = writeRegister(
+                macfw::fw1814::kSrcAnalogOutLo, desired.srcAnalogOut());
+            if (result != WriteResult::Ok) {
+                replyWriteError(result);
+                return;
+            }
+            routing_ = desired;
+        }
+        reply("OK " + std::to_string(pair) + " " +
+              std::to_string(source) + "\n");
+    }
+
     void handle(const std::string& command) {
         if (command == "ROUTING GET") {
             const std::string profile = routing_.isStraightAnalogPlaybackPreset()
@@ -246,7 +308,7 @@ private:
         }
         if (command == "CAPABILITIES GET") {
             reply("OK routing-state=1 runtime-routing-set=1 "
-                  "stream-mixer=1 analog-output-source=deferred "
+                  "stream-mixer=1 analog-output-source=1 "
                   "register-readback=0 state-cache=authoritative "
                   "analog-input-mixer=deferred digital=deferred "
                   "headphone=deferred levels=deferred midi=deferred\n");
@@ -259,6 +321,10 @@ private:
         }
         if (command.rfind("MIXER ", 0) == 0) {
             handleMixer(command);
+            return;
+        }
+        if (command.rfind("OUTPUT ", 0) == 0) {
+            handleOutput(command);
             return;
         }
         reply("ERR unknown-command\n");

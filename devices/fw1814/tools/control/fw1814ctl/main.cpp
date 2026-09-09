@@ -24,6 +24,8 @@ constexpr std::array<const char*, RoutingModel::kStreamSourceCount>
 constexpr std::array<const char*, RoutingModel::kMixerBusCount>
     kMixerBusArgs{{"1/2", "3/4"}};
 constexpr std::array<const char*, RoutingModel::kAnalogOutputPairCount>
+    kOutputPairArgs{{"1/2", "3/4"}};
+constexpr std::array<const char*, RoutingModel::kAnalogOutputPairCount>
     kOutputPairLabels{{"Analog Outputs 1/2", "Analog Outputs 3/4"}};
 
 int usage() {
@@ -33,6 +35,9 @@ int usage() {
         << "  fw1814ctl mixer get\n"
         << "  fw1814ctl mixer-route get sw1/2|sw3/4 1/2|3/4\n"
         << "  fw1814ctl mixer-route set sw1/2|sw3/4 1/2|3/4 on|off\n"
+        << "  fw1814ctl output-state get\n"
+        << "  fw1814ctl output-source get 1/2|3/4\n"
+        << "  fw1814ctl output-source set 1/2|3/4 mixer|aux\n"
         << "  fw1814ctl capabilities get\n"
         << "  fw1814ctl engine get\n\n"
         << "FW1814 mixer registers are write-only. The active transport "
@@ -253,6 +258,69 @@ int mixerRouteCommand(const std::string& action, int argc, char** argv) {
     return 0;
 }
 
+int outputStateGet() {
+    std::string payload;
+    if (!payloadFor("OUTPUT GET", payload)) return 1;
+    std::istringstream input(payload);
+    std::array<unsigned, RoutingModel::kAnalogOutputPairCount> sources{};
+    for (auto& source : sources)
+        if (!(input >> source) || source > 1) {
+            std::cerr << "fw1814ctl: invalid output response: " << payload
+                      << '\n';
+            return 1;
+        }
+    std::string raw;
+    std::string extra;
+    if (!(input >> raw) || (input >> extra)) {
+        std::cerr << "fw1814ctl: invalid output response: " << payload << '\n';
+        return 1;
+    }
+    std::cout << "FW1814 analog output sources (active engine cache):\n";
+    for (std::size_t pair = 0; pair < sources.size(); ++pair)
+        std::cout << "  " << kOutputPairLabels[pair] << ": "
+                  << outputSourceName(sources[pair]) << '\n';
+    std::cout << "  SRC_ANA_OUT: " << raw << " (write-only cache)\n";
+    return 0;
+}
+
+int outputSourceCommand(const std::string& action, int argc, char** argv) {
+    if ((action == "get" && argc != 4) ||
+        (action == "set" && argc != 5))
+        return usage();
+    const int pair = indexOf(argv[3], kOutputPairArgs.data(),
+                             kOutputPairArgs.size());
+    if (pair < 0) return usage();
+
+    int source = -1;
+    if (action == "set") {
+        const std::string value = argv[4];
+        source = value == "mixer" ? 0 : value == "aux" ? 1 : -1;
+        if (source < 0) return usage();
+    }
+
+    std::string command = "OUTPUT SOURCE " +
+        std::string(action == "get" ? "GET " : "SET ") +
+        std::to_string(pair);
+    if (action == "set") command += " " + std::to_string(source);
+
+    std::string payload;
+    if (!payloadFor(command, payload)) return 1;
+    std::istringstream input(payload);
+    int returnedPair = -1;
+    int returnedSource = -1;
+    std::string extra;
+    if (!(input >> returnedPair >> returnedSource) || (input >> extra) ||
+        returnedPair != pair || returnedSource < 0 || returnedSource > 1) {
+        std::cerr << "fw1814ctl: invalid output-source response: " << payload
+                  << '\n';
+        return 1;
+    }
+    std::cout << kOutputPairLabels[pair] << ": "
+              << outputSourceName(static_cast<unsigned>(returnedSource))
+              << '\n';
+    return 0;
+}
+
 int capabilitiesGet() {
     std::string payload;
     if (!payloadFor("CAPABILITIES GET", payload)) return 1;
@@ -296,6 +364,12 @@ int main(int argc, char** argv) {
     if (control == "mixer-route")
         return action == "get" || action == "set"
             ? mixerRouteCommand(action, argc, argv)
+            : usage();
+    if (control == "output-state")
+        return action == "get" && argc == 3 ? outputStateGet() : usage();
+    if (control == "output-source")
+        return action == "get" || action == "set"
+            ? outputSourceCommand(action, argc, argv)
             : usage();
     if (control == "capabilities")
         return action == "get" && argc == 3 ? capabilitiesGet() : usage();

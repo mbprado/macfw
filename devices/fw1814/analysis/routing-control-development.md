@@ -16,7 +16,7 @@ FW1814 special-firmware mixer registers are write-only. The backend therefore:
 
 FFADO documents the special-firmware control area and bit layouts in [`special_avdevice.h`](https://github.com/llekn/ffado/blob/8ba6d6415f48ccb740cf4685299ef415286f4a6e/src/bebob/maudio/special_avdevice.h). Its mixer implementation also maintains a software register cache because hardware readback is unavailable.
 
-The first writable macfw subset is only `MIX_STM_IN` at offset `0x94`:
+The first writable macfw subset was `MIX_STM_IN` at offset `0x94`:
 
 | Bit | Route |
 |---:|---|
@@ -27,7 +27,18 @@ The first writable macfw subset is only `MIX_STM_IN` at offset `0x94`:
 
 The proven startup value is `0x00000006`, which establishes the straight pair-to-pair routing. Runtime commands rewrite the complete cached quadlet rather than issuing an isolated unknown-state update.
 
-`SRC_ANA_OUT` remains visible in `routing get` because the engine already owns its known startup value, but output-source changes are not enabled in this increment. `MIX_ANA_DIG_IN`, `SRC_HP_OUT`, gain, pan and AUX registers also remain untouched.
+The cached route-write path and Software Return 1/2 -> Mixer 3/4 cell were hardware-validated at 48 kHz on 2026-09-09. Enabling that route changed the cached quadlet from `0x00000006` to `0x0000000e`, produced clean simultaneous playback on Analog Outputs 1/2 and 3/4, and restored cleanly to `0x00000006` when disabled. The opposite cross-route remains to be exercised when a convenient Software Return 3/4 source is available.
+
+The next enabled register is `SRC_ANA_OUT` at offset `0x9c`:
+
+| Bit | Output pair | `0` | `1` |
+|---:|---|---|---|
+| 1 | Analog Outputs 3/4 | Mixer 3/4 | AUX 1/2 |
+| 0 | Analog Outputs 1/2 | Mixer 1/2 | AUX 1/2 |
+
+The proven startup value is `0x00000000`, selecting the corresponding mixer bus for both analog output pairs. As with `MIX_STM_IN`, the backend changes the full cached quadlet and restores the exact baseline value when requested.
+
+`MIX_ANA_DIG_IN`, `SRC_HP_OUT`, gain, pan and AUX-level registers remain untouched.
 
 ## Command surface
 
@@ -35,12 +46,15 @@ The proven startup value is `0x00000006`, which establishes the straight pair-to
 fw1814ctl mixer get
 fw1814ctl mixer-route get sw1/2|sw3/4 1/2|3/4
 fw1814ctl mixer-route set sw1/2|sw3/4 1/2|3/4 on|off
+fw1814ctl output-state get
+fw1814ctl output-source get 1/2|3/4
+fw1814ctl output-source set 1/2|3/4 mixer|aux
 fw1814ctl routing get
 ```
 
 Settings are intentionally runtime-only during validation. Restarting the transport restores the hardware-proven `0x00000006` straight-through baseline.
 
-## First hardware validation
+## Validated mixer test
 
 With stereo audio playing through Analog Outputs 1/2:
 
@@ -52,11 +66,33 @@ fw1814ctl mixer-route set sw1/2 3/4 off
 fw1814ctl routing get
 ```
 
+Observed behavior at 48 kHz:
+
+- the initial cache was `0x00000006`;
+- enabling the additional route changed it to `0x0000000e` and mirrored software return 1/2 to Mixer 3/4 without removing the original Mixer 1/2 route;
+- disabling the additional route restored `0x00000006`;
+- audio remained clean throughout and the engine continued running.
+
+## Next hardware validation
+
+First mirror Software Return 1/2 to both mixer buses, then switch only Analog Outputs 3/4 between Mixer and AUX:
+
+```bash
+fw1814ctl mixer-route set sw1/2 3/4 on
+fw1814ctl output-state get
+fw1814ctl output-source set 3/4 aux
+fw1814ctl routing get
+fw1814ctl output-source set 3/4 mixer
+fw1814ctl routing get
+fw1814ctl mixer-route set sw1/2 3/4 off
+```
+
 Expected behavior:
 
-- the initial cache is `0x00000006`;
-- enabling the additional route changes it to `0x0000000e` and mirrors software return 1/2 to Mixer 3/4 without removing the original Mixer 1/2 route;
-- disabling the additional route restores `0x00000006`;
-- audio remains clean throughout and the engine continues running.
+- Analog Outputs 1/2 remain on their mixer source throughout;
+- `SRC_ANA_OUT` changes from `0x00000000` to `0x00000002` when Analog Outputs 3/4 select AUX;
+- the signal on Analog Outputs 3/4 changes to the current AUX mix, which may be silence if no AUX send is active;
+- selecting Mixer restores the mirrored signal on Analog Outputs 3/4 and returns `SRC_ANA_OUT` to `0x00000000`;
+- the engine remains online and audio on unaffected outputs remains clean.
 
-Do not test output-source, headphone, analog-input or digital-input routing as part of this step.
+Do not test headphone, analog-input, digital-input, gain, pan or AUX-level controls as part of this step.
