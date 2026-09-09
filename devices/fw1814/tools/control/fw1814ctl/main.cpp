@@ -6,11 +6,15 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <libgen.h>
+#include <limits.h>
 #include <sstream>
 #include <string>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/wait.h>
 #include <unistd.h>
+#include <vector>
 
 namespace {
 
@@ -42,9 +46,68 @@ int usage() {
         << "  fw1814ctl engine get\n\n"
         << "FW1814 mixer registers are write-only. The active transport "
            "establishes a known startup baseline and maintains the "
-           "authoritative routing cache. Settings currently return to that "
-           "baseline when the engine restarts.\n";
+           "authoritative routing cache. Successful changes to validated "
+           "controls are saved and restored after engine startup.\n";
     return 64;
+}
+
+std::string executableDirectory(const char* argv0) {
+    char resolved[PATH_MAX] = {};
+    if (argv0 && realpath(argv0, resolved)) {
+        char copy[PATH_MAX] = {};
+        std::strncpy(copy, resolved, sizeof(copy) - 1);
+        return dirname(copy);
+    }
+    return ".";
+}
+
+std::string stateHelperPath(const char* argv0) {
+    const std::string directory = executableDirectory(argv0);
+    const std::string installed = directory + "/fw1814state";
+    if (access(installed.c_str(), X_OK) == 0) return installed;
+    return directory + "/../fw1814state/fw1814state";
+}
+
+void persistSuccessfulSet(const char* argv0,
+                          const std::string& key,
+                          int argc,
+                          char** argv) {
+    if (std::getenv("MACFW_STATE_RESTORE")) return;
+    const std::string helper = stateHelperPath(argv0);
+    if (access(helper.c_str(), X_OK) != 0) {
+        std::cerr << "fw1814ctl: warning: state helper unavailable; setting "
+                     "was not persisted\n";
+        return;
+    }
+
+    std::vector<char*> arguments;
+    arguments.reserve(static_cast<std::size_t>(argc) + 3);
+    arguments.push_back(const_cast<char*>(helper.c_str()));
+    arguments.push_back(const_cast<char*>("record"));
+    arguments.push_back(const_cast<char*>(key.c_str()));
+    for (int index = 1; index < argc; ++index)
+        arguments.push_back(argv[index]);
+    arguments.push_back(nullptr);
+
+    const pid_t pid = fork();
+    if (pid < 0) {
+        std::cerr << "fw1814ctl: warning: could not start state helper\n";
+        return;
+    }
+    if (pid == 0) {
+        execv(helper.c_str(), arguments.data());
+        _exit(127);
+    }
+
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno == EINTR) continue;
+        std::cerr << "fw1814ctl: warning: state helper wait failed\n";
+        return;
+    }
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+        std::cerr << "fw1814ctl: warning: setting worked but could not be "
+                     "persisted\n";
 }
 
 bool transact(const std::string& command, std::string& response) {
@@ -255,6 +318,11 @@ int mixerRouteCommand(const std::string& action, int argc, char** argv) {
     std::cout << kMixerSourceLabels[source] << " -> Mixer "
               << kMixerBusArgs[destination] << ": "
               << onOff(returnedValue != 0) << '\n';
+    if (action == "set") {
+        const std::string key = "mixer-route:" + std::string(argv[3]) +
+                                ":" + argv[4];
+        persistSuccessfulSet(argv[0], key, argc, argv);
+    }
     return 0;
 }
 
@@ -318,6 +386,10 @@ int outputSourceCommand(const std::string& action, int argc, char** argv) {
     std::cout << kOutputPairLabels[pair] << ": "
               << outputSourceName(static_cast<unsigned>(returnedSource))
               << '\n';
+    if (action == "set")
+        persistSuccessfulSet(argv[0],
+                             "output-source:" + std::string(argv[3]),
+                             argc, argv);
     return 0;
 }
 

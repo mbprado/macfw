@@ -16,7 +16,9 @@ The experimental FW1814 profile currently provides:
   cache for the future GUI;
 - experimental runtime assignment of software returns 1/2 and 3/4 to Mixer
   buses 1/2 and 3/4;
-- experimental Mixer/AUX source selection for Analog Outputs 1/2 and 3/4.
+- experimental Mixer/AUX source selection for Analog Outputs 1/2 and 3/4;
+- experimental persistent restoration of the validated routing subset after transport
+  restart, rate change and reconnect.
 
 S/PDIF, ADAT, 88.2/96/176.4/192 kHz, analog/digital input routing, levels, headphone controls and the native control panel remain under development. MIDI is intentionally deferred until the audio/control surface is complete.
 
@@ -64,6 +66,8 @@ The active transport owns `/tmp/macfw-fw1814-control.sock`; clients never open F
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-source set 3/4 mixer
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" capabilities get
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" engine get
+"/Library/Application Support/macfw/fw1814/bin/fw1814state" show
+"/Library/Application Support/macfw/fw1814/bin/fw1814state" reset
 ```
 
-Only the already-established `MIX_STM_IN` and `SRC_ANA_OUT` registers are writable through this experimental command set. A changed route returns to the proven straight-through baseline when the engine restarts; persistence is deliberately deferred until each routing behavior is hardware-validated. See [`analysis/routing-control-development.md`](analysis/routing-control-development.md) for the enabled subset and test sequence.
+Only the hardware-validated `MIX_STM_IN` and `SRC_ANA_OUT` registers are writable through this experimental command set. Successful changes are recorded in `/Library/Application Support/macfw/fw1814/control-state.conf` and replayed after a new engine reports ready. `fw1814state reset` applies and saves the proven straight-through defaults; `clear` removes saved overrides without changing the current hardware state. See [`analysis/routing-control-development.md`](analysis/routing-control-development.md) for the enabled subset and validation sequence.

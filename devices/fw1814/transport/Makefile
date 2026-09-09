@@ -24,7 +24,7 @@ $(LIBMACFW):
 	$(MAKE) -C ../../../fw410/lib libmacfw.a
 
 $(ANALOG48): analog48_main.cpp blocking_pcm_tx.h pcm_stream48.h capture_pump.h \
-	duplex_lifecycle.h fw1814_control_server.h playback_pump.h realtime_service.h shared_io.h \
+	duplex_lifecycle.h engine_ready.h fw1814_control_server.h playback_pump.h realtime_service.h shared_io.h \
 	../channel_map.h ../fcp_control.h ../special_mixer.h ../special_mixer_model.h \
 	../hal/include/macfw_fw1814_hal_shm.h \
 	../hal/include/macfw_fw1814_capture_shm.h $(LIBMACFW)
@@ -32,7 +32,7 @@ $(ANALOG48): analog48_main.cpp blocking_pcm_tx.h pcm_stream48.h capture_pump.h \
 		analog48_main.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
 
 $(ANALOG44): analog44_main.cpp blocking_pcm_tx44.h capture_pump44.h \
-	duplex_lifecycle.h fw1814_control_server.h playback_pump.h realtime_service.h shared_io.h \
+	duplex_lifecycle.h engine_ready.h fw1814_control_server.h playback_pump.h realtime_service.h shared_io.h \
 	../channel_map.h ../fcp_control.h ../special_mixer.h ../special_mixer_model.h \
 	../hal/include/macfw_fw1814_hal_shm.h \
 	../hal/include/macfw_fw1814_capture_shm.h $(LIBMACFW)

@@ -5,6 +5,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <libgen.h>
@@ -110,28 +111,96 @@ int runChild(const std::string& path,
     return 1;
 }
 
+bool restoreControlState(const std::string& path) {
+    if (access(path.c_str(), X_OK) != 0) {
+        std::fprintf(stderr,
+                     "FW1814 control-state helper unavailable: %s\n",
+                     path.c_str());
+        return false;
+    }
+    const pid_t pid = fork();
+    if (pid < 0) return false;
+    if (pid == 0) {
+        execl(path.c_str(), path.c_str(), "restore",
+              static_cast<char*>(nullptr));
+        _exit(127);
+    }
+
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno == EINTR) continue;
+        return false;
+    }
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
 int runEngine(const std::string& path,
+              const std::string& stateHelper,
               std::uint32_t startedRate,
               bool& rateChangeRequested) {
     rateChangeRequested = false;
+    int readyPipe[2] = {-1, -1};
+    if (pipe(readyPipe) != 0) {
+        std::fprintf(stderr, "FW1814 supervisor ready-pipe failed: %s\n",
+                     std::strerror(errno));
+        return 1;
+    }
+    const int flags = fcntl(readyPipe[0], F_GETFL, 0);
+    if (flags >= 0)
+        fcntl(readyPipe[0], F_SETFL, flags | O_NONBLOCK);
+
     const pid_t pid = fork();
     if (pid < 0) {
+        close(readyPipe[0]);
+        close(readyPipe[1]);
         std::fprintf(stderr, "FW1814 supervisor fork failed for %s: %s\n",
                      path.c_str(), std::strerror(errno));
         return 1;
     }
 
     if (pid == 0) {
+        close(readyPipe[0]);
+        char fdText[32] = {};
+        std::snprintf(fdText, sizeof(fdText), "%d", readyPipe[1]);
+        setenv("MACFW_ENGINE_READY_FD", fdText, 1);
         execl(path.c_str(), path.c_str(), static_cast<char*>(nullptr));
         _exit(127);
     }
+    close(readyPipe[1]);
+    readyPipe[1] = -1;
+
+    std::printf("FW1814 native engine started (pid %d); waiting for READY\n",
+                static_cast<int>(pid));
 
     int status = 0;
+    bool stateRestoreAttempted = false;
     for (;;) {
+        if (!stateRestoreAttempted && readyPipe[0] >= 0) {
+            unsigned char value = 0;
+            const ssize_t count = read(readyPipe[0], &value, sizeof(value));
+            if (count == 1 && value == 1) {
+                close(readyPipe[0]);
+                readyPipe[0] = -1;
+                stateRestoreAttempted = true;
+                std::printf("FW1814 native engine reported READY; restoring "
+                            "saved control state\n");
+                if (restoreControlState(stateHelper))
+                    std::printf("FW1814 saved control state restored\n");
+                else
+                    std::fprintf(stderr,
+                                 "FW1814 saved control-state restore failed; "
+                                 "audio remains online\n");
+            } else if (count == 0) {
+                close(readyPipe[0]);
+                readyPipe[0] = -1;
+            }
+        }
+
         const pid_t r = waitpid(pid, &status, WNOHANG);
         if (r == pid) break;
         if (r < 0) {
             if (errno == EINTR) continue;
+            if (readyPipe[0] >= 0) close(readyPipe[0]);
             return 1;
         }
 
@@ -154,6 +223,8 @@ int runEngine(const std::string& path,
 
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+
+    if (readyPipe[0] >= 0) close(readyPipe[0]);
 
     if (WIFEXITED(status)) return WEXITSTATUS(status);
     if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
@@ -212,10 +283,12 @@ int main(int argc, char** argv) {
     const std::string busResetPath = here + "/firewirebusreset";
     const std::string engine48Path = here + "/fw1814analog48";
     const std::string engine44Path = here + "/fw1814analog44";
+    const std::string stateHelperPath = here + "/fw1814state";
 
     std::printf("macfw fw1814supervisor — resilient 44.1/48 kHz transport supervisor\n");
     std::printf("automatic reconnect and guarded bootloader recovery: enabled\n");
     std::printf("validated pre-transport FW1814 bus reset: enabled\n");
+    std::printf("persistent validated routing-state restore: enabled\n");
 
     std::chrono::milliseconds retryDelay(250);
     constexpr std::chrono::milliseconds kMaxRetryDelay(4000);
@@ -337,7 +410,8 @@ int main(int argc, char** argv) {
                         : "48 kHz analog transport engine");
         bool rateChangeRequested = false;
         const int engineStatus =
-            runEngine(enginePath, requestedRate, rateChangeRequested);
+            runEngine(enginePath, stateHelperPath, requestedRate,
+                      rateChangeRequested);
         if (gStopRequested) break;
 
         // Any engine exit outside supervisor shutdown means the next transport

@@ -3,6 +3,7 @@
 #include "blocking_pcm_tx.h"
 #include "capture_pump.h"
 #include "duplex_lifecycle.h"
+#include "engine_ready.h"
 #include "fw1814_control_server.h"
 #include "pcm_stream48.h"
 #include "playback_pump.h"
@@ -189,6 +190,8 @@ bool run() {
 
         if (!control.start(device, kRate))
             std::cerr << "warning: FW1814 control socket unavailable; audio will continue\n";
+
+        signalEngineReady();
 
         playbackShared.ring()->active.store(1, std::memory_order_release);
         playbackActive = true;
