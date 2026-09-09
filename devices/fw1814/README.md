@@ -20,8 +20,8 @@ The experimental FW1814 profile currently provides:
 - experimental runtime assignment of software returns 1/2 and 3/4 to Mixer
   buses 1/2 and 3/4;
 - experimental Mixer/AUX source selection for Analog Outputs 1/2 and 3/4;
-- experimental Mixer 1/2 or Mixer 3/4 source selection for both physical
-  headphone outputs;
+- hardware-validated, persistent Mixer 1/2 or Mixer 3/4 source selection for
+  both physical headphone outputs;
 - hardware-validated persistent restoration of the routing subset after
   transport restart, rate changes in both directions and reconnect at both
   supported rates.

@@ -45,9 +45,17 @@ The next documented register, `SRC_HP_OUT`, was then exercised through a
 guarded full-register diagnostic. Both physical headphone outputs followed
 Mixer 1/2 with `0x00010001`; changing only the second field to Mixer 3/4
 produced `0x00020001` and the two outputs followed their assigned mixer buses
-exactly. This validates the headphone source bit layout. Individual cached
-controls and persistence are the next integration step; AUX selection remains
-deferred until its signal path is established safely.
+exactly. This validated the headphone source bit layout and established
+`0x00010001` as the engine startup baseline.
+
+Individual cached controls were then enabled for both headphone outputs.
+Headphone Output 2 retained its Mixer 3/4 selection (`0x00020001`) across a
+launchd transport restart, while Headphone Output 1 retained its reciprocal
+Mixer 3/4 selection (`0x00010002`) across a 48 -> 44.1 kHz engine transition.
+Both returned independently to Mixer 1/2 and the complete cache returned to
+`0x00010001`. The two validated mixer sources are now part of persistent state
+and Reset Defaults. AUX selection remains deferred until its signal path is
+established safely.
 
 ## 2026-09-08 — Native 44.1 kHz CoreAudio and dynamic rate switching validated
 

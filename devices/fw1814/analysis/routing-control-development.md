@@ -176,7 +176,7 @@ Mixer 1/2 while Headphone Output 2 followed Mixer 3/4 exactly. Both were then
 restored to Mixer 1/2. AUX was not tested because its input levels have not yet
 been established by macfw.
 
-## Next hardware validation
+## Validated individual headphone controls
 
 Confirm the production individual-control and persistence path:
 
@@ -190,14 +190,18 @@ fw1814ctl headphone-source set 2 mixer1/2
 fw1814state show
 ```
 
-Expected behavior:
+Observed behavior on 2026-09-09:
 
-- startup reports `SRC_HP_OUT=0x00010001`;
-- changing Headphone Output 2 produces `SRC_HP_OUT=0x00020001` without
-  changing Headphone Output 1;
-- the non-default selection survives the launchd restart;
-- restoring Output 2 to Mixer 1/2 returns `SRC_HP_OUT` to `0x00010001` and
-  updates the saved state;
-- analog playback and capture remain unaffected throughout.
+- startup reported `SRC_HP_OUT=0x00010001`;
+- changing Headphone Output 2 produced `SRC_HP_OUT=0x00020001` without
+  changing Headphone Output 1, and the selection survived a launchd restart;
+- changing Headphone Output 1 produced the reciprocal
+  `SRC_HP_OUT=0x00010002` without changing Headphone Output 2, and the
+  selection survived a 48 -> 44.1 kHz engine transition;
+- both outputs restored independently to Mixer 1/2 and returned the complete
+  cache to `SRC_HP_OUT=0x00010001`;
+- the persistent state path accepted both typed headphone controls while still
+  rejecting the unvalidated AUX source.
 
-Do not test the headphone AUX source as part of this step.
+Both headphone fields, their differential cached writes and persistence are
+now hardware-validated. The headphone AUX source remains disabled.
