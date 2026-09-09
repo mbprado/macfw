@@ -2,6 +2,9 @@
 
 The FW1814 is the second macfw device target.
 
+See [`HISTORY.md`](HISTORY.md) for the main hardware and integration
+milestones.
+
 ## Current scope
 
 The experimental FW1814 profile currently provides:
