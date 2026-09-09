@@ -30,6 +30,7 @@ class SpecialMixerRoutingModel {
 public:
     static constexpr std::size_t kStreamSourceCount = 2;
     static constexpr std::size_t kMixerBusCount = 2;
+    static constexpr std::size_t kAnalogInputPairCount = 4;
     static constexpr std::size_t kAnalogOutputPairCount = 2;
     static constexpr std::size_t kHeadphoneOutputCount = 2;
 
@@ -69,6 +70,19 @@ public:
         kStreamRouteMasks{{
             {{0x04u, 0x08u}},
             {{0x01u, 0x02u}},
+        }};
+
+    // MIX_ANA_DIG_IN low-byte layout documented by FFADO:
+    //   bits 0..3: Analog 1/2, 3/4, 5/6, 7/8 -> Mixer 1/2
+    //   bits 4..7: Analog 1/2, 3/4, 5/6, 7/8 -> Mixer 3/4
+    inline static constexpr std::array<std::array<std::uint32_t,
+                                                  kMixerBusCount>,
+                                       kAnalogInputPairCount>
+        kAnalogInputRouteMasks{{
+            {{0x01u, 0x10u}},
+            {{0x02u, 0x20u}},
+            {{0x04u, 0x40u}},
+            {{0x08u, 0x80u}},
         }};
 
     void loadStraightAnalogPlaybackPreset() {

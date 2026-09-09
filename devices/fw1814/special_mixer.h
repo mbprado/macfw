@@ -12,6 +12,7 @@ namespace macfw::fw1814 {
 // FFADO-documented M-Audio special-firmware mixer area. These registers are
 // write-only on FW1814/ProjectMix; never read them back or probe nearby offsets.
 inline constexpr UInt16 kMixerAddressHi = 0xffc7;
+inline constexpr UInt32 kMixAnalogDigitalInLo = 0x00700090; // MIX_ANA_DIG_IN
 inline constexpr UInt32 kMixStreamInLo = 0x00700094;  // MIX_STM_IN
 inline constexpr UInt32 kSrcHeadphoneOutLo = 0x00700098; // SRC_HP_OUT
 inline constexpr UInt32 kSrcAnalogOutLo = 0x0070009c; // SRC_ANA_OUT

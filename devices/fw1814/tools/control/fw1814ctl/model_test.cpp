@@ -21,6 +21,15 @@ int main() {
     assert(model.streamRoute(Model::StreamSource::Stream34,
                              Model::MixerBus::Mixer34));
 
+    assert(Model::kAnalogInputRouteMasks[0][0] == 0x01u);
+    assert(Model::kAnalogInputRouteMasks[0][1] == 0x10u);
+    assert(Model::kAnalogInputRouteMasks[1][0] == 0x02u);
+    assert(Model::kAnalogInputRouteMasks[1][1] == 0x20u);
+    assert(Model::kAnalogInputRouteMasks[2][0] == 0x04u);
+    assert(Model::kAnalogInputRouteMasks[2][1] == 0x40u);
+    assert(Model::kAnalogInputRouteMasks[3][0] == 0x08u);
+    assert(Model::kAnalogInputRouteMasks[3][1] == 0x80u);
+
     model.setStreamRoute(Model::StreamSource::Stream12,
                          Model::MixerBus::Mixer34, true);
     assert(model.mixStreamIn() == 0x0000000eu);

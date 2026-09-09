@@ -55,7 +55,25 @@ their respective mixer buses exactly. The engine now establishes
 individual changes. AUX remains disabled in the persistent command surface
 until its signal path is tested separately.
 
-`MIX_ANA_DIG_IN`, gain, pan and AUX-level registers remain untouched.
+The guarded analog-input diagnostic uses `MIX_ANA_DIG_IN` at offset `0x90`.
+Only its FFADO-documented low-byte analog routes are exposed:
+
+| Analog input pair | -> Mixer 1/2 | -> Mixer 3/4 |
+|---|---:|---:|
+| Analog 1/2 | `0x01` | `0x10` |
+| Analog 3/4 | `0x02` | `0x20` |
+| Analog 5/6 | `0x04` | `0x40` |
+| Analog 7/8 | `0x08` | `0x80` |
+
+Unlike the production routing subset, the engine does not establish a startup
+value for this register. The diagnostic therefore rejects reads and
+differential changes until `input-mixer initialize` explicitly writes the
+complete value zero. This disables every analog and digital input route and
+establishes an authoritative temporary cache. Every later diagnostic write is
+restricted to the low byte, keeping all digital-input bits zero. The state is
+not persisted or included in `routing get`.
+
+Gain, pan, digital-input and AUX-level controls remain untouched.
 
 ## Command surface
 
@@ -69,6 +87,10 @@ fw1814ctl output-source set 1/2|3/4 mixer|aux
 fw1814ctl headphone-state get
 fw1814ctl headphone-source get 1|2
 fw1814ctl headphone-source set 1|2 mixer1/2|mixer3/4
+fw1814ctl input-mixer initialize
+fw1814ctl input-mixer get
+fw1814ctl input-mixer-route get analog1/2|analog3/4|analog5/6|analog7/8 1/2|3/4
+fw1814ctl input-mixer-route set analog1/2|analog3/4|analog5/6|analog7/8 1/2|3/4 on|off
 fw1814ctl routing get
 ```
 
@@ -148,9 +170,8 @@ Observed behavior on 2026-09-09:
   `MIX_STM_IN=0x00000006` and `SRC_ANA_OUT=0x00000000`.
 
 This validates the complete persistence lifecycle for the currently enabled
-register subset. Headphone routing remains diagnostic-only; analog-input,
-digital-input, gain, pan and AUX-level controls remain outside the enabled
-surface.
+register subset. Analog-input diagnostics, digital-input, gain, pan and
+AUX-level controls remain outside the persistent surface.
 
 ## Validated headphone-source diagnostic
 
@@ -205,3 +226,30 @@ Observed behavior on 2026-09-09:
 
 Both headphone fields, their differential cached writes and persistence are
 now hardware-validated. The headphone AUX source remains disabled.
+
+## Analog-input mixer diagnostic
+
+This test starts with one full-register zero write, then changes exactly one
+documented route bit. Connect a known signal at a comfortable level to physical
+Analog Input 1 and monitor Mixer 1/2 through Analog Outputs 1/2 or either
+headphone output:
+
+```bash
+fw1814ctl input-mixer initialize
+fw1814ctl input-mixer get
+fw1814ctl input-mixer-route set analog1/2 1/2 on
+fw1814ctl input-mixer get
+fw1814ctl input-mixer-route set analog1/2 1/2 off
+fw1814ctl input-mixer get
+```
+
+The initialization and final state should report
+`MIX_ANA_DIG_IN=0x00000000`. Enabling the single route should report
+`MIX_ANA_DIG_IN=0x00000001`; the input signal should become audible on Mixer
+1/2 without disturbing host playback, then disappear when the route is turned
+off. Do not test Mixer 3/4, other input pairs, digital inputs, gain, pan or AUX
+in this first pass.
+
+This diagnostic state intentionally disappears when the transport restarts.
+A new engine rejects `input-mixer get` and `input-mixer-route` until an explicit
+`input-mixer initialize` establishes the complete zero baseline again.

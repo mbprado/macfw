@@ -27,6 +27,15 @@ constexpr std::array<const char*, RoutingModel::kStreamSourceCount>
     kMixerSourceLabels{{"SW Return 1/2", "SW Return 3/4"}};
 constexpr std::array<const char*, RoutingModel::kMixerBusCount>
     kMixerBusArgs{{"1/2", "3/4"}};
+constexpr std::array<const char*, RoutingModel::kAnalogInputPairCount>
+    kInputPairArgs{{"analog1/2", "analog3/4", "analog5/6", "analog7/8"}};
+constexpr std::array<const char*, RoutingModel::kAnalogInputPairCount>
+    kInputPairLabels{{
+        "Analog Inputs 1/2",
+        "Analog Inputs 3/4",
+        "Analog Inputs 5/6",
+        "Analog Inputs 7/8",
+    }};
 constexpr std::array<const char*, RoutingModel::kAnalogOutputPairCount>
     kOutputPairArgs{{"1/2", "3/4"}};
 constexpr std::array<const char*, RoutingModel::kAnalogOutputPairCount>
@@ -49,6 +58,12 @@ int usage() {
         << "  fw1814ctl mixer get\n"
         << "  fw1814ctl mixer-route get sw1/2|sw3/4 1/2|3/4\n"
         << "  fw1814ctl mixer-route set sw1/2|sw3/4 1/2|3/4 on|off\n"
+        << "  fw1814ctl input-mixer initialize\n"
+        << "  fw1814ctl input-mixer get\n"
+        << "  fw1814ctl input-mixer-route get "
+           "analog1/2|analog3/4|analog5/6|analog7/8 1/2|3/4\n"
+        << "  fw1814ctl input-mixer-route set "
+           "analog1/2|analog3/4|analog5/6|analog7/8 1/2|3/4 on|off\n"
         << "  fw1814ctl output-state get\n"
         << "  fw1814ctl output-source get 1/2|3/4\n"
         << "  fw1814ctl output-source set 1/2|3/4 mixer|aux\n"
@@ -358,6 +373,119 @@ int mixerRouteCommand(const std::string& action, int argc, char** argv) {
     return 0;
 }
 
+int inputMixerInitialize() {
+    std::string payload;
+    if (!payloadFor("INPUT_MIXER INITIALIZE", payload)) return 1;
+
+    std::uint32_t raw = 0;
+    if (!parseRawWord(payload, raw) || raw != 0) {
+        std::cerr << "fw1814ctl: invalid input-mixer initialize response: "
+                  << payload << '\n';
+        return 1;
+    }
+    std::cout << "FW1814 analog input mixer initialized: all analog and "
+                 "digital input routes are off\n"
+              << "MIX_ANA_DIG_IN: " << payload
+              << " (write-only diagnostic cache)\n";
+    return 0;
+}
+
+int inputMixerGet() {
+    std::string payload;
+    if (!payloadFor("INPUT_MIXER GET", payload)) return 1;
+
+    std::istringstream input(payload);
+    std::array<std::array<unsigned, RoutingModel::kMixerBusCount>,
+               RoutingModel::kAnalogInputPairCount> routes{};
+    for (auto& source : routes)
+        for (auto& destination : source)
+            if (!(input >> destination) || destination > 1) {
+                std::cerr << "fw1814ctl: invalid input-mixer response: "
+                          << payload << '\n';
+                return 1;
+            }
+
+    std::string raw;
+    std::string extra;
+    if (!(input >> raw) || (input >> extra)) {
+        std::cerr << "fw1814ctl: invalid input-mixer response: " << payload
+                  << '\n';
+        return 1;
+    }
+    std::uint32_t rawValue = 0;
+    if (!parseRawWord(raw, rawValue) || rawValue > 0xffu) {
+        std::cerr << "fw1814ctl: invalid MIX_ANA_DIG_IN value\n";
+        return 1;
+    }
+
+    std::cout << "FW1814 analog input mixer (diagnostic cache):\n";
+    for (std::size_t source = 0; source < routes.size(); ++source) {
+        std::cout << "  " << kInputPairLabels[source] << ":";
+        for (std::size_t destination = 0;
+             destination < routes[source].size(); ++destination)
+            std::cout << "  " << kMixerBusArgs[destination] << '='
+                      << onOff(routes[source][destination] != 0);
+        std::cout << '\n';
+    }
+    std::cout << "  MIX_ANA_DIG_IN: " << raw
+              << " (write-only diagnostic cache)\n";
+    return 0;
+}
+
+int inputMixerRouteCommand(const std::string& action,
+                           int argc,
+                           char** argv) {
+    if ((action == "get" && argc != 5) ||
+        (action == "set" && argc != 6))
+        return usage();
+    const int source = indexOf(argv[3], kInputPairArgs.data(),
+                               kInputPairArgs.size());
+    const int destination = indexOf(argv[4], kMixerBusArgs.data(),
+                                    kMixerBusArgs.size());
+    if (source < 0 || destination < 0) return usage();
+
+    int value = -1;
+    if (action == "set") {
+        const std::string state = argv[5];
+        value = state == "on" ? 1 : state == "off" ? 0 : -1;
+        if (value < 0) return usage();
+    }
+
+    std::string command = "INPUT_MIXER ROUTE " +
+        std::string(action == "get" ? "GET " : "SET ") +
+        std::to_string(source) + " " + std::to_string(destination);
+    if (action == "set") command += " " + std::to_string(value);
+
+    std::string payload;
+    if (!payloadFor(command, payload)) return 1;
+    std::istringstream input(payload);
+    int returnedSource = -1;
+    int returnedDestination = -1;
+    int returnedValue = -1;
+    std::string raw;
+    std::string extra;
+    if (!(input >> returnedSource >> returnedDestination >> returnedValue >>
+          raw) || (input >> extra) || returnedSource != source ||
+        returnedDestination != destination || returnedValue < 0 ||
+        returnedValue > 1) {
+        std::cerr << "fw1814ctl: invalid input-mixer-route response: "
+                  << payload << '\n';
+        return 1;
+    }
+    std::uint32_t rawValue = 0;
+    if (!parseRawWord(raw, rawValue) || rawValue > 0xffu) {
+        std::cerr << "fw1814ctl: invalid MIX_ANA_DIG_IN value\n";
+        return 1;
+    }
+
+    std::cout << kInputPairLabels[source] << " -> Mixer "
+              << kMixerBusArgs[destination] << ": "
+              << onOff(returnedValue != 0) << '\n'
+              << "MIX_ANA_DIG_IN: " << raw
+              << " (write-only diagnostic cache)\n";
+    return 0;
+}
+
 int outputStateGet() {
     std::string payload;
     if (!payloadFor("OUTPUT GET", payload)) return 1;
@@ -551,6 +679,14 @@ int main(int argc, char** argv) {
     if (control == "mixer-route")
         return action == "get" || action == "set"
             ? mixerRouteCommand(action, argc, argv)
+            : usage();
+    if (control == "input-mixer")
+        return action == "initialize" && argc == 3
+            ? inputMixerInitialize()
+            : action == "get" && argc == 3 ? inputMixerGet() : usage();
+    if (control == "input-mixer-route")
+        return action == "get" || action == "set"
+            ? inputMixerRouteCommand(action, argc, argv)
             : usage();
     if (control == "output-state")
         return action == "get" && argc == 3 ? outputStateGet() : usage();
