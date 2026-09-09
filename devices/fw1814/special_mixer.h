@@ -1,5 +1,6 @@
 #pragma once
 
+#include "special_mixer_model.h"
 #include "macfw/firewire_device.h"
 
 #include <array>
@@ -13,9 +14,6 @@ namespace macfw::fw1814 {
 inline constexpr UInt16 kMixerAddressHi = 0xffc7;
 inline constexpr UInt32 kMixStreamInLo = 0x00700094;  // MIX_STM_IN
 inline constexpr UInt32 kSrcAnalogOutLo = 0x0070009c; // SRC_ANA_OUT
-
-inline constexpr std::uint32_t kStraightStreamToMixer = 0x00000006u;
-inline constexpr std::uint32_t kAnalogFromMixers = 0x00000000u;
 
 inline std::array<std::uint8_t, 4> mixerBe32(std::uint32_t value) {
     return {{
@@ -34,6 +32,25 @@ inline bool writeMixerRegister(FireWireDevice& device,
     const IOReturn kr = device.write(
         kMixerAddressHi, addressLo, bytes.data(), size);
     return kr == kIOReturnSuccess && size == bytes.size();
+}
+
+inline bool mixerGenerationMatches(FireWireDevice& device,
+                                   UInt32 expectedGeneration) {
+    auto native = device.nativeHandle();
+    if (!native || expectedGeneration == 0) return false;
+    UInt32 currentGeneration = 0;
+    return (*native)->GetBusGeneration(native, &currentGeneration) ==
+               kIOReturnSuccess &&
+           currentGeneration == expectedGeneration;
+}
+
+inline bool writeMixerRegisterForGeneration(FireWireDevice& device,
+                                            UInt32 expectedGeneration,
+                                            UInt32 addressLo,
+                                            std::uint32_t value) {
+    if (!mixerGenerationMatches(device, expectedGeneration)) return false;
+    if (!writeMixerRegister(device, addressLo, value)) return false;
+    return mixerGenerationMatches(device, expectedGeneration);
 }
 
 inline bool applyStraightAnalogPlaybackRouting(FireWireDevice& device,

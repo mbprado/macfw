@@ -12,9 +12,12 @@ The experimental FW1814 profile currently provides:
 - rate switching from Audio MIDI Setup;
 - automatic boot, transport restart and disconnect/reconnect recovery;
 - restoration of the previously selected rate after reconnect;
-- a transport-owned, read-only routing-control API for the future GUI.
+- a transport-owned routing-control API and authoritative write-only register
+  cache for the future GUI;
+- experimental runtime assignment of software returns 1/2 and 3/4 to Mixer
+  buses 1/2 and 3/4.
 
-S/PDIF, ADAT, 88.2/96/176.4/192 kHz, writable routing controls and the native control panel remain under development. MIDI is intentionally deferred until the audio/control surface is complete.
+S/PDIF, ADAT, 88.2/96/176.4/192 kHz, analog/digital input routing, output-source selection, levels, headphone controls and the native control panel remain under development. MIDI is intentionally deferred until the audio/control surface is complete.
 
 ## Architecture
 
@@ -46,12 +49,16 @@ Build every FW1814 reverse-engineering/diagnostic tool with `make fw1814-tools`.
 
 ## Routing control API
 
-The active transport owns `/tmp/macfw-fw1814-control.sock`; clients never open FireWire independently. The initial `fw1814ctl` surface is deliberately read-only because the special-firmware mixer registers cannot be queried safely:
+The active transport owns `/tmp/macfw-fw1814-control.sock`; clients never open FireWire independently. The special-firmware mixer registers cannot be queried safely, so the engine establishes a known startup baseline and caches every successful differential update:
 
 ```bash
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" routing get
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" mixer get
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" mixer-route get sw1/2 1/2
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" mixer-route set sw1/2 3/4 on
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" mixer-route set sw1/2 3/4 off
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" capabilities get
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" engine get
 ```
 
-This establishes the backend boundary for the future GUI. Writable controls will be enabled only as individual documented register values are hardware-validated.
+Only the already-established `MIX_STM_IN` register is writable through this first experimental command set. A changed route returns to the proven straight-through baseline when the engine restarts; persistence is deliberately deferred until the routing behavior is hardware-validated. See [`analysis/routing-control-development.md`](analysis/routing-control-development.md) for the enabled subset and test sequence.

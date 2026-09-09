@@ -25,7 +25,7 @@ $(LIBMACFW):
 
 $(ANALOG48): analog48_main.cpp blocking_pcm_tx.h pcm_stream48.h capture_pump.h \
 	duplex_lifecycle.h fw1814_control_server.h playback_pump.h realtime_service.h shared_io.h \
-	../channel_map.h ../fcp_control.h ../special_mixer.h \
+	../channel_map.h ../fcp_control.h ../special_mixer.h ../special_mixer_model.h \
 	../hal/include/macfw_fw1814_hal_shm.h \
 	../hal/include/macfw_fw1814_capture_shm.h $(LIBMACFW)
 	$(CXX) $(CXXFLAGS) -I$(LIBMACFW_INCLUDE) -I$(DEVICE_INCLUDE) -I$(HAL_INCLUDE) \
@@ -33,7 +33,7 @@ $(ANALOG48): analog48_main.cpp blocking_pcm_tx.h pcm_stream48.h capture_pump.h \
 
 $(ANALOG44): analog44_main.cpp blocking_pcm_tx44.h capture_pump44.h \
 	duplex_lifecycle.h fw1814_control_server.h playback_pump.h realtime_service.h shared_io.h \
-	../channel_map.h ../fcp_control.h ../special_mixer.h \
+	../channel_map.h ../fcp_control.h ../special_mixer.h ../special_mixer_model.h \
 	../hal/include/macfw_fw1814_hal_shm.h \
 	../hal/include/macfw_fw1814_capture_shm.h $(LIBMACFW)
 	$(CXX) $(CXXFLAGS) -I$(LIBMACFW_INCLUDE) -I$(DEVICE_INCLUDE) -I$(HAL_INCLUDE) \
@@ -53,7 +53,7 @@ $(DUPLEX44_PROBE): ../tools/fw1814duplex44.cpp blocking_pcm_tx44.h \
 
 $(TONE44_PROBE): ../tools/fw1814tone44.cpp blocking_pcm_tx44.h \
 	duplex_lifecycle.h realtime_service.h ../channel_map.h ../fcp_control.h \
-	../special_mixer.h $(LIBMACFW)
+	../special_mixer.h ../special_mixer_model.h $(LIBMACFW)
 	$(CXX) $(CXXFLAGS) -I$(LIBMACFW_INCLUDE) -I$(DEVICE_INCLUDE) -I$(HAL_INCLUDE) \
 		../tools/fw1814tone44.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
 
