@@ -37,6 +37,10 @@ constexpr std::array<const char*, 3> kHeadphoneSourceArgs{{
 constexpr std::array<const char*, 3> kHeadphoneSourceLabels{{
     "Mixer 1/2", "Mixer 3/4", "AUX 1/2",
 }};
+constexpr std::array<const char*, RoutingModel::kHeadphoneOutputCount>
+    kHeadphoneOutputArgs{{"1", "2"}};
+constexpr std::array<const char*, RoutingModel::kHeadphoneOutputCount>
+    kHeadphoneOutputLabels{{"Headphone Output 1", "Headphone Output 2"}};
 
 int usage() {
     std::cerr
@@ -49,8 +53,8 @@ int usage() {
         << "  fw1814ctl output-source get 1/2|3/4\n"
         << "  fw1814ctl output-source set 1/2|3/4 mixer|aux\n"
         << "  fw1814ctl headphone-state get\n"
-        << "  fw1814ctl headphone-source set-all "
-           "mixer1/2|mixer3/4|aux mixer1/2|mixer3/4|aux\n"
+        << "  fw1814ctl headphone-source get 1|2\n"
+        << "  fw1814ctl headphone-source set 1|2 mixer1/2|mixer3/4\n"
         << "  fw1814ctl capabilities get\n"
         << "  fw1814ctl engine get\n\n"
         << "FW1814 mixer registers are write-only. The active transport "
@@ -214,10 +218,11 @@ int routingGet() {
     unsigned rate = 0;
     std::string mixStreamText;
     std::string analogOutputText;
+    std::string headphoneOutputText;
     std::string stateSource;
     std::string extra;
     if (!(input >> profile >> rate >> mixStreamText >> analogOutputText >>
-          stateSource) || (input >> extra)) {
+          headphoneOutputText >> stateSource) || (input >> extra)) {
         std::cerr << "fw1814ctl: invalid routing response: " << payload
                   << '\n';
         return 1;
@@ -225,8 +230,10 @@ int routingGet() {
 
     std::uint32_t mixStreamIn = 0;
     std::uint32_t srcAnalogOut = 0;
+    std::uint32_t srcHeadphoneOut = 0;
     if (!parseRawWord(mixStreamText, mixStreamIn) ||
-        !parseRawWord(analogOutputText, srcAnalogOut)) {
+        !parseRawWord(analogOutputText, srcAnalogOut) ||
+        !parseRawWord(headphoneOutputText, srcHeadphoneOut)) {
         std::cerr << "fw1814ctl: invalid routing register value\n";
         return 1;
     }
@@ -253,8 +260,18 @@ int routingGet() {
         std::cout << "  " << kOutputPairLabels[pair] << ": "
                   << outputSourceName(source) << '\n';
     }
+    for (std::size_t output = 0;
+         output < RoutingModel::kHeadphoneOutputCount; ++output) {
+        const std::uint32_t field =
+            (srcHeadphoneOut >> (output * 16)) & 0xffffu;
+        const unsigned source =
+            field & 0x04u ? 2u : field & 0x02u ? 1u : 0u;
+        std::cout << "  " << kHeadphoneOutputLabels[output] << ": "
+                  << headphoneSourceName(source) << '\n';
+    }
     std::cout << "  MIX_STM_IN: " << mixStreamText << '\n'
               << "  SRC_ANA_OUT: " << analogOutputText << '\n'
+              << "  SRC_HP_OUT: " << headphoneOutputText << '\n'
               << "  hardware readback: unavailable (" << stateSource
               << ")\n";
     return 0;
@@ -440,20 +457,55 @@ int headphoneStateGet() {
     return printHeadphoneState(payload);
 }
 
-int headphoneSourceSetAll(int argc, char** argv) {
-    if (argc != 5) return usage();
-    const int first = indexOf(argv[3], kHeadphoneSourceArgs.data(),
-                              kHeadphoneSourceArgs.size());
-    const int second = indexOf(argv[4], kHeadphoneSourceArgs.data(),
-                               kHeadphoneSourceArgs.size());
-    if (first < 0 || second < 0) return usage();
+int headphoneSourceCommand(const std::string& action,
+                           int argc,
+                           char** argv) {
+    if ((action == "get" && argc != 4) ||
+        (action == "set" && argc != 5))
+        return usage();
+    const int output = indexOf(argv[3], kHeadphoneOutputArgs.data(),
+                               kHeadphoneOutputArgs.size());
+    if (output < 0) return usage();
+
+    int source = -1;
+    if (action == "set") {
+        source = indexOf(argv[4], kHeadphoneSourceArgs.data(), 2);
+        if (source < 0) return usage();
+    }
+
+    std::string command = "HEADPHONE SOURCE " +
+        std::string(action == "get" ? "GET " : "SET ") +
+        std::to_string(output);
+    if (action == "set") command += " " + std::to_string(source);
 
     std::string payload;
-    if (!payloadFor("HEADPHONE SOURCE SET_ALL " +
-                    std::to_string(first) + " " +
-                    std::to_string(second), payload))
+    if (!payloadFor(command, payload)) return 1;
+    std::istringstream input(payload);
+    int returnedOutput = -1;
+    int returnedSource = -1;
+    std::string raw;
+    std::string extra;
+    if (!(input >> returnedOutput >> returnedSource >> raw) ||
+        (input >> extra) || returnedOutput != output ||
+        returnedSource < 0 || returnedSource > 2) {
+        std::cerr << "fw1814ctl: invalid headphone-source response: "
+                  << payload << '\n';
         return 1;
-    return printHeadphoneState(payload);
+    }
+    std::uint32_t rawValue = 0;
+    if (!parseRawWord(raw, rawValue)) {
+        std::cerr << "fw1814ctl: invalid SRC_HP_OUT value\n";
+        return 1;
+    }
+    std::cout << kHeadphoneOutputLabels[output] << ": "
+              << headphoneSourceName(static_cast<unsigned>(returnedSource))
+              << '\n'
+              << "SRC_HP_OUT: " << raw << " (write-only cache)\n";
+    if (action == "set")
+        persistSuccessfulSet(argv[0],
+                             "headphone-source:" + std::string(argv[3]),
+                             argc, argv);
+    return 0;
 }
 
 int capabilitiesGet() {
@@ -509,8 +561,8 @@ int main(int argc, char** argv) {
     if (control == "headphone-state")
         return action == "get" && argc == 3 ? headphoneStateGet() : usage();
     if (control == "headphone-source")
-        return action == "set-all"
-            ? headphoneSourceSetAll(argc, argv)
+        return action == "get" || action == "set"
+            ? headphoneSourceCommand(action, argc, argv)
             : usage();
     if (control == "capabilities")
         return action == "get" && argc == 3 ? capabilitiesGet() : usage();

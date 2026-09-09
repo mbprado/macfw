@@ -40,18 +40,20 @@ The proven startup value is `0x00000000`, selecting the corresponding mixer bus 
 
 The Analog Outputs 3/4 selector was hardware-validated at 48 kHz on 2026-09-09. With Software Return 1/2 mirrored to both mixer buses, selecting AUX changed only Outputs 3/4 and produced the expected cached value `0x00000002`. Selecting Mixer restored the signal and returned the register cache to `0x00000000`; Outputs 1/2 remained unaffected throughout.
 
-The next guarded diagnostic targets `SRC_HP_OUT` at offset `0x98`. FFADO
-documents two independent 16-bit one-hot fields:
+`SRC_HP_OUT` at offset `0x98` contains two independent 16-bit one-hot fields:
 
 | Field | Physical output | `0x01` | `0x02` | `0x04` |
 |---|---|---|---|---|
 | bits 15:0 | Headphone Output 1 | Mixer 1/2 | Mixer 3/4 | AUX 1/2 |
 | bits 31:16 | Headphone Output 2 | Mixer 1/2 | Mixer 3/4 | AUX 1/2 |
 
-Because this register is write-only and macfw has not established a headphone
-startup baseline yet, the diagnostic accepts only an explicit pair of sources
-and writes the complete quadlet. Individual differential changes and
-persistence remain disabled until the mapping is verified on hardware.
+The full-register diagnostic was hardware-validated on 2026-09-09. Both
+physical headphone outputs followed Mixer 1/2 with `0x00010001`; changing only
+the second field to Mixer 3/4 produced `0x00020001`, and the outputs followed
+their respective mixer buses exactly. The engine now establishes
+`0x00010001` as its complete headphone startup baseline, allowing safe cached
+individual changes. AUX remains disabled in the persistent command surface
+until its signal path is tested separately.
 
 `MIX_ANA_DIG_IN`, gain, pan and AUX-level registers remain untouched.
 
@@ -65,13 +67,18 @@ fw1814ctl output-state get
 fw1814ctl output-source get 1/2|3/4
 fw1814ctl output-source set 1/2|3/4 mixer|aux
 fw1814ctl headphone-state get
-fw1814ctl headphone-source set-all <hp1-source> <hp2-source>
+fw1814ctl headphone-source get 1|2
+fw1814ctl headphone-source set 1|2 mixer1/2|mixer3/4
 fw1814ctl routing get
 ```
 
 Successful writes to this validated subset are recorded by `fw1814state` in `/Library/Application Support/macfw/fw1814/control-state.conf`. After each native engine reports low-level readiness, the supervisor replays the saved typed `fw1814ctl` commands through the normal transport-owned socket. The state helper rejects unknown command shapes and never accepts raw register addresses or values.
 
-With no saved overrides, a new engine keeps the hardware-proven `MIX_STM_IN=0x00000006` and `SRC_ANA_OUT=0x00000000` startup baseline. `fw1814state reset` applies and saves all six default routing cells/selectors. `fw1814state clear` empties the saved file without changing current hardware state.
+With no saved overrides, a new engine keeps the hardware-proven
+`MIX_STM_IN=0x00000006`, `SRC_ANA_OUT=0x00000000` and
+`SRC_HP_OUT=0x00010001` startup baseline. `fw1814state reset` applies and saves
+all eight default routing cells/selectors. `fw1814state clear` empties the saved
+file without changing current hardware state.
 
 ## Validated mixer test
 
@@ -145,7 +152,7 @@ register subset. Headphone routing remains diagnostic-only; analog-input,
 digital-input, gain, pan and AUX-level controls remain outside the enabled
 surface.
 
-## Next hardware validation
+## Validated headphone-source diagnostic
 
 With playback sent only to Software Return 1/2 and both headphone volumes at a
 comfortable level, initialize both physical headphone outputs from Mixer 1/2:
@@ -155,16 +162,42 @@ fw1814ctl headphone-source set-all mixer1/2 mixer1/2
 fw1814ctl headphone-state get
 ```
 
-The expected cache is `SRC_HP_OUT=0x00010001`, with clean Software Return 1/2
-audio on both headphone outputs. Then select Mixer 3/4 for only the second
-headphone output:
+The resulting cache was `SRC_HP_OUT=0x00010001`, with clean Software Return 1/2
+audio on both headphone outputs. Mixer 3/4 was then selected for only the
+second headphone output:
 
 ```bash
 fw1814ctl headphone-source set-all mixer1/2 mixer3/4
 fw1814ctl headphone-state get
 ```
 
-The expected cache is `SRC_HP_OUT=0x00020001`. Headphone Output 1 must remain
-on Mixer 1/2 while Headphone Output 2 follows Mixer 3/4. Restore both to Mixer
-1/2 after the observation. Do not test AUX yet; its input levels have not been
-established by macfw.
+The resulting cache was `SRC_HP_OUT=0x00020001`. Headphone Output 1 remained on
+Mixer 1/2 while Headphone Output 2 followed Mixer 3/4 exactly. Both were then
+restored to Mixer 1/2. AUX was not tested because its input levels have not yet
+been established by macfw.
+
+## Next hardware validation
+
+Confirm the production individual-control and persistence path:
+
+```bash
+fw1814ctl routing get
+fw1814ctl headphone-source set 2 mixer3/4
+fw1814ctl headphone-state get
+sudo launchctl kickstart -k system/com.mbprado.macfw.fw1814.transport
+fw1814ctl routing get
+fw1814ctl headphone-source set 2 mixer1/2
+fw1814state show
+```
+
+Expected behavior:
+
+- startup reports `SRC_HP_OUT=0x00010001`;
+- changing Headphone Output 2 produces `SRC_HP_OUT=0x00020001` without
+  changing Headphone Output 1;
+- the non-default selection survives the launchd restart;
+- restoring Output 2 to Mixer 1/2 returns `SRC_HP_OUT` to `0x00010001` and
+  updates the saved state;
+- analog playback and capture remain unaffected throughout.
+
+Do not test the headphone AUX source as part of this step.

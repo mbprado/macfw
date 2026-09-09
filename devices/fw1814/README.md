@@ -20,11 +20,13 @@ The experimental FW1814 profile currently provides:
 - experimental runtime assignment of software returns 1/2 and 3/4 to Mixer
   buses 1/2 and 3/4;
 - experimental Mixer/AUX source selection for Analog Outputs 1/2 and 3/4;
+- experimental Mixer 1/2 or Mixer 3/4 source selection for both physical
+  headphone outputs;
 - hardware-validated persistent restoration of the routing subset after
   transport restart, rate changes in both directions and reconnect at both
   supported rates.
 
-S/PDIF, ADAT, 88.2/96/176.4/192 kHz, analog/digital input routing, levels, headphone controls and the native control panel remain under development. MIDI is intentionally deferred until the audio/control surface is complete.
+S/PDIF, ADAT, 88.2/96/176.4/192 kHz, analog/digital input routing, levels, headphone AUX routing and the native control panel remain under development. MIDI is intentionally deferred until the audio/control surface is complete.
 
 ## Architecture
 
@@ -69,16 +71,21 @@ The active transport owns `/tmp/macfw-fw1814-control.sock`; clients never open F
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-source set 3/4 aux
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-source set 3/4 mixer
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-state get
-"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-source set-all mixer1/2 mixer1/2
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-source get 2
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-source set 2 mixer3/4
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-source set 2 mixer1/2
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" capabilities get
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" engine get
 "/Library/Application Support/macfw/fw1814/bin/fw1814state" show
 "/Library/Application Support/macfw/fw1814/bin/fw1814state" reset
 ```
 
-Only the hardware-validated `MIX_STM_IN` and `SRC_ANA_OUT` registers are writable through the persistent command set. Successful changes are recorded in `/Library/Application Support/macfw/fw1814/control-state.conf` and replayed after a new engine reports ready. `fw1814state reset` applies and saves the proven straight-through defaults; `clear` removes saved overrides without changing the current hardware state. See [`analysis/routing-control-development.md`](analysis/routing-control-development.md) for the enabled subset and validation sequence.
-
-`headphone-source set-all` is a guarded diagnostic for the documented
-write-only `SRC_HP_OUT` register. It always sets both physical headphone
-outputs in one complete write, is not persisted, and must be hardware-validated
-before individual headphone controls or startup defaults are enabled.
+Only the hardware-validated `MIX_STM_IN`, `SRC_ANA_OUT` and `SRC_HP_OUT`
+fields are writable through the persistent command set. Successful changes are
+recorded in `/Library/Application Support/macfw/fw1814/control-state.conf` and
+replayed after a new engine reports ready. `fw1814state reset` applies and
+saves the proven straight-through defaults; `clear` removes saved overrides
+without changing the current hardware state. Headphone AUX selection remains
+disabled pending a separate signal-path test. See
+[`analysis/routing-control-development.md`](analysis/routing-control-development.md)
+for the enabled subset and validation sequence.

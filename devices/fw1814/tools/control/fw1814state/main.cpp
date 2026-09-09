@@ -23,6 +23,7 @@ constexpr const char* kFormat = "macfw-fw1814-control-state-v1";
 constexpr std::array<const char*, 2> kMixerSources{{"sw1/2", "sw3/4"}};
 constexpr std::array<const char*, 2> kMixerBuses{{"1/2", "3/4"}};
 constexpr std::array<const char*, 2> kOutputPairs{{"1/2", "3/4"}};
+constexpr std::array<const char*, 2> kHeadphoneOutputs{{"1", "2"}};
 
 struct Entry {
     std::string key;
@@ -67,6 +68,14 @@ bool validStoredCommand(const Entry& entry) {
         (entry.arguments[2] == "1/2" || entry.arguments[2] == "3/4") &&
         (entry.arguments[3] == "mixer" || entry.arguments[3] == "aux"))
         return entry.key == "output-source:" + entry.arguments[2];
+
+    if (entry.arguments.size() == 4 &&
+        entry.arguments[0] == "headphone-source" &&
+        entry.arguments[1] == "set" &&
+        (entry.arguments[2] == "1" || entry.arguments[2] == "2") &&
+        (entry.arguments[3] == "mixer1/2" ||
+         entry.arguments[3] == "mixer3/4"))
+        return entry.key == "headphone-source:" + entry.arguments[2];
 
     return false;
 }
@@ -207,7 +216,7 @@ int restoreEntries(const char* argv0, const std::vector<Entry>& entries) {
 
 std::vector<Entry> defaultState() {
     std::vector<Entry> entries;
-    entries.reserve(6);
+    entries.reserve(8);
     for (const char* sourceValue : kMixerSources) {
         for (const char* busValue : kMixerBuses) {
             const std::string source(sourceValue);
@@ -229,6 +238,15 @@ std::vector<Entry> defaultState() {
         Entry entry;
         entry.key = "output-source:" + pair;
         entry.arguments = {"output-source", "set", pair, "mixer"};
+        entries.push_back(std::move(entry));
+    }
+    for (const char* outputValue : kHeadphoneOutputs) {
+        const std::string output(outputValue);
+        Entry entry;
+        entry.key = "headphone-source:" + output;
+        entry.arguments = {
+            "headphone-source", "set", output, "mixer1/2",
+        };
         entries.push_back(std::move(entry));
     }
     return entries;

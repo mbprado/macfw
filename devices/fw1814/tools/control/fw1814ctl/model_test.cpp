@@ -8,6 +8,7 @@ int main() {
     Model model;
     model.loadStraightAnalogPlaybackPreset();
     assert(model.mixStreamIn() == 0x00000006u);
+    assert(model.srcHeadphoneOut() == 0x00010001u);
     assert(model.srcAnalogOut() == 0x00000000u);
     assert(model.isStraightAnalogPlaybackPreset());
 
@@ -53,5 +54,21 @@ int main() {
     assert(macfw::fw1814::headphoneSourceWord(
                HeadphoneSource::Mixer34, HeadphoneSource::Aux12) ==
            0x00040002u);
+
+    assert(model.headphoneSource(Model::HeadphoneOutput::Output1) ==
+           HeadphoneSource::Mixer12);
+    assert(model.headphoneSource(Model::HeadphoneOutput::Output2) ==
+           HeadphoneSource::Mixer12);
+    model.setHeadphoneSource(Model::HeadphoneOutput::Output2,
+                             HeadphoneSource::Mixer34);
+    assert(model.srcHeadphoneOut() == 0x00020001u);
+    assert(model.headphoneSource(Model::HeadphoneOutput::Output2) ==
+           HeadphoneSource::Mixer34);
+    assert(!model.isStraightAnalogPlaybackPreset());
+    model.setHeadphoneSource(Model::HeadphoneOutput::Output1,
+                             HeadphoneSource::Aux12);
+    assert(model.srcHeadphoneOut() == 0x00020004u);
+    model.loadStraightAnalogPlaybackPreset();
+    assert(model.isStraightAnalogPlaybackPreset());
     return 0;
 }

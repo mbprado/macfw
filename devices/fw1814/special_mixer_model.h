@@ -11,6 +11,7 @@ namespace macfw::fw1814 {
 // every runtime update must be derived from this authoritative software state.
 inline constexpr std::uint32_t kStraightStreamToMixer = 0x00000006u;
 inline constexpr std::uint32_t kAnalogFromMixers = 0x00000000u;
+inline constexpr std::uint32_t kHeadphonesFromMixer12 = 0x00010001u;
 
 enum class HeadphoneSource : std::uint32_t {
     Mixer12 = 0x01u,
@@ -30,6 +31,7 @@ public:
     static constexpr std::size_t kStreamSourceCount = 2;
     static constexpr std::size_t kMixerBusCount = 2;
     static constexpr std::size_t kAnalogOutputPairCount = 2;
+    static constexpr std::size_t kHeadphoneOutputCount = 2;
 
     enum class StreamSource : std::size_t {
         Stream12 = 0,
@@ -51,6 +53,11 @@ public:
         Aux = 1,
     };
 
+    enum class HeadphoneOutput : std::size_t {
+        Output1 = 0,
+        Output2,
+    };
+
     // MIX_STM_IN bit layout documented by FFADO:
     //   bit 3: Stream 1/2 -> Mixer 3/4
     //   bit 2: Stream 1/2 -> Mixer 1/2
@@ -66,11 +73,13 @@ public:
 
     void loadStraightAnalogPlaybackPreset() {
         mixStreamIn_ = kStraightStreamToMixer;
+        srcHeadphoneOut_ = kHeadphonesFromMixer12;
         srcAnalogOut_ = kAnalogFromMixers;
     }
 
     bool isStraightAnalogPlaybackPreset() const {
         return mixStreamIn_ == kStraightStreamToMixer &&
+               srcHeadphoneOut_ == kHeadphonesFromMixer12 &&
                srcAnalogOut_ == kAnalogFromMixers;
     }
 
@@ -105,7 +114,26 @@ public:
         srcAnalogOut_ &= 0x03u;
     }
 
+    HeadphoneSource headphoneSource(HeadphoneOutput output) const {
+        const std::size_t shift = index(output) * 16;
+        const std::uint32_t value = (srcHeadphoneOut_ >> shift) & 0xffffu;
+        return value & static_cast<std::uint32_t>(HeadphoneSource::Aux12)
+            ? HeadphoneSource::Aux12
+            : value & static_cast<std::uint32_t>(HeadphoneSource::Mixer34)
+                ? HeadphoneSource::Mixer34
+                : HeadphoneSource::Mixer12;
+    }
+
+    void setHeadphoneSource(HeadphoneOutput output, HeadphoneSource source) {
+        const std::size_t shift = index(output) * 16;
+        const std::uint32_t mask = 0xffffu << shift;
+        srcHeadphoneOut_ =
+            (srcHeadphoneOut_ & ~mask) |
+            (static_cast<std::uint32_t>(source) << shift);
+    }
+
     std::uint32_t mixStreamIn() const { return mixStreamIn_; }
+    std::uint32_t srcHeadphoneOut() const { return srcHeadphoneOut_; }
     std::uint32_t srcAnalogOut() const { return srcAnalogOut_; }
 
     static constexpr std::size_t index(StreamSource source) {
@@ -120,6 +148,10 @@ public:
         return static_cast<std::size_t>(pair);
     }
 
+    static constexpr std::size_t index(HeadphoneOutput output) {
+        return static_cast<std::size_t>(output);
+    }
+
 private:
     static constexpr std::uint32_t routeMask(StreamSource source,
                                              MixerBus destination) {
@@ -127,6 +159,7 @@ private:
     }
 
     std::uint32_t mixStreamIn_ = kStraightStreamToMixer;
+    std::uint32_t srcHeadphoneOut_ = kHeadphonesFromMixer12;
     std::uint32_t srcAnalogOut_ = kAnalogFromMixers;
 };
 

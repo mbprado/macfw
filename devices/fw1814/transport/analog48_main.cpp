@@ -206,7 +206,7 @@ bool run() {
         std::cout << "FW1814 analog engine ONLINE\n"
                   << "    CoreAudio-facing outputs: Analog 1-4\n"
                   << "    CoreAudio-facing inputs:  Analog 1-8\n"
-                  << "    digital/MIDI/headphone routing: deferred\n"
+                  << "    digital/MIDI/headphone levels: deferred\n"
                   << "    audio service: dedicated Mach-paced thread (250 us)\n"
                   << "    Ctrl-C to stop\n";
 
