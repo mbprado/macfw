@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mbprado.macfw.fw1814.transport</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Library/Application Support/macfw/fw1814/bin/fw1814supervisor</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MACFW_VERBOSE</key>
+        <string>1</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <key>StandardOutPath</key>
+    <string>/Library/Logs/macfw-fw1814-transport.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Library/Logs/macfw-fw1814-transport.log</string>
+</dict>
+</plist>

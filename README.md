@@ -4,7 +4,7 @@ Modern FireWire audio support for macOS.
 
 `macfw` is an open-source reverse-engineering and compatibility project focused on bringing legacy IEEE 1394 / FireWire audio interfaces back to life on modern macOS systems.
 
-The first supported target is the **M-Audio FireWire 410**. The repository is structured so reusable FireWire/audio components can eventually support additional devices and families.
+The released target is the **M-Audio FireWire 410**. The **M-Audio FireWire 1814** is the second, currently experimental target, and the repository separates reusable FireWire/audio components from device-specific implementations.
 
 ## Current status
 
@@ -51,70 +51,17 @@ Current cumulative macOS hardware-test status:
 
 Apple Silicon is not currently supported. See [`COMPATIBILITY.md`](COMPATIBILITY.md) and [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) for the evidence-based compatibility status.
 
-## Install
+The experimental FW1814 implementation now has hardware-validated analog full-duplex CoreAudio operation, 44.1/48 kHz switching and reconnect recovery. Its routing-control API is being developed as the backend for a future control panel. See [`devices/fw1814/README.md`](devices/fw1814/README.md) for its current scope.
 
-For binary [`releases`](https://github.com/mbprado/macfw/releases), use the provided macOS `.pkg` with the M-Audio FireWire 410 connected and powered on.
+macOS Tahoe 26 is not currently supported because Apple removed the built-in FireWire stack on which macfw depends. Future Tahoe support may become possible through integration with an alternative stack such as [`ASFireWire`](https://github.com/mrmidi/ASFireWire), but that path is experimental and has not been integrated or validated with macfw.
 
-For a source checkout, install the Command Line Tools if needed:
+## Installation
 
-```bash
-xcode-select --install
-```
-
-Then clone, build as a normal user, and install the already-built artifacts as root:
-
-```bash
-git clone https://github.com/mbprado/macfw.git
-cd macfw
-make
-sudo make install
-```
-
-The normal build produces the HAL plug-in, release runtime tools and native control panel. `sudo make install` installs those existing artifacts; it does not intentionally rebuild them as root.
-
-Installed user-facing components include:
-
-```text
-/Applications/macfw FW410 Control.app
-/Library/Audio/Plug-Ins/HAL/macfw-fw410.driver
-/Library/Application Support/macfw/fw410/
-```
-
-Full instructions, status checks, troubleshooting and uninstall information are in [`INSTALL.md`](INSTALL.md).
-
-## Useful build targets
-
-From the repository root:
-
-```bash
-make             # HAL + release runtime + GUI
-make hal         # HAL only
-make runtime     # release runtime/control tools only
-make gui         # control panel only
-make all-tools   # development/reverse-engineering tools
-make package     # fresh release build + complete installer package
-make clean
-```
-
-`make runtime` builds only the binaries required by the installed service and control path.
-
-## Build a package
-
-From the repository root:
-
-```bash
-make package
-```
-
-The package target performs a fresh release-artifact rebuild, then packages the HAL plug-in, launchd/runtime files, persistent control-state helper, runtime build metadata and native control panel under:
-
-```text
-package/dist/
-```
+See [`INSTALL.md`](INSTALL.md) for requirements, binary and source installation, build targets, package creation, status checks, troubleshooting and uninstall instructions for both device targets.
 
 ## Architecture
 
-The project does not port the original M-Audio kernel extension. The current architecture separates the persistent CoreAudio-facing endpoint from a recoverable user-space FireWire transport:
+The project does not port the original M-Audio kernel extension. The current released FW410 architecture, also used as the model for FW1814 development, separates the persistent CoreAudio-facing endpoint from a recoverable user-space FireWire transport:
 
 ```text
 CoreAudio application
@@ -212,6 +159,11 @@ macfw/
 ├── RELEASE-NOTES.md
 ├── RELEASES.md
 ├── Makefile
+├── common/
+├── devices/
+│   ├── README.md
+│   ├── fw410/
+│   └── fw1814/
 ├── package/
 │   ├── build-pkg.sh
 │   └── scripts/
@@ -263,7 +215,7 @@ The objective is hardware compatibility, not reproducing the architecture of an 
 
 ## Current roadmap
 
-Major completed areas now include:
+Major completed FW410 areas now include:
 
 1. Device/firmware identification and guarded boot recovery.
 2. User-space FireWire async/FCP/AV/C access.
@@ -283,6 +235,8 @@ Major completed areas now include:
 
 Deferred work includes unresolved mixer strip level/pan/mute/AUX-send semantics, calibrated CoreAudio latency reporting, MIDI, named presets, optional menu-bar controls, broader hardware coverage, and signing/notarization.
 
+The FW1814 has separately reached hardware-validated analog CoreAudio playback/capture, 44.1/48 kHz switching and reconnect recovery. Its current sequence is routing controls, remaining sample rates, then the native control panel; MIDI remains last.
+
 ## Release documentation
 
 - [`INSTALL.md`](INSTALL.md) — install, build, status, troubleshooting and uninstall.
@@ -292,10 +246,11 @@ Deferred work includes unresolved mixer strip level/pan/mute/AUX-send semantics,
 - [`RELEASE-NOTES.md`](RELEASE-NOTES.md) — current alpha release notes.
 - [`RELEASES.md`](RELEASES.md) — versioning, tagging and release contract.
 - [`fw410/README.md`](fw410/README.md) — detailed FW410 engineering status.
+- [`devices/fw1814/README.md`](devices/fw1814/README.md) — experimental FW1814 status and development scope.
 
 ## Contributing and testing
 
-Useful contributions include hardware testing, FireWire captures, protocol/firmware analysis, macOS/CoreAudio development, and testing across different Intel Macs, macOS versions, adapters and FW410 revisions.
+Useful contributions include hardware testing, FireWire captures, protocol/firmware analysis, macOS/CoreAudio development, and testing across different Intel Macs, macOS versions, adapters and supported interface revisions.
 
 When reporting runtime problems, use **Copy Diagnostics** from the control panel when available and include the system/connection details described in [`INSTALL.md`](INSTALL.md).
 
