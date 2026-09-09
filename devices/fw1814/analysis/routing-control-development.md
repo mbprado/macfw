@@ -99,7 +99,7 @@ Observed behavior at 48 kHz:
 - selecting Mixer restored the mirrored signal on Analog Outputs 3/4 and returned `SRC_ANA_OUT` to `0x00000000`;
 - the engine remained online and audio on unaffected outputs remained clean.
 
-## Next hardware validation
+## Validated persistence test
 
 Set two non-default but already-proven controls, confirm they were recorded, restart the launchd service, and verify that the new engine restores both cached quadlets:
 
@@ -113,12 +113,18 @@ fw1814state reset
 fw1814ctl routing get
 ```
 
-Expected behavior:
+Observed behavior on 2026-09-09:
 
 - `fw1814state show` contains the two typed overrides;
-- after restart, `routing get` reports `MIX_STM_IN=0x0000000e` and `SRC_ANA_OUT=0x00000002`;
-- Analog Outputs 1/2 remain clean while Outputs 3/4 use AUX;
-- `fw1814state reset` returns the live and saved state to `MIX_STM_IN=0x00000006` and `SRC_ANA_OUT=0x00000000`;
-- the state is restored again after a later rate change or physical reconnect.
+- after a launchd restart, `routing get` reported `MIX_STM_IN=0x0000000e`
+  and `SRC_ANA_OUT=0x00000002`;
+- the same non-default values were restored through 44.1 -> 48 kHz and
+  48 -> 44.1 kHz transitions;
+- physical disconnect/reconnect restored the same values at both 44.1 and
+  48 kHz;
+- `fw1814state reset` returned the live and saved state to
+  `MIX_STM_IN=0x00000006` and `SRC_ANA_OUT=0x00000000`.
 
-Do not test headphone, analog-input, digital-input, gain, pan or AUX-level controls as part of this step.
+This validates the complete persistence lifecycle for the currently enabled
+register subset. Headphone, analog-input, digital-input, gain, pan and
+AUX-level controls remain outside the enabled surface.

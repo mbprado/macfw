@@ -17,8 +17,9 @@ The experimental FW1814 profile currently provides:
 - experimental runtime assignment of software returns 1/2 and 3/4 to Mixer
   buses 1/2 and 3/4;
 - experimental Mixer/AUX source selection for Analog Outputs 1/2 and 3/4;
-- experimental persistent restoration of the validated routing subset after transport
-  restart, rate change and reconnect.
+- hardware-validated persistent restoration of the routing subset after
+  transport restart, rate changes in both directions and reconnect at both
+  supported rates.
 
 S/PDIF, ADAT, 88.2/96/176.4/192 kHz, analog/digital input routing, levels, headphone controls and the native control panel remain under development. MIDI is intentionally deferred until the audio/control surface is complete.
 
