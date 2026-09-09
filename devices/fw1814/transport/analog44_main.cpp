@@ -3,6 +3,7 @@
 #include "blocking_pcm_tx44.h"
 #include "capture_pump44.h"
 #include "duplex_lifecycle.h"
+#include "fw1814_control_server.h"
 #include "playback_pump.h"
 #include "realtime_service.h"
 #include "shared_io.h"
@@ -135,6 +136,7 @@ bool run() {
     bool playbackActive = false;
     macfw::fw1814::FcpControl fcp;
     DuplexLifecycle lifecycle;
+    Fw1814ControlServer control;
     IsochCallbackRunLoopThread isochCallbackThread;
 
     if (!macfw::fw1814::applyStraightAnalogPlaybackRouting(device))
@@ -281,6 +283,9 @@ bool run() {
         }
         std::cout << "FW1814 post-start INPUT rate readback: 44100 Hz PASS\n";
 
+        if (!control.start(device, kRate))
+            std::cerr << "warning: FW1814 control socket unavailable; audio will continue\n";
+
         playbackShared.ring()->active.store(1, std::memory_order_release);
         playbackActive = true;
 
@@ -391,14 +396,17 @@ bool run() {
             audioFinished.store(true, std::memory_order_release);
         });
 
-        while (!gStopRequested && !audioFinished.load(std::memory_order_acquire))
+        while (!gStopRequested && !audioFinished.load(std::memory_order_acquire)) {
+            control.service();
             CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+        }
 
         audioThread.join();
         ok = audioOk;
     }
 
 cleanup:
+    control.reset();
     if (playbackActive)
         playbackShared.ring()->active.store(0, std::memory_order_release);
 

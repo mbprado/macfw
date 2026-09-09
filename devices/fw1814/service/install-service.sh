@@ -20,13 +20,14 @@ ENGINE44="$FW1814_DIR/transport/fw1814analog44"
 INIT="$FW1814_DIR/tools/fw1814init"
 BOOT="$FW1814_DIR/tools/fwboot1814"
 BUS_RESET="$FW1814_DIR/../../common/tools/firewirebusreset/firewirebusreset"
+CONTROL="$FW1814_DIR/tools/control/fw1814ctl/fw1814ctl"
 
-for file in "$SUPERVISOR" "$ENGINE48" "$ENGINE44" "$INIT" "$BOOT" "$BUS_RESET"; do
+for file in "$SUPERVISOR" "$ENGINE48" "$ENGINE44" "$INIT" "$BOOT" "$BUS_RESET" "$CONTROL"; do
     if [[ ! -x "$file" ]]; then
         echo "error: required FW1814 runtime binary is missing or not executable: $file" >&2
         echo "build with:" >&2
         echo "  make -C devices/fw1814/transport clean all" >&2
-        echo "  make -C devices/fw1814/tools init-tool boot-tool bus-reset-tool" >&2
+        echo "  make -C devices/fw1814/tools init-tool boot-tool bus-reset-tool control-tool" >&2
         exit 1
     fi
 done
@@ -40,6 +41,7 @@ install -o root -g wheel -m 0755 "$ENGINE44" "$BIN_DIR/fw1814analog44"
 install -o root -g wheel -m 0755 "$INIT" "$BIN_DIR/fw1814init"
 install -o root -g wheel -m 0755 "$BOOT" "$BIN_DIR/fwboot1814"
 install -o root -g wheel -m 0755 "$BUS_RESET" "$BIN_DIR/firewirebusreset"
+install -o root -g wheel -m 0755 "$CONTROL" "$BIN_DIR/fw1814ctl"
 
 install -o root -g wheel -m 0644 \
     "$SCRIPT_DIR/com.mbprado.macfw.fw1814.transport.plist" "$LAUNCHD_PLIST"

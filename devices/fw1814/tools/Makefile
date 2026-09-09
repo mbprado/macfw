@@ -19,6 +19,7 @@ CLIENT_CLOSE_WATCH_TOOL := fw1814client_close_watch
 STREAM_CLIENT_CLOSE_WATCH_TOOL := fw1814stream_client_close_watch
 PLAYBACK_MAP_TOOL := fw1814playback_map
 ROUTE_ANALOG_TOOL := fw1814route_stream_to_analog
+CONTROL_DIR := control/fw1814ctl
 
 .PHONY: fingerprint probe boot-tool boot-check boot \
 	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe \
@@ -32,7 +33,7 @@ ROUTE_ANALOG_TOOL := fw1814route_stream_to_analog
 	client-close-watch-tool client-close-watch-check client-close-watch \
 	stream-client-close-watch-tool stream-client-close-watch-check stream-client-close-watch \
 	playback-map-tool playback-map-check playback-map \
-	route-analog-tool route-analog-check route-analog clean
+	route-analog-tool route-analog-check route-analog control-tool clean
 
 probe:
 	$(MAKE) -C $(PROBE_DIR)
@@ -241,8 +242,12 @@ route-analog-check: route-analog-tool
 route-analog: route-analog-tool
 	./$(ROUTE_ANALOG_TOOL) --execute
 
+control-tool:
+	$(MAKE) -C $(CONTROL_DIR)
+
 clean:
 	$(MAKE) -C $(PROBE_DIR) clean
 	$(MAKE) -C $(BEBOB_PROBE_DIR) clean
 	$(MAKE) -C $(BUS_RESET_DIR) clean
+	$(MAKE) -C $(CONTROL_DIR) clean
 	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) $(PLAYBACK_MAP_TOOL) $(ROUTE_ANALOG_TOOL) fw1814capture48_duplex_nodata

@@ -3,6 +3,7 @@
 #include "blocking_pcm_tx.h"
 #include "capture_pump.h"
 #include "duplex_lifecycle.h"
+#include "fw1814_control_server.h"
 #include "pcm_stream48.h"
 #include "playback_pump.h"
 #include "realtime_service.h"
@@ -88,6 +89,7 @@ bool run() {
     bool playbackActive = false;
     macfw::fw1814::FcpControl fcp;
     DuplexLifecycle lifecycle;
+    Fw1814ControlServer control;
     IsochCallbackRunLoopThread isochCallbackThread;
 
     if (!macfw::fw1814::applyStraightAnalogPlaybackRouting(device))
@@ -184,6 +186,9 @@ bool run() {
         std::cout << "FW1814 stream kick: PASS"
                   << " (matched INTERIMs=" << fcp.matchedInterimCount()
                   << ", ignored unrelated=" << fcp.ignoredResponseCount() << ")\n";
+
+        if (!control.start(device, kRate))
+            std::cerr << "warning: FW1814 control socket unavailable; audio will continue\n";
 
         playbackShared.ring()->active.store(1, std::memory_order_release);
         playbackActive = true;
@@ -294,14 +299,17 @@ bool run() {
         // Keep the FireWire general callback dispatcher alive independently of
         // the realtime audio service. This is the same scheduling separation
         // used by the released FW410 runtime.
-        while (!gStopRequested && !audioFinished.load(std::memory_order_acquire))
+        while (!gStopRequested && !audioFinished.load(std::memory_order_acquire)) {
+            control.service();
             CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+        }
 
         audioThread.join();
         ok = audioOk;
     }
 
 cleanup:
+    control.reset();
     if (playbackActive)
         playbackShared.ring()->active.store(0, std::memory_order_release);
 
