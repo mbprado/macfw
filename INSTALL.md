@@ -1,10 +1,10 @@
-# Installing macfw for the M-Audio FireWire 410
+# Installing macfw
 
-This guide covers the current macfw FW410 alpha runtime for Intel macOS.
+This guide covers the released M-Audio FireWire 410 alpha runtime and the experimental M-Audio FireWire 1814 source build for Intel macOS.
 
 > **Alpha software:** this driver is hardware-tested but is not yet a signed/notarized public production release. Back up important work before testing it on another system.
 
-## Requirements
+## FW410 requirements
 
 - Intel Mac.
 - A hardware-tested macOS release. Current cumulative validation includes Monterey 12.7.6, Ventura 13.7.8, Sonoma 14.8.9 and Sequoia 15.x.
@@ -75,6 +75,18 @@ make clean
 
 The `runtime` target is intentionally narrow. It builds only the binaries used by the installed service/control path instead of compiling all historical probes and experiments.
 
+The experimental FW1814 target has separate namespaced commands so the default FW410 release build and installer remain unchanged:
+
+```bash
+make fw1814             # FW1814 HAL + installed runtime/control binaries
+make fw1814-hal         # FW1814 HAL only
+make fw1814-runtime     # FW1814 service/runtime binaries only
+make fw1814-tools       # all FW1814 development and diagnostic tools
+sudo make fw1814-install
+sudo make fw1814-uninstall
+make fw1814-clean
+```
+
 For GUI-only development:
 
 ```bash
@@ -94,6 +106,32 @@ For transport-only development without replacing the HAL or GUI:
 make runtime
 sudo bash fw410/service/install-service.sh
 ```
+
+## Experimental FW1814 source installation
+
+The FW1814 implementation is not included in the current FW410 `.pkg`. Build it from a source checkout as a normal user:
+
+```bash
+make fw1814
+```
+
+Then install the already-built FW1814 HAL and supervised runtime as root:
+
+```bash
+sudo make fw1814-install
+```
+
+The current FW1814 scope exposes Analog Outputs 1-4 and Analog Inputs 1-8 at 44.1 and 48 kHz. Rate switching from Audio MIDI Setup and disconnect/reconnect restoration are hardware-validated. S/PDIF, higher rates, the control-panel GUI and MIDI remain under development.
+
+The first routing-control API is available through the transport-owned socket. It reports the exact write-only routing baseline cached by the active engine without issuing new FireWire writes:
+
+```bash
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" routing get
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" capabilities get
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" engine get
+```
+
+Do not run standalone FireWire probes while the supervised engine is active; the transport must remain the sole FireWire owner.
 
 ## Building a package locally
 

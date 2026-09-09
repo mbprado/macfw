@@ -6,6 +6,7 @@ This file records limitations and open items for the current macfw M-Audio FireW
 
 - **Intel Macs only.** Apple Silicon is not currently a project target.
 - Hardware validation includes **macOS Monterey 12.7.6**, **Ventura 13.7.8**, **Sonoma 14.8.9**, and **Sequoia 15.x**.
+- **macOS Tahoe 26 is not supported.** Apple removed the native FireWire stack used by the current transport. Experimental future support may depend on an alternative such as [`ASFireWire`](https://github.com/mrmidi/ASFireWire), which is not currently integrated with macfw.
 - Hardware validation is still concentrated on a small number of Mac/FW410 combinations. A broader Mac / FireWire-adapter / firmware matrix is still needed.
 - See [`COMPATIBILITY.md`](COMPATIBILITY.md) for the cumulative tested matrix.
 

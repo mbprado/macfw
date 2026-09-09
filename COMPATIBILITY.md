@@ -14,6 +14,7 @@ The table is cumulative across development releases; not every operating-system 
 | Ventura 13.7.8 | validated | validated | validated | validated | validated | validated | validated | **Validated** | Stock/OpenCore LP |
 | Sonoma 14.8.9 | validated | validated | validated | validated | validated | validated | validated | **Validated** | OpenCore LP |
 | Sequoia 15.x | validated | validated | validated | validated | validated | validated | validated | **Validated** | OpenCore LP |
+| Tahoe 26.x | not supported | not supported | not supported | not supported | not supported | not supported | not supported | **Blocked by missing native FireWire stack** | N/A |
 
 The native control panel and transport/control architecture have been exercised on the validated development systems. The control-path rule is common across releases: the GUI/CLI use the active transport's Unix-socket IPC rather than opening FireWire independently.
 
@@ -97,6 +98,12 @@ Observed result:
 Logic Pro on this Sequoia installation was noticeably more resource-demanding on the older test MacBook. This was observed as host/application resource pressure rather than a macfw transport or FW410 compatibility failure. Better-performing Intel hardware may provide a more comfortable DAW workload, but broader machine testing is still needed before making performance claims.
 
 With this test, macfw has real-hardware validation across Monterey, Ventura, Sonoma and Sequoia on Intel Macs.
+
+## Tahoe 26.x
+
+macOS Tahoe 26 removed Apple's built-in FireWire stack. The current macfw transport depends on `IOFireWireLib` and therefore cannot operate on Tahoe as implemented today.
+
+[`ASFireWire`](https://github.com/mrmidi/ASFireWire) is an experimental DriverKit replacement for the removed stack. It may provide a future route to Tahoe support, but macfw has not been ported to its API and neither the FW410 nor FW1814 path has been validated through it. Tahoe should therefore be treated as unsupported unless and until that integration is implemented and tested.
 
 ## Interpretation
 

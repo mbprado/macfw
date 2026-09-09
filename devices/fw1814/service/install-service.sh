@@ -26,8 +26,7 @@ for file in "$SUPERVISOR" "$ENGINE48" "$ENGINE44" "$INIT" "$BOOT" "$BUS_RESET" "
     if [[ ! -x "$file" ]]; then
         echo "error: required FW1814 runtime binary is missing or not executable: $file" >&2
         echo "build with:" >&2
-        echo "  make -C devices/fw1814/transport clean all" >&2
-        echo "  make -C devices/fw1814/tools init-tool boot-tool bus-reset-tool control-tool" >&2
+        echo "  make fw1814-runtime" >&2
         exit 1
     fi
 done

@@ -14,9 +14,11 @@ SUPERVISOR := fw1814supervisor
 DUPLEX44_PROBE := fw1814duplex44
 TONE44_PROBE := fw1814tone44
 
-.PHONY: all analog48 analog44 shm-test supervisor duplex44-probe tone44-probe clean
+.PHONY: all runtime analog48 analog44 shm-test supervisor duplex44-probe tone44-probe clean
 
 all: $(ANALOG48) $(ANALOG44) $(SHM_TEST) $(SUPERVISOR) $(DUPLEX44_PROBE) $(TONE44_PROBE)
+
+runtime: $(ANALOG48) $(ANALOG44) $(SHM_TEST) $(SUPERVISOR)
 
 $(LIBMACFW):
 	$(MAKE) -C ../../../fw410/lib libmacfw.a

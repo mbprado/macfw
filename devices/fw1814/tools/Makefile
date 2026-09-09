@@ -21,7 +21,7 @@ PLAYBACK_MAP_TOOL := fw1814playback_map
 ROUTE_ANALOG_TOOL := fw1814route_stream_to_analog
 CONTROL_DIR := control/fw1814ctl
 
-.PHONY: fingerprint probe boot-tool boot-check boot \
+.PHONY: all runtime fingerprint probe boot-tool boot-check boot \
 	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe \
 	init-tool init-check init-48 init-44 \
 	capture48-tool capture48-check capture48 capture48-raw \
@@ -34,6 +34,13 @@ CONTROL_DIR := control/fw1814ctl
 	stream-client-close-watch-tool stream-client-close-watch-check stream-client-close-watch \
 	playback-map-tool playback-map-check playback-map \
 	route-analog-tool route-analog-check route-analog control-tool clean
+
+all: probe bebob-probe bus-reset-tool boot-tool init-tool capture48-tool dualcmp-tool dualcmp-wait-tool \
+	duplex-blocking-tool output-watch-tool teardown-watch-tool \
+	client-close-watch-tool stream-client-close-watch-tool playback-map-tool \
+	route-analog-tool control-tool
+
+runtime: boot-tool init-tool bus-reset-tool control-tool
 
 probe:
 	$(MAKE) -C $(PROBE_DIR)

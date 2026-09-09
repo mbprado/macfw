@@ -24,24 +24,16 @@ engine matching the CoreAudio rate request.
 ## Build
 
 ```bash
-make -C devices/fw1814/hal clean all
+make fw1814
 ```
 
 ## Install
 
 ```bash
-sudo make -C devices/fw1814/hal install
+sudo make fw1814-install
 ```
 
-The install target copies `macfw-fw1814.driver` to `/Library/Audio/Plug-Ins/HAL/` and restarts `coreaudiod`.
-
-The complete supervised runtime is installed separately:
-
-```bash
-make -C devices/fw1814/transport clean all
-make -C devices/fw1814/tools init-tool boot-tool bus-reset-tool
-sudo ./devices/fw1814/service/install-service.sh
-```
+The consolidated install target copies `macfw-fw1814.driver` to `/Library/Audio/Plug-Ins/HAL/`, installs the complete supervised runtime and `fw1814ctl`, loads the launchd service and restarts `coreaudiod`.
 
 ## Hardware test order
 
@@ -62,5 +54,5 @@ producer with active CoreAudio playback because the playback ring is SPSC.
 ## Uninstall
 
 ```bash
-sudo make -C devices/fw1814/hal uninstall
+sudo make fw1814-uninstall
 ```
