@@ -78,6 +78,8 @@ public:
         sampleRate_ = 0;
         generation_ = 0;
         routing_.loadStraightAnalogPlaybackPreset();
+        headphoneSourcesKnown_ = false;
+        srcHeadphoneOut_ = 0;
     }
 
     void service() {
@@ -296,6 +298,60 @@ private:
               std::to_string(source) + "\n");
     }
 
+    void handleHeadphone(const std::string& command) {
+        using Source = macfw::fw1814::HeadphoneSource;
+        if (command == "HEADPHONE GET") {
+            if (!headphoneSourcesKnown_) {
+                reply("ERR headphone-state-uninitialized\n");
+                return;
+            }
+            const unsigned first =
+                srcHeadphoneOut_ & 0x04u ? 2u :
+                srcHeadphoneOut_ & 0x02u ? 1u : 0u;
+            const std::uint32_t upper = srcHeadphoneOut_ >> 16;
+            const unsigned second =
+                upper & 0x04u ? 2u : upper & 0x02u ? 1u : 0u;
+            reply("OK " + std::to_string(first) + " " +
+                  std::to_string(second) + " " +
+                  hex32(srcHeadphoneOut_) + "\n");
+            return;
+        }
+
+        const std::string prefix = "HEADPHONE SOURCE SET_ALL ";
+        if (command.rfind(prefix, 0) != 0) {
+            reply("ERR unknown-command\n");
+            return;
+        }
+
+        std::istringstream input(command.substr(prefix.size()));
+        unsigned first = 0;
+        unsigned second = 0;
+        std::string extra;
+        if (!(input >> first >> second) || (input >> extra) ||
+            first > 2 || second > 2) {
+            reply("ERR invalid-headphone-source\n");
+            return;
+        }
+
+        const auto sourceFor = [](unsigned value) {
+            return value == 0 ? Source::Mixer12
+                 : value == 1 ? Source::Mixer34
+                              : Source::Aux12;
+        };
+        const std::uint32_t desired = macfw::fw1814::headphoneSourceWord(
+            sourceFor(first), sourceFor(second));
+        const WriteResult result = writeRegister(
+            macfw::fw1814::kSrcHeadphoneOutLo, desired);
+        if (result != WriteResult::Ok) {
+            replyWriteError(result);
+            return;
+        }
+        srcHeadphoneOut_ = desired;
+        headphoneSourcesKnown_ = true;
+        reply("OK " + std::to_string(first) + " " +
+              std::to_string(second) + " " + hex32(desired) + "\n");
+    }
+
     void handle(const std::string& command) {
         if (command == "ROUTING GET") {
             const std::string profile = routing_.isStraightAnalogPlaybackPreset()
@@ -309,9 +365,10 @@ private:
         if (command == "CAPABILITIES GET") {
             reply("OK routing-state=1 runtime-routing-set=1 "
                   "stream-mixer=1 analog-output-source=1 "
+                  "headphone-source=diagnostic-set-all "
                   "register-readback=0 state-cache=authoritative "
                   "analog-input-mixer=deferred digital=deferred "
-                  "headphone=deferred levels=deferred midi=deferred\n");
+                  "headphone-levels=deferred levels=deferred midi=deferred\n");
             return;
         }
         if (command == "ENGINE GET") {
@@ -327,6 +384,10 @@ private:
             handleOutput(command);
             return;
         }
+        if (command.rfind("HEADPHONE ", 0) == 0) {
+            handleHeadphone(command);
+            return;
+        }
         reply("ERR unknown-command\n");
     }
 
@@ -334,6 +395,8 @@ private:
     unsigned sampleRate_ = 0;
     UInt32 generation_ = 0;
     macfw::fw1814::SpecialMixerRoutingModel routing_{};
+    bool headphoneSourcesKnown_ = false;
+    std::uint32_t srcHeadphoneOut_ = 0;
     int listenFd_ = -1;
     int clientFd_ = -1;
     std::string request_;

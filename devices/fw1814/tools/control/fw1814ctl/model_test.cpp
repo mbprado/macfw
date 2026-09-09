@@ -45,5 +45,13 @@ int main() {
 
     model.loadStraightAnalogPlaybackPreset();
     assert(model.isStraightAnalogPlaybackPreset());
+
+    using HeadphoneSource = macfw::fw1814::HeadphoneSource;
+    assert(macfw::fw1814::headphoneSourceWord(
+               HeadphoneSource::Mixer12, HeadphoneSource::Mixer12) ==
+           0x00010001u);
+    assert(macfw::fw1814::headphoneSourceWord(
+               HeadphoneSource::Mixer34, HeadphoneSource::Aux12) ==
+           0x00040002u);
     return 0;
 }

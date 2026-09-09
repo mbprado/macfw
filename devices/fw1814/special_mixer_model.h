@@ -12,6 +12,19 @@ namespace macfw::fw1814 {
 inline constexpr std::uint32_t kStraightStreamToMixer = 0x00000006u;
 inline constexpr std::uint32_t kAnalogFromMixers = 0x00000000u;
 
+enum class HeadphoneSource : std::uint32_t {
+    Mixer12 = 0x01u,
+    Mixer34 = 0x02u,
+    Aux12 = 0x04u,
+};
+
+inline constexpr std::uint32_t headphoneSourceWord(
+    HeadphoneSource headphone12,
+    HeadphoneSource headphone34) {
+    return static_cast<std::uint32_t>(headphone12) |
+           (static_cast<std::uint32_t>(headphone34) << 16);
+}
+
 class SpecialMixerRoutingModel {
 public:
     static constexpr std::size_t kStreamSourceCount = 2;

@@ -13,6 +13,7 @@ namespace macfw::fw1814 {
 // write-only on FW1814/ProjectMix; never read them back or probe nearby offsets.
 inline constexpr UInt16 kMixerAddressHi = 0xffc7;
 inline constexpr UInt32 kMixStreamInLo = 0x00700094;  // MIX_STM_IN
+inline constexpr UInt32 kSrcHeadphoneOutLo = 0x00700098; // SRC_HP_OUT
 inline constexpr UInt32 kSrcAnalogOutLo = 0x0070009c; // SRC_ANA_OUT
 
 inline std::array<std::uint8_t, 4> mixerBe32(std::uint32_t value) {

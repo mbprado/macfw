@@ -31,6 +31,12 @@ constexpr std::array<const char*, RoutingModel::kAnalogOutputPairCount>
     kOutputPairArgs{{"1/2", "3/4"}};
 constexpr std::array<const char*, RoutingModel::kAnalogOutputPairCount>
     kOutputPairLabels{{"Analog Outputs 1/2", "Analog Outputs 3/4"}};
+constexpr std::array<const char*, 3> kHeadphoneSourceArgs{{
+    "mixer1/2", "mixer3/4", "aux",
+}};
+constexpr std::array<const char*, 3> kHeadphoneSourceLabels{{
+    "Mixer 1/2", "Mixer 3/4", "AUX 1/2",
+}};
 
 int usage() {
     std::cerr
@@ -42,6 +48,9 @@ int usage() {
         << "  fw1814ctl output-state get\n"
         << "  fw1814ctl output-source get 1/2|3/4\n"
         << "  fw1814ctl output-source set 1/2|3/4 mixer|aux\n"
+        << "  fw1814ctl headphone-state get\n"
+        << "  fw1814ctl headphone-source set-all "
+           "mixer1/2|mixer3/4|aux mixer1/2|mixer3/4|aux\n"
         << "  fw1814ctl capabilities get\n"
         << "  fw1814ctl engine get\n\n"
         << "FW1814 mixer registers are write-only. The active transport "
@@ -188,6 +197,12 @@ int indexOf(const std::string& value,
 const char* onOff(bool value) { return value ? "on" : "off"; }
 const char* outputSourceName(unsigned value) {
     return value == 0 ? "mixer" : value == 1 ? "aux" : "unknown";
+}
+
+const char* headphoneSourceName(unsigned value) {
+    return value < kHeadphoneSourceLabels.size()
+        ? kHeadphoneSourceLabels[value]
+        : "unknown";
 }
 
 int routingGet() {
@@ -393,6 +408,54 @@ int outputSourceCommand(const std::string& action, int argc, char** argv) {
     return 0;
 }
 
+int printHeadphoneState(const std::string& payload) {
+    std::istringstream input(payload);
+    unsigned first = 0;
+    unsigned second = 0;
+    std::string raw;
+    std::string extra;
+    if (!(input >> first >> second >> raw) || (input >> extra) ||
+        first > 2 || second > 2) {
+        std::cerr << "fw1814ctl: invalid headphone response: " << payload
+                  << '\n';
+        return 1;
+    }
+    std::uint32_t rawValue = 0;
+    if (!parseRawWord(raw, rawValue)) {
+        std::cerr << "fw1814ctl: invalid SRC_HP_OUT value\n";
+        return 1;
+    }
+    std::cout << "FW1814 headphone sources (diagnostic cache):\n"
+              << "  Headphone Output 1: " << headphoneSourceName(first)
+              << '\n'
+              << "  Headphone Output 2: " << headphoneSourceName(second)
+              << '\n'
+              << "  SRC_HP_OUT: " << raw << " (write-only cache)\n";
+    return 0;
+}
+
+int headphoneStateGet() {
+    std::string payload;
+    if (!payloadFor("HEADPHONE GET", payload)) return 1;
+    return printHeadphoneState(payload);
+}
+
+int headphoneSourceSetAll(int argc, char** argv) {
+    if (argc != 5) return usage();
+    const int first = indexOf(argv[3], kHeadphoneSourceArgs.data(),
+                              kHeadphoneSourceArgs.size());
+    const int second = indexOf(argv[4], kHeadphoneSourceArgs.data(),
+                               kHeadphoneSourceArgs.size());
+    if (first < 0 || second < 0) return usage();
+
+    std::string payload;
+    if (!payloadFor("HEADPHONE SOURCE SET_ALL " +
+                    std::to_string(first) + " " +
+                    std::to_string(second), payload))
+        return 1;
+    return printHeadphoneState(payload);
+}
+
 int capabilitiesGet() {
     std::string payload;
     if (!payloadFor("CAPABILITIES GET", payload)) return 1;
@@ -442,6 +505,12 @@ int main(int argc, char** argv) {
     if (control == "output-source")
         return action == "get" || action == "set"
             ? outputSourceCommand(action, argc, argv)
+            : usage();
+    if (control == "headphone-state")
+        return action == "get" && argc == 3 ? headphoneStateGet() : usage();
+    if (control == "headphone-source")
+        return action == "set-all"
+            ? headphoneSourceSetAll(argc, argv)
             : usage();
     if (control == "capabilities")
         return action == "get" && argc == 3 ? capabilitiesGet() : usage();

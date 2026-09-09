@@ -65,10 +65,17 @@ The active transport owns `/tmp/macfw-fw1814-control.sock`; clients never open F
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-source get 3/4
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-source set 3/4 aux
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-source set 3/4 mixer
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-state get
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-source set-all mixer1/2 mixer1/2
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" capabilities get
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" engine get
 "/Library/Application Support/macfw/fw1814/bin/fw1814state" show
 "/Library/Application Support/macfw/fw1814/bin/fw1814state" reset
 ```
 
-Only the hardware-validated `MIX_STM_IN` and `SRC_ANA_OUT` registers are writable through this experimental command set. Successful changes are recorded in `/Library/Application Support/macfw/fw1814/control-state.conf` and replayed after a new engine reports ready. `fw1814state reset` applies and saves the proven straight-through defaults; `clear` removes saved overrides without changing the current hardware state. See [`analysis/routing-control-development.md`](analysis/routing-control-development.md) for the enabled subset and validation sequence.
+Only the hardware-validated `MIX_STM_IN` and `SRC_ANA_OUT` registers are writable through the persistent command set. Successful changes are recorded in `/Library/Application Support/macfw/fw1814/control-state.conf` and replayed after a new engine reports ready. `fw1814state reset` applies and saves the proven straight-through defaults; `clear` removes saved overrides without changing the current hardware state. See [`analysis/routing-control-development.md`](analysis/routing-control-development.md) for the enabled subset and validation sequence.
+
+`headphone-source set-all` is a guarded diagnostic for the documented
+write-only `SRC_HP_OUT` register. It always sets both physical headphone
+outputs in one complete write, is not persisted, and must be hardware-validated
+before individual headphone controls or startup defaults are enabled.
