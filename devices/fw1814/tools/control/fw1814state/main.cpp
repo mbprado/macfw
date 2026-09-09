@@ -131,11 +131,6 @@ bool saveState(const std::vector<Entry>& entries) {
     if (std::fclose(file) != 0) ok = false;
     if (!ok)
         std::fprintf(stderr, "fw1814state: failed writing %s\n", kStatePath);
-    if (chmod(kStatePath, 0666) != 0)
-        std::fprintf(stderr,
-                     "fw1814state: warning: could not set state-file "
-                     "permissions: %s\n",
-                     std::strerror(errno));
     return ok;
 }
 
