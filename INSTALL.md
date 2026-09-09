@@ -40,6 +40,11 @@ Apple Silicon is not currently supported.
 The installed runtime is managed automatically by launchd. You do not need to run `haltransport` manually.
 
 ## Installation from source
+For a source checkout, install Xcode Command Line Tools if not installed:
+
+```bash
+xcode-select --install
+```
 
 Clone the repository and build as a normal user:
 
