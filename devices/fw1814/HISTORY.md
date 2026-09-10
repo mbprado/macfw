@@ -83,6 +83,17 @@ Input 1 normally while preserving Input 2, and updating the right field formed
 zero word. This provides the backend behavior required for independent GUI
 faders and a Link control.
 
+The documented `LR_ANA_12_IN` field layout was also validated with both
+physical inputs. Hard left, center and hard right use `0x7ffe`, `0x0000` and
+`0x8000` respectively, with the left channel in the upper 16 bits and the
+right channel in the lower 16 bits. Independent writes produced every expected
+test word, including `0x00008000`, `0x7ffe0000`, `0x80008000`, `0x80000000`
+and `0x00000000`, and the audible image followed the selected channel. The
+engine now establishes the proven `0x7ffe8000` left/right baseline for Analog
+Inputs 1/2 at startup and exposes persistent per-channel left/center/right
+controls backed by its authoritative cache. Other input pairs and continuous
+pan values remain bounded follow-up work.
+
 ## 2026-09-09 — Routing controls, persistence and headphone sources validated
 
 The FW1814 gained its first end-user-style routing control surface. The active

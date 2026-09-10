@@ -73,11 +73,9 @@ int usage() {
            "  # diagnostic\n"
         << "  fw1814ctl input-monitor-channel-level set analog1/2 left|right "
            "unity|-20db  # diagnostic\n"
-        << "  fw1814ctl input-monitor-pan initialize analog1/2"
-           "  # diagnostic\n"
-        << "  fw1814ctl input-monitor-pan get analog1/2  # diagnostic\n"
+        << "  fw1814ctl input-monitor-pan get analog1/2\n"
         << "  fw1814ctl input-monitor-pan set analog1/2 left|right "
-           "left|center|right  # diagnostic\n"
+           "left|center|right\n"
         << "  fw1814ctl output-state get\n"
         << "  fw1814ctl output-source get 1/2|3/4\n"
         << "  fw1814ctl output-source set 1/2|3/4 mixer|aux\n"
@@ -654,12 +652,11 @@ int inputMonitorChannelLevelCommand(const std::string& action,
 int inputMonitorPanCommand(const std::string& action,
                            int argc,
                            char** argv) {
-    const bool initializing = action == "initialize";
     const bool getting = action == "get";
     const bool setting = action == "set";
-    if (((initializing || getting) && argc != 4) ||
+    if ((getting && argc != 4) ||
         (setting && argc != 6) ||
-        (!initializing && !getting && !setting) ||
+        (!getting && !setting) ||
         std::string(argv[3]) != "analog1/2")
         return usage();
 
@@ -677,8 +674,7 @@ int inputMonitorPanCommand(const std::string& action,
     }
 
     std::string command = "INPUT_MONITOR_PAN " +
-        std::string(initializing ? "INITIALIZE 0"
-                                 : getting ? "GET 0" : "SET 0 ");
+        std::string(getting ? "GET 0" : "SET 0 ");
     if (setting)
         command += std::to_string(channel) + " " +
                    std::to_string(position);
@@ -716,7 +712,12 @@ int inputMonitorPanCommand(const std::string& action,
               << kPositionArgs[left] << " right-channel="
               << kPositionArgs[right] << '\n'
               << "LR_ANA_12_IN: " << raw
-              << " (write-only diagnostic cache)\n";
+              << " (write-only cache)\n";
+    if (setting) {
+        const std::string key = "input-monitor-pan:analog1/2:" +
+                                std::string(argv[4]);
+        persistSuccessfulSet(argv[0], key, argc, argv);
+    }
     return 0;
 }
 

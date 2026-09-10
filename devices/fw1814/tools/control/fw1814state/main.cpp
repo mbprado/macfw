@@ -103,6 +103,18 @@ bool validStoredCommand(const Entry& entry) {
          entry.arguments[3] == "unity"))
         return entry.key == "input-monitor-level:" + entry.arguments[2];
 
+    if (entry.arguments.size() == 5 &&
+        entry.arguments[0] == "input-monitor-pan" &&
+        entry.arguments[1] == "set" &&
+        entry.arguments[2] == "analog1/2" &&
+        (entry.arguments[3] == "left" ||
+         entry.arguments[3] == "right") &&
+        (entry.arguments[4] == "left" ||
+         entry.arguments[4] == "center" ||
+         entry.arguments[4] == "right"))
+        return entry.key == "input-monitor-pan:" + entry.arguments[2] +
+                                ":" + entry.arguments[3];
+
     return false;
 }
 
@@ -242,7 +254,7 @@ int restoreEntries(const char* argv0, const std::vector<Entry>& entries) {
 
 std::vector<Entry> defaultState() {
     std::vector<Entry> entries;
-    entries.reserve(19);
+    entries.reserve(22);
     for (const char* sourceValue : kMixerSources) {
         for (const char* busValue : kMixerBuses) {
             const std::string source(sourceValue);
@@ -295,6 +307,19 @@ std::vector<Entry> defaultState() {
             "input-monitor-level", "set-all", pair, "unity",
         };
         entries.push_back(std::move(monitorLevel));
+    }
+    for (const auto& channelAndPosition :
+         std::array<std::pair<const char*, const char*>, 2>{{
+             {"left", "left"}, {"right", "right"},
+         }}) {
+        Entry pan;
+        pan.key = "input-monitor-pan:analog1/2:" +
+                  std::string(channelAndPosition.first);
+        pan.arguments = {
+            "input-monitor-pan", "set", "analog1/2",
+            channelAndPosition.first, channelAndPosition.second,
+        };
+        entries.push_back(std::move(pan));
     }
     return entries;
 }

@@ -41,6 +41,15 @@ int main() {
     assert(macfw::fw1814::setInputPanChannel(
                macfw::fw1814::kAnalogInputPanBaseline, 1,
                macfw::fw1814::kPanCenter) == 0x7ffe0000u);
+    assert(macfw::fw1814::setInputPanChannel(
+               0x00008000u, 0,
+               macfw::fw1814::kPanHardRight) == 0x80008000u);
+    assert(macfw::fw1814::setInputPanChannel(
+               0x80008000u, 1,
+               macfw::fw1814::kPanCenter) == 0x80000000u);
+    assert(macfw::fw1814::setInputPanChannel(
+               0x00008000u, 1,
+               macfw::fw1814::kPanCenter) == 0x00000000u);
 
     assert(model.streamRoute(Model::StreamSource::Stream12,
                              Model::MixerBus::Mixer12));

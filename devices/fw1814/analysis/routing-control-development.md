@@ -496,35 +496,37 @@ preserving the other 16-bit field. Updating the right field then produced
 restored `0x00000000`. Independent cached gain-field updates are therefore
 validated; arbitrary attenuation ranges and persistence remain deferred.
 
-## Analog Inputs 1/2 pan diagnostic
+## Analog Inputs 1/2 pan validation and promotion
 
 FFADO initializes each analog input-pair LR register to `0x7ffe8000`: the upper
 left-channel field is hard left (`0x7ffe`) and the lower right-channel field is
-hard right (`0x8000`). Center is `0x0000`. The first pan diagnostic is limited
-to Analog Inputs 1/2 and the exact left, center and right positions. It performs
-no startup write and is not persisted.
+hard right (`0x8000`). Center is `0x0000`. The first guarded diagnostic was
+limited to Analog Inputs 1/2 and the exact left, center and right positions. It
+performed no startup write or persistence.
 
-Initialize the complete known baseline before any differential pan write:
+Hardware testing confirmed the baseline and independent upper/lower field
+updates. In addition to the expected one-channel center values `0x00008000`
+and `0x7ffe0000`, the following combinations were exercised:
+
+- both channels hard right: `0x80008000`;
+- left hard right, right centered: `0x80000000`;
+- both channels centered: `0x00000000`.
+
+The audible position followed the selected channel. Writing hard-left to the
+left member and hard-right to the right member restores the complete baseline
+word `0x7ffe8000`.
+
+That result promotes the bounded three-position control for Analog Inputs 1/2.
+The engine now writes the proven left/right baseline during startup, exposes an
+authoritative cache immediately after the readiness gate, and persists the two
+channel positions independently. `fw1814state reset` records hard-left for the
+left member and hard-right for the right member. The production commands are:
 
 ```bash
-fw1814ctl input-monitor-level set-all analog1/2 unity
-fw1814ctl input-monitor-pan initialize analog1/2
 fw1814ctl input-monitor-pan get analog1/2
+fw1814ctl input-monitor-pan set analog1/2 left left|center|right
+fw1814ctl input-monitor-pan set analog1/2 right left|center|right
 ```
 
-The cache must report `LR_ANA_12_IN=0x7ffe8000`. With signals available on both
-physical inputs, center and restore one member at a time:
-
-```bash
-fw1814ctl input-monitor-pan set analog1/2 left center
-fw1814ctl input-monitor-pan set analog1/2 left left
-fw1814ctl input-monitor-pan set analog1/2 right center
-fw1814ctl input-monitor-pan set analog1/2 right right
-fw1814ctl input-monitor-pan get analog1/2
-```
-
-Centering the left member must produce `0x00008000`; restoring it must return
-`0x7ffe8000`. Centering the right member must produce `0x7ffe0000`; restoring
-it must again return `0x7ffe8000`. The audible image should follow only the
-selected input. Do not restart or test intermediate pan positions while the
-diagnostic is active.
+The remaining analog input pairs and continuous intermediate pan values remain
+separate hardware-validation steps.

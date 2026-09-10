@@ -42,7 +42,9 @@ public:
         gainAnalogIn_.fill(macfw::fw1814::stereoMonitorLevelWord(
             macfw::fw1814::kMonitorLevelUnity));
         analogInputPanKnown_.fill(false);
+        analogInputPanKnown_[0] = true;
         panAnalogIn_.fill(0);
+        panAnalogIn_[0] = macfw::fw1814::kAnalogInputPanBaseline;
 
         listenFd_ = socket(AF_UNIX, SOCK_STREAM, 0);
         if (listenFd_ < 0) return false;
@@ -594,19 +596,17 @@ private:
     }
 
     void handleInputMonitorPan(const std::string& command) {
-        const std::string initializePrefix = "INPUT_MONITOR_PAN INITIALIZE ";
         const std::string getPrefix = "INPUT_MONITOR_PAN GET ";
         const std::string setPrefix = "INPUT_MONITOR_PAN SET ";
-        const bool initializing = command.rfind(initializePrefix, 0) == 0;
         const bool getting = command.rfind(getPrefix, 0) == 0;
         const bool setting = command.rfind(setPrefix, 0) == 0;
-        if (!initializing && !getting && !setting) {
+        if (!getting && !setting) {
             reply("ERR unknown-command\n");
             return;
         }
 
-        const std::size_t prefixSize = initializing ? initializePrefix.size()
-            : getting ? getPrefix.size() : setPrefix.size();
+        const std::size_t prefixSize = getting ? getPrefix.size()
+                                               : setPrefix.size();
         std::istringstream input(command.substr(prefixSize));
         unsigned pair = 0;
         unsigned channel = 0;
@@ -619,30 +619,19 @@ private:
             return;
         }
 
-        if (initializing) {
-            const WriteResult result = writeRegister(
-                macfw::fw1814::kLrAnalog12InLo,
-                macfw::fw1814::kAnalogInputPanBaseline);
-            if (result != WriteResult::Ok) {
-                replyWriteError(result);
-                return;
-            }
-            panAnalogIn_[pair] = macfw::fw1814::kAnalogInputPanBaseline;
-            analogInputPanKnown_[pair] = true;
-        } else {
-            if (!analogInputPanKnown_[pair]) {
-                reply("ERR input-monitor-pan-state-uninitialized\n");
-                return;
-            }
-            if (setting) {
-                const std::array<std::uint16_t, 3> positions{{
-                    macfw::fw1814::kPanHardLeft,
-                    macfw::fw1814::kPanCenter,
-                    macfw::fw1814::kPanHardRight,
-                }};
-                const std::uint32_t desired =
-                    macfw::fw1814::setInputPanChannel(
-                        panAnalogIn_[pair], channel, positions[position]);
+        if (!analogInputPanKnown_[pair]) {
+            reply("ERR input-monitor-pan-state-uninitialized\n");
+            return;
+        }
+        if (setting) {
+            const std::array<std::uint16_t, 3> positions{{
+                macfw::fw1814::kPanHardLeft,
+                macfw::fw1814::kPanCenter,
+                macfw::fw1814::kPanHardRight,
+            }};
+            const std::uint32_t desired = macfw::fw1814::setInputPanChannel(
+                panAnalogIn_[pair], channel, positions[position]);
+            if (desired != panAnalogIn_[pair]) {
                 const WriteResult result = writeRegister(
                     macfw::fw1814::kLrAnalog12InLo, desired);
                 if (result != WriteResult::Ok) {
@@ -711,7 +700,7 @@ private:
                   "analog-input-monitor-level=all-analog-persistent "
                   "analog-input-attenuation=-20db-diagnostic "
                   "analog-input-channel-attenuation=analog1/2-minus20db-diagnostic "
-                  "analog-input-pan=analog1/2-three-position-diagnostic "
+                  "analog-input-pan=analog1/2-three-position-persistent "
                   "headphone-levels=deferred levels=deferred midi=deferred\n");
             return;
         }
