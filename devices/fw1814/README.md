@@ -49,6 +49,11 @@ previously selected rate.
 See `analysis/dynamic-rate-switching-success.md` for the current validated
 checkpoint and `analysis/bringup-plan.md` for the original bring-up sequence.
 
+System sleep/wake behavior remains under observation. One non-reproduced
+AppleFWOHCI deep-idle kernel panic has been recorded in
+[`analysis/power-management-notes.md`](analysis/power-management-notes.md);
+no causal link to macfw has been established.
+
 ## Build and install
 
 From the repository root:
