@@ -91,8 +91,10 @@ test word, including `0x00008000`, `0x7ffe0000`, `0x80008000`, `0x80000000`
 and `0x00000000`, and the audible image followed the selected channel. The
 engine now establishes the proven `0x7ffe8000` left/right baseline for Analog
 Inputs 1/2 at startup and exposes persistent per-channel left/center/right
-controls backed by its authoritative cache. Other input pairs and continuous
-pan values remain bounded follow-up work.
+controls backed by its authoritative cache. A saved left-channel center
+position survived a launchd transport restart: polling observed the readiness
+gate, and the first successful read returned `0x00008000`. Other input pairs
+and continuous pan values remain bounded follow-up work.
 
 ## 2026-09-09 — Routing controls, persistence and headphone sources validated
 

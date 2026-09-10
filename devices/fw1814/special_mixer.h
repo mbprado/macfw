@@ -17,6 +17,7 @@ inline constexpr UInt32 kGainAnalog34InLo = 0x00700014; // GAIN_ANA_34_IN
 inline constexpr UInt32 kGainAnalog56InLo = 0x00700018; // GAIN_ANA_56_IN
 inline constexpr UInt32 kGainAnalog78InLo = 0x0070001c; // GAIN_ANA_78_IN
 inline constexpr UInt32 kLrAnalog12InLo = 0x00700040; // LR_ANA_12_IN
+inline constexpr UInt32 kLrAnalog34InLo = 0x00700044; // LR_ANA_34_IN
 inline constexpr UInt32 kMixAnalogDigitalInLo = 0x00700090; // MIX_ANA_DIG_IN
 inline constexpr UInt32 kMixStreamInLo = 0x00700094;  // MIX_STM_IN
 inline constexpr UInt32 kSrcHeadphoneOutLo = 0x00700098; // SRC_HP_OUT

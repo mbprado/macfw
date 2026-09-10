@@ -530,3 +530,37 @@ fw1814ctl input-monitor-pan set analog1/2 right left|center|right
 
 The remaining analog input pairs and continuous intermediate pan values remain
 separate hardware-validation steps.
+
+The first production persistence test set the Inputs 1/2 left member to center,
+restarted the launchd transport and polled through the socket-unavailable and
+`control-state-restoring` phases. The first successful read already reported
+`left-channel=center right-channel=right` and `LR_ANA_12_IN=0x00008000`.
+This confirms that pan participates correctly in the established readiness and
+state-replay contract. A hard-left write restores the normal `0x7ffe8000`
+stereo baseline and saved state.
+
+## Analog Inputs 3/4 pan diagnostic
+
+The next guarded step applies the same documented register layout only to
+`LR_ANA_34_IN` at `0x00700044`. It deliberately does not add a startup write or
+persistence. Establish the complete known baseline before differential writes:
+
+```bash
+fw1814ctl input-monitor-pan initialize analog3/4
+fw1814ctl input-monitor-pan get analog3/4
+```
+
+The expected initial word is `0x7ffe8000`. With signals on physical Inputs 3
+and 4, center and restore one channel at a time:
+
+```bash
+fw1814ctl input-monitor-pan set analog3/4 left center
+fw1814ctl input-monitor-pan set analog3/4 left left
+fw1814ctl input-monitor-pan set analog3/4 right center
+fw1814ctl input-monitor-pan set analog3/4 right right
+fw1814ctl input-monitor-pan get analog3/4
+```
+
+Expected center words are `0x00008000` and `0x7ffe0000`; the final word must be
+`0x7ffe8000`. Do not restart while this diagnostic is left at a non-baseline
+position.

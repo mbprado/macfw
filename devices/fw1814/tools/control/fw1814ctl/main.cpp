@@ -76,6 +76,11 @@ int usage() {
         << "  fw1814ctl input-monitor-pan get analog1/2\n"
         << "  fw1814ctl input-monitor-pan set analog1/2 left|right "
            "left|center|right\n"
+        << "  fw1814ctl input-monitor-pan initialize analog3/4"
+           "  # diagnostic\n"
+        << "  fw1814ctl input-monitor-pan get analog3/4  # diagnostic\n"
+        << "  fw1814ctl input-monitor-pan set analog3/4 left|right "
+           "left|center|right  # diagnostic\n"
         << "  fw1814ctl output-state get\n"
         << "  fw1814ctl output-source get 1/2|3/4\n"
         << "  fw1814ctl output-source set 1/2|3/4 mixer|aux\n"
@@ -652,13 +657,17 @@ int inputMonitorChannelLevelCommand(const std::string& action,
 int inputMonitorPanCommand(const std::string& action,
                            int argc,
                            char** argv) {
+    const bool initializing = action == "initialize";
     const bool getting = action == "get";
     const bool setting = action == "set";
-    if ((getting && argc != 4) ||
+    if (((initializing || getting) && argc != 4) ||
         (setting && argc != 6) ||
-        (!getting && !setting) ||
-        std::string(argv[3]) != "analog1/2")
+        (!initializing && !getting && !setting))
         return usage();
+
+    const int pair = indexOf(argv[3], kInputPairArgs.data(),
+                             kInputPairArgs.size());
+    if (pair < 0 || pair > 1 || (initializing && pair != 1)) return usage();
 
     constexpr std::array<const char*, 2> kChannelArgs{{"left", "right"}};
     constexpr std::array<const char*, 3> kPositionArgs{{
@@ -673,10 +682,12 @@ int inputMonitorPanCommand(const std::string& action,
         if (channel < 0 || position < 0) return usage();
     }
 
-    std::string command = "INPUT_MONITOR_PAN " +
-        std::string(getting ? "GET 0" : "SET 0 ");
+    const char* wireAction = initializing ? "INITIALIZE "
+                           : getting ? "GET " : "SET ";
+    std::string command = "INPUT_MONITOR_PAN " + std::string(wireAction) +
+                          std::to_string(pair);
     if (setting)
-        command += std::to_string(channel) + " " +
+        command += " " + std::to_string(channel) + " " +
                    std::to_string(position);
 
     std::string payload;
@@ -688,7 +699,7 @@ int inputMonitorPanCommand(const std::string& action,
     std::string raw;
     std::string extra;
     if (!(input >> returnedPair >> left >> right >> raw) ||
-        (input >> extra) || returnedPair != 0 || left < 0 || left > 2 ||
+        (input >> extra) || returnedPair != pair || left < 0 || left > 2 ||
         right < 0 || right > 2) {
         std::cerr << "fw1814ctl: invalid input-monitor-pan response: "
                   << payload << '\n';
@@ -708,12 +719,16 @@ int inputMonitorPanCommand(const std::string& action,
         return 1;
     }
 
-    std::cout << "Analog Inputs 1/2 monitor pan: left-channel="
+    constexpr std::array<const char*, 2> kRegisterNames{{
+        "LR_ANA_12_IN", "LR_ANA_34_IN",
+    }};
+    std::cout << kInputPairLabels[pair] << " monitor pan: left-channel="
               << kPositionArgs[left] << " right-channel="
               << kPositionArgs[right] << '\n'
-              << "LR_ANA_12_IN: " << raw
-              << " (write-only cache)\n";
-    if (setting) {
+              << kRegisterNames[pair] << ": " << raw
+              << (pair == 0 ? " (write-only cache)\n"
+                            : " (write-only diagnostic cache)\n");
+    if (setting && pair == 0) {
         const std::string key = "input-monitor-pan:analog1/2:" +
                                 std::string(argv[4]);
         persistSuccessfulSet(argv[0], key, argc, argv);
