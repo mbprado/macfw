@@ -15,6 +15,8 @@ inline constexpr std::uint32_t kAnalogFromMixers = 0x00000000u;
 inline constexpr std::uint32_t kHeadphonesFromMixer12 = 0x00010001u;
 inline constexpr std::uint16_t kMonitorLevelMute = 0x8000u;
 inline constexpr std::uint16_t kMonitorLevelUnity = 0x0000u;
+// AV/C volume values use signed 8.8 dB units. -20 dB is -20 * 256.
+inline constexpr std::uint16_t kMonitorLevelMinus20Db = 0xec00u;
 
 inline constexpr std::uint32_t stereoMonitorLevelWord(
     std::uint16_t level) {

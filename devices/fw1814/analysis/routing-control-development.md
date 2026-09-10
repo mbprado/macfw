@@ -449,5 +449,28 @@ a launchd restart passed through the readiness gate before its first successful
 read returned the restored `GAIN_ANA_78_IN=0x80008000` value. Writing unity
 again restored both the direct signal and saved state. This completes the
 startup, cache, readiness and restart-persistence validation for all four
-analog input pairs. Individual channels, intermediate attenuation, pan and AUX
-remain outside this bounded pass.
+analog input pairs. Individual channels, pan and AUX remain outside this
+bounded pass.
+
+## Analog Inputs 1/2 intermediate-attenuation diagnostic
+
+FFADO maps these registers to AV/C Audio Subunit volume values and updates each
+16-bit channel independently. In that signed 8.8 dB representation, -20 dB is
+`-20 * 256`, or `0xec00`; the complete linked stereo word is therefore
+`0xec00ec00`. The next guarded diagnostic exposes only this single intermediate
+value in addition to the already validated mute and unity endpoints. It is not
+accepted by `fw1814state` and is not replayed after restart.
+
+With Analog Inputs 1/2 routed to Mixer 1/2 and a steady signal present:
+
+```bash
+fw1814ctl input-monitor-level set-all analog1/2 -20db
+fw1814ctl input-monitor-level get analog1/2
+fw1814ctl input-monitor-level set-all analog1/2 unity
+fw1814ctl input-monitor-level get analog1/2
+```
+
+The diagnostic write must report `GAIN_ANA_12_IN=0xec00ec00` and reduce both
+channels substantially while leaving the signal audible. The unity write must
+report `0x00000000` and restore the original direct-monitor level. Do not test
+individual channels or other attenuation values in this pass.

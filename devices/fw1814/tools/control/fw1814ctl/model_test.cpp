@@ -17,6 +17,8 @@ int main() {
                macfw::fw1814::kMonitorLevelMute) == 0x80008000u);
     assert(macfw::fw1814::stereoMonitorLevelWord(
                macfw::fw1814::kMonitorLevelUnity) == 0x00000000u);
+    assert(macfw::fw1814::stereoMonitorLevelWord(
+               macfw::fw1814::kMonitorLevelMinus20Db) == 0xec00ec00u);
 
     assert(model.streamRoute(Model::StreamSource::Stream12,
                              Model::MixerBus::Mixer12));

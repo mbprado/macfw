@@ -67,6 +67,8 @@ int usage() {
            "analog1/2|analog3/4|analog5/6|analog7/8\n"
         << "  fw1814ctl input-monitor-level set-all "
            "analog1/2|analog3/4|analog5/6|analog7/8 mute|unity\n"
+        << "  fw1814ctl input-monitor-level set-all analog1/2 -20db"
+           "  # diagnostic\n"
         << "  fw1814ctl output-state get\n"
         << "  fw1814ctl output-source get 1/2|3/4\n"
         << "  fw1814ctl output-source set 1/2|3/4 mixer|aux\n"
@@ -516,8 +518,11 @@ int inputMonitorLevelCommand(const std::string& action,
     int level = -1;
     if (setting) {
         const std::string value = argv[4];
-        level = value == "mute" ? 0 : value == "unity" ? 1 : -1;
-        if (level < 0) return usage();
+        level = value == "mute" ? 0
+              : value == "unity" ? 1
+              : value == "-20db" ? 2
+              : -1;
+        if (level < 0 || (level == 2 && pair != 0)) return usage();
     }
 
     std::string command = "INPUT_MONITOR_LEVEL " +
@@ -534,16 +539,20 @@ int inputMonitorLevelCommand(const std::string& action,
     std::string extra;
     if (!(input >> returnedPair >> returnedLevel >> raw) ||
         (input >> extra) || returnedPair != pair || returnedLevel < 0 ||
-        returnedLevel > 1) {
+        returnedLevel > 2) {
         std::cerr << "fw1814ctl: invalid input-monitor-level response: "
                   << payload << '\n';
         return 1;
     }
 
     std::uint32_t rawValue = 0;
-    const std::uint32_t expected = macfw::fw1814::stereoMonitorLevelWord(
-        returnedLevel == 0 ? macfw::fw1814::kMonitorLevelMute
-                           : macfw::fw1814::kMonitorLevelUnity);
+    constexpr std::array<std::uint16_t, 3> kLevels{{
+        macfw::fw1814::kMonitorLevelMute,
+        macfw::fw1814::kMonitorLevelUnity,
+        macfw::fw1814::kMonitorLevelMinus20Db,
+    }};
+    const std::uint32_t expected =
+        macfw::fw1814::stereoMonitorLevelWord(kLevels[returnedLevel]);
     if (!parseRawWord(raw, rawValue) || rawValue != expected) {
         std::cerr << "fw1814ctl: invalid analog input gain value\n";
         return 1;
@@ -553,11 +562,15 @@ int inputMonitorLevelCommand(const std::string& action,
         "GAIN_ANA_12_IN", "GAIN_ANA_34_IN", "GAIN_ANA_56_IN",
         "GAIN_ANA_78_IN",
     }};
+    constexpr std::array<const char*, 3> kLevelLabels{{
+        "mute", "unity (0 dB)", "-20 dB (diagnostic)",
+    }};
     std::cout << kInputPairLabels[pair] << " monitor level: "
-              << (returnedLevel == 0 ? "mute" : "unity (0 dB)") << '\n'
+              << kLevelLabels[returnedLevel] << '\n'
               << kRegisterNames[pair] << ": " << raw
-              << " (write-only cache)\n";
-    if (setting)
+              << (returnedLevel <= 1 ? " (write-only cache)\n"
+                                     : " (write-only diagnostic cache)\n");
+    if (setting && level <= 1)
         persistSuccessfulSet(
             argv[0], "input-monitor-level:" + std::string(argv[3]),
             argc, argv);

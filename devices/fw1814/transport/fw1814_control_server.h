@@ -466,7 +466,8 @@ private:
         unsigned level = 0;
         std::string extra;
         if (!(input >> pair) || (setting && !(input >> level)) ||
-            (input >> extra) || pair > 3 || level > 1) {
+            (input >> extra) || pair > 3 || level > 2 ||
+            (setting && level == 2 && pair != 0)) {
             reply("ERR invalid-input-monitor-level\n");
             return;
         }
@@ -476,18 +477,35 @@ private:
                 reply("ERR input-monitor-level-state-uninitialized\n");
                 return;
             }
-            const unsigned cachedLevel =
-                gainAnalogIn_[pair] == macfw::fw1814::stereoMonitorLevelWord(
-                    macfw::fw1814::kMonitorLevelMute) ? 0u : 1u;
+            unsigned cachedLevel = 0;
+            if (gainAnalogIn_[pair] ==
+                macfw::fw1814::stereoMonitorLevelWord(
+                    macfw::fw1814::kMonitorLevelMute)) {
+                cachedLevel = 0;
+            } else if (gainAnalogIn_[pair] ==
+                       macfw::fw1814::stereoMonitorLevelWord(
+                           macfw::fw1814::kMonitorLevelUnity)) {
+                cachedLevel = 1;
+            } else if (gainAnalogIn_[pair] ==
+                       macfw::fw1814::stereoMonitorLevelWord(
+                           macfw::fw1814::kMonitorLevelMinus20Db)) {
+                cachedLevel = 2;
+            } else {
+                reply("ERR input-monitor-level-cache-invalid\n");
+                return;
+            }
             reply("OK " + std::to_string(pair) + " " +
                   std::to_string(cachedLevel) + " " +
                   hex32(gainAnalogIn_[pair]) + "\n");
             return;
         }
 
-        const std::uint16_t channelLevel = level == 0
-            ? macfw::fw1814::kMonitorLevelMute
-            : macfw::fw1814::kMonitorLevelUnity;
+        const std::array<std::uint16_t, 3> levels{{
+            macfw::fw1814::kMonitorLevelMute,
+            macfw::fw1814::kMonitorLevelUnity,
+            macfw::fw1814::kMonitorLevelMinus20Db,
+        }};
+        const std::uint16_t channelLevel = levels[level];
         const std::uint32_t desired =
             macfw::fw1814::stereoMonitorLevelWord(channelLevel);
         const std::array<UInt32, 4> addresses{{
@@ -545,6 +563,7 @@ private:
                   "register-readback=0 state-cache=authoritative "
                   "analog-input-mixer=1 digital=deferred "
                   "analog-input-monitor-level=all-analog-persistent "
+                  "analog-input-attenuation=-20db-diagnostic "
                   "headphone-levels=deferred levels=deferred midi=deferred\n");
             return;
         }
