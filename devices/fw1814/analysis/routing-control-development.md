@@ -342,6 +342,13 @@ fw1814ctl input-monitor-level get analog3/4
 The unity command reported `GAIN_ANA_34_IN=0x00000000` and restored the direct
 monitor signal normally, validating the register encoding and physical path.
 
+After promotion, a fresh engine reported the known Inputs 3/4 unity baseline.
+The typed mute appeared in `fw1814state`, survived a launchd transport restart
+and returned from the new engine cache as `GAIN_ANA_34_IN=0x80008000`. Writing
+unity again restored the direct signal and saved state. This completes the
+startup, cache and transport-restart persistence validation for the second
+analog input pair.
+
 ## Analog Inputs 5/6 monitor-level diagnostic
 
 Enable the validated Analog Inputs 5/6 route with a known low-level signal,

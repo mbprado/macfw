@@ -47,7 +47,8 @@ The same bounded test then validated `GAIN_ANA_34_IN`. Its initial cache was
 unknown as intended; `0x80008000` completely muted the Analog Inputs 3/4 direct
 monitor signal and `0x00000000` restored it normally. Inputs 3/4 now share the
 known unity startup baseline and persistent mute/unity state used by Inputs
-1/2.
+1/2. A saved Inputs 3/4 mute was also replayed after a launchd transport
+restart, after which unity restored both the signal and saved state.
 
 ## 2026-09-09 — Routing controls, persistence and headphone sources validated
 
