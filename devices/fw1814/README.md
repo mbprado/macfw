@@ -25,8 +25,8 @@ The experimental FW1814 profile currently provides:
 - hardware-validated, persistent routing of the four analog input pairs to
   Mixer 1/2 or Mixer 3/4;
 - hardware-validated, persistent stereo mute/unity control for the Analog
-  Inputs 1/2 monitor-mixer level, plus a guarded equivalent diagnostic for
-  Analog Inputs 3/4;
+  Inputs 1/2 and 3/4 monitor-mixer levels, plus a guarded equivalent diagnostic
+  for Analog Inputs 5/6;
 - hardware-validated persistent restoration of software-return, analog-input,
   analog-output and headphone selections after transport restart, rate changes
   and reconnect; the validated Analog Inputs 1/2 monitor level also survives a
@@ -87,6 +87,9 @@ The active transport owns `/tmp/macfw-fw1814-control.sock`; clients never open F
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" input-monitor-level get analog3/4
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" input-monitor-level set-all analog3/4 mute
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" input-monitor-level set-all analog3/4 unity
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" input-monitor-level get analog5/6
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" input-monitor-level set-all analog5/6 mute
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" input-monitor-level set-all analog5/6 unity
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-state get
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-source get 3/4
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-source set 3/4 aux
@@ -117,10 +120,9 @@ all analog and digital monitoring routes off. Differential controls expose
 only the eight proven analog routes for Inputs 1/2 through 7/8; digital-input
 bits remain zero and unavailable.
 
-The Analog Inputs 1/2 monitor-level control writes the complete documented
-stereo word and permits only mute or unity. Hardware testing confirmed that it
-controls the input's contribution to the hardware mixer, not the preamp or
-CoreAudio capture level. The engine establishes unity at startup and successful
-changes are saved by `fw1814state`. Analog Inputs 3/4 expose the same bounded
-write as a non-persistent diagnostic; its cache remains unknown until the first
-write.
+The Analog Inputs 1/2 and 3/4 monitor-level controls write their complete
+documented stereo words and permit only mute or unity. Hardware testing
+confirmed that they control the inputs' contribution to the hardware mixer.
+The engine establishes unity at startup and successful changes are saved by
+`fw1814state`. Analog Inputs 5/6 expose the same bounded write as a
+non-persistent diagnostic; its cache remains unknown until the first write.

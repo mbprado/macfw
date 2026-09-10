@@ -39,7 +39,10 @@ public:
         analogInputMonitorLevelKnown_.fill(false);
         gainAnalogIn_.fill(0);
         analogInputMonitorLevelKnown_[0] = true;
+        analogInputMonitorLevelKnown_[1] = true;
         gainAnalogIn_[0] = macfw::fw1814::stereoMonitorLevelWord(
+            macfw::fw1814::kMonitorLevelUnity);
+        gainAnalogIn_[1] = macfw::fw1814::stereoMonitorLevelWord(
             macfw::fw1814::kMonitorLevelUnity);
 
         listenFd_ = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -465,7 +468,7 @@ private:
         unsigned level = 0;
         std::string extra;
         if (!(input >> pair) || (setting && !(input >> level)) ||
-            (input >> extra) || pair > 1 || level > 1) {
+            (input >> extra) || pair > 2 || level > 1) {
             reply("ERR invalid-input-monitor-level\n");
             return;
         }
@@ -489,10 +492,12 @@ private:
             : macfw::fw1814::kMonitorLevelUnity;
         const std::uint32_t desired =
             macfw::fw1814::stereoMonitorLevelWord(channelLevel);
-        const UInt32 address = pair == 0
-            ? macfw::fw1814::kGainAnalog12InLo
-            : macfw::fw1814::kGainAnalog34InLo;
-        const WriteResult result = writeRegister(address, desired);
+        const std::array<UInt32, 3> addresses{{
+            macfw::fw1814::kGainAnalog12InLo,
+            macfw::fw1814::kGainAnalog34InLo,
+            macfw::fw1814::kGainAnalog56InLo,
+        }};
+        const WriteResult result = writeRegister(addresses[pair], desired);
         if (result != WriteResult::Ok) {
             replyWriteError(result);
             return;
@@ -523,7 +528,7 @@ private:
                   "headphone-source=1 "
                   "register-readback=0 state-cache=authoritative "
                   "analog-input-mixer=1 digital=deferred "
-                  "analog-input-monitor-level=1/2-persistent,3/4-diagnostic "
+                  "analog-input-monitor-level=1/2+3/4-persistent,5/6-diagnostic "
                   "headphone-levels=deferred levels=deferred midi=deferred\n");
             return;
         }
@@ -559,8 +564,8 @@ private:
     unsigned sampleRate_ = 0;
     UInt32 generation_ = 0;
     macfw::fw1814::SpecialMixerRoutingModel routing_{};
-    std::array<bool, 2> analogInputMonitorLevelKnown_{{false, false}};
-    std::array<std::uint32_t, 2> gainAnalogIn_{{0, 0}};
+    std::array<bool, 3> analogInputMonitorLevelKnown_{{false, false, false}};
+    std::array<std::uint32_t, 3> gainAnalogIn_{{0, 0, 0}};
     int listenFd_ = -1;
     int clientFd_ = -1;
     std::string request_;

@@ -14,6 +14,7 @@ namespace macfw::fw1814 {
 inline constexpr UInt16 kMixerAddressHi = 0xffc7;
 inline constexpr UInt32 kGainAnalog12InLo = 0x00700010; // GAIN_ANA_12_IN
 inline constexpr UInt32 kGainAnalog34InLo = 0x00700014; // GAIN_ANA_34_IN
+inline constexpr UInt32 kGainAnalog56InLo = 0x00700018; // GAIN_ANA_56_IN
 inline constexpr UInt32 kMixAnalogDigitalInLo = 0x00700090; // MIX_ANA_DIG_IN
 inline constexpr UInt32 kMixStreamInLo = 0x00700094;  // MIX_STM_IN
 inline constexpr UInt32 kSrcHeadphoneOutLo = 0x00700098; // SRC_HP_OUT
@@ -78,6 +79,20 @@ inline bool applyStraightAnalogPlaybackRouting(FireWireDevice& device,
         return false;
     }
 
+    if (!writeMixerRegister(device, kGainAnalog34InLo,
+                            stereoMonitorLevelWord(kMonitorLevelUnity))) {
+        if (verbose) std::cerr << "FW1814 GAIN_ANA_34_IN write failed\n";
+        return false;
+    }
+
+    if ((*native)->GetBusGeneration(native, &generation) != kIOReturnSuccess ||
+        generation != expectedGeneration) {
+        if (verbose)
+            std::cerr << "FW1814 generation changed after GAIN_ANA_34_IN; "
+                         "stopping routing sequence\n";
+        return false;
+    }
+
     if (!writeMixerRegister(device, kMixAnalogDigitalInLo,
                             kAnalogInputsMuted)) {
         if (verbose) std::cerr << "FW1814 MIX_ANA_DIG_IN write failed\n";
@@ -130,7 +145,7 @@ inline bool applyStraightAnalogPlaybackRouting(FireWireDevice& device,
         std::cout << "FW1814 analog routing: Stream 1/2->Mix 1/2->Analog 1/2, "
                      "Stream 3/4->Mix 3/4->Analog 3/4; "
                      "Headphones 1/2->Mix 1/2; analog monitor routes off; "
-                     "Analog Inputs 1/2 monitor level at unity\n";
+                     "Analog Inputs 1/2 and 3/4 monitor levels at unity\n";
     return true;
 }
 

@@ -88,9 +88,15 @@ The control always writes both channels together and exposes no raw or
 intermediate attenuation values. The engine now writes unity at startup, keeps
 an authoritative cache and persists successful Analog Inputs 1/2 changes.
 
-The next guarded diagnostic applies the same full-word mute/unity restriction
-to `GAIN_ANA_34_IN` at offset `0x14`. It performs no startup write and is not
-persisted until its physical signal path is validated.
+The same full-word mute/unity restriction was then validated for
+`GAIN_ANA_34_IN` at offset `0x14`: `0x80008000` completely muted the Analog
+Inputs 3/4 direct-monitor signal and `0x00000000` restored it normally. The
+engine now establishes unity for both validated pairs at startup, and both
+controls use the authoritative cache and persistent state path.
+
+The next guarded diagnostic targets `GAIN_ANA_56_IN` at offset `0x18`. It
+performs no startup write and is not persisted until its physical signal path
+is validated.
 
 ## Command surface
 
@@ -107,8 +113,8 @@ fw1814ctl headphone-source set 1|2 mixer1/2|mixer3/4
 fw1814ctl input-mixer get
 fw1814ctl input-mixer-route get analog1/2|analog3/4|analog5/6|analog7/8 1/2|3/4
 fw1814ctl input-mixer-route set analog1/2|analog3/4|analog5/6|analog7/8 1/2|3/4 on|off
-fw1814ctl input-monitor-level get analog1/2|analog3/4
-fw1814ctl input-monitor-level set-all analog1/2|analog3/4 mute|unity
+fw1814ctl input-monitor-level get analog1/2|analog3/4|analog5/6
+fw1814ctl input-monitor-level set-all analog1/2|analog3/4|analog5/6 mute|unity
 fw1814ctl routing get
 ```
 
@@ -118,7 +124,7 @@ With no saved overrides, a new engine keeps the hardware-proven
 `MIX_ANA_DIG_IN=0x00000000`, `MIX_STM_IN=0x00000006`,
 `SRC_ANA_OUT=0x00000000` and `SRC_HP_OUT=0x00010001` startup baseline.
 `fw1814state reset` applies and saves all sixteen default routing
-cells/selectors plus the validated Analog Inputs 1/2 unity level.
+cells/selectors plus the validated Analog Inputs 1/2 and 3/4 unity levels.
 `fw1814state clear` empties the saved file without changing current hardware
 state.
 
@@ -310,7 +316,7 @@ engine reported `GAIN_ANA_12_IN=0x80008000`. Writing unity again restored the
 signal and replaced the saved mute state. This validates the control's startup,
 cache and transport-restart persistence lifecycle.
 
-## Analog Inputs 3/4 monitor-level diagnostic
+## Analog Inputs 3/4 monitor-level validation
 
 Enable the validated Analog Inputs 3/4 route with a known low-level signal,
 then confirm the new cache begins unknown:
@@ -322,9 +328,9 @@ fw1814ctl input-monitor-level set-all analog3/4 mute
 fw1814ctl input-monitor-level get analog3/4
 ```
 
-The first `get` must report `input-monitor-level-state-uninitialized`. The mute
-command must report `GAIN_ANA_34_IN=0x80008000` and silence the direct hardware
-monitor signal without affecting CoreAudio capture.
+The first `get` reported `input-monitor-level-state-uninitialized`. The mute
+command reported `GAIN_ANA_34_IN=0x80008000` and completely silenced the direct
+hardware-monitor signal.
 
 Restore the complete unity value before ending the test:
 
@@ -333,7 +339,34 @@ fw1814ctl input-monitor-level set-all analog3/4 unity
 fw1814ctl input-monitor-level get analog3/4
 ```
 
-The command must report `GAIN_ANA_34_IN=0x00000000` and restore the direct
-monitor signal. Do not restart the transport while Analog Inputs 3/4 are
+The unity command reported `GAIN_ANA_34_IN=0x00000000` and restored the direct
+monitor signal normally, validating the register encoding and physical path.
+
+## Analog Inputs 5/6 monitor-level diagnostic
+
+Enable the validated Analog Inputs 5/6 route with a known low-level signal,
+then confirm the new cache begins unknown:
+
+```bash
+fw1814ctl input-mixer-route set analog3/4 1/2 off
+fw1814ctl input-mixer-route set analog5/6 1/2 on
+fw1814ctl input-monitor-level get analog5/6
+fw1814ctl input-monitor-level set-all analog5/6 mute
+fw1814ctl input-monitor-level get analog5/6
+```
+
+The first `get` must report `input-monitor-level-state-uninitialized`. The mute
+command must report `GAIN_ANA_56_IN=0x80008000` and silence the direct hardware
+monitor signal.
+
+Restore the complete unity value before ending the test:
+
+```bash
+fw1814ctl input-monitor-level set-all analog5/6 unity
+fw1814ctl input-monitor-level get analog5/6
+```
+
+The command must report `GAIN_ANA_56_IN=0x00000000` and restore the direct
+monitor signal. Do not restart the transport while Analog Inputs 5/6 are
 muted, and do not test individual channels, intermediate attenuation, other
 unexposed input pairs, pan or AUX in this pass.

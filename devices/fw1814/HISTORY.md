@@ -43,6 +43,12 @@ and Reset Defaults. A saved mute was replayed successfully after a launchd
 transport restart, the authoritative cache returned `0x80008000`, and a final
 unity write restored both the signal and saved state.
 
+The same bounded test then validated `GAIN_ANA_34_IN`. Its initial cache was
+unknown as intended; `0x80008000` completely muted the Analog Inputs 3/4 direct
+monitor signal and `0x00000000` restored it normally. Inputs 3/4 now share the
+known unity startup baseline and persistent mute/unity state used by Inputs
+1/2.
+
 ## 2026-09-09 — Routing controls, persistence and headphone sources validated
 
 The FW1814 gained its first end-user-style routing control surface. The active
