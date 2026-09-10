@@ -17,6 +17,10 @@ inline constexpr std::uint16_t kMonitorLevelMute = 0x8000u;
 inline constexpr std::uint16_t kMonitorLevelUnity = 0x0000u;
 // AV/C volume values use signed 8.8 dB units. -20 dB is -20 * 256.
 inline constexpr std::uint16_t kMonitorLevelMinus20Db = 0xec00u;
+inline constexpr std::uint16_t kPanHardRight = 0x8000u;
+inline constexpr std::uint16_t kPanCenter = 0x0000u;
+inline constexpr std::uint16_t kPanHardLeft = 0x7ffeu;
+inline constexpr std::uint32_t kAnalogInputPanBaseline = 0x7ffe8000u;
 
 inline constexpr std::uint32_t stereoMonitorLevelWord(
     std::uint16_t level) {
@@ -35,6 +39,16 @@ inline constexpr std::uint32_t setMonitorLevelChannel(
     return channel == 0
         ? (word & 0x0000ffffu) | (static_cast<std::uint32_t>(level) << 16)
         : (word & 0xffff0000u) | level;
+}
+
+inline constexpr std::uint16_t inputPanChannel(
+    std::uint32_t word, std::size_t channel) {
+    return monitorLevelChannel(word, channel);
+}
+
+inline constexpr std::uint32_t setInputPanChannel(
+    std::uint32_t word, std::size_t channel, std::uint16_t pan) {
+    return setMonitorLevelChannel(word, channel, pan);
 }
 
 enum class HeadphoneSource : std::uint32_t {

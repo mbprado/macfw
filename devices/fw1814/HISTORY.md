@@ -76,8 +76,12 @@ This completes restart-persistence validation for all four pairs.
 The first intermediate analog monitor value was then validated on Inputs 1/2.
 The linked stereo AV/C -20 dB word `0xec00ec00` reduced the direct-monitor
 volume normally and returned identically from the authoritative cache. This
-establishes the first non-endpoint fader value; independent channel updates are
-the next guarded diagnostic.
+establishes the first non-endpoint fader value. Independent upper- and lower-
+16-bit updates were then validated: the left-only value `0xec000000` attenuated
+Input 1 normally while preserving Input 2, and updating the right field formed
+`0xec00ec00` with both channels attenuated. Linked unity restored the complete
+zero word. This provides the backend behavior required for independent GUI
+faders and a Link control.
 
 ## 2026-09-09 — Routing controls, persistence and headphone sources validated
 

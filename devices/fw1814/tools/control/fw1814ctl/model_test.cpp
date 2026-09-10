@@ -29,6 +29,18 @@ int main() {
            macfw::fw1814::kMonitorLevelMinus20Db);
     assert(macfw::fw1814::monitorLevelChannel(0xec000000u, 1) ==
            macfw::fw1814::kMonitorLevelUnity);
+    assert(macfw::fw1814::inputPanChannel(
+               macfw::fw1814::kAnalogInputPanBaseline, 0) ==
+           macfw::fw1814::kPanHardLeft);
+    assert(macfw::fw1814::inputPanChannel(
+               macfw::fw1814::kAnalogInputPanBaseline, 1) ==
+           macfw::fw1814::kPanHardRight);
+    assert(macfw::fw1814::setInputPanChannel(
+               macfw::fw1814::kAnalogInputPanBaseline, 0,
+               macfw::fw1814::kPanCenter) == 0x00008000u);
+    assert(macfw::fw1814::setInputPanChannel(
+               macfw::fw1814::kAnalogInputPanBaseline, 1,
+               macfw::fw1814::kPanCenter) == 0x7ffe0000u);
 
     assert(model.streamRoute(Model::StreamSource::Stream12,
                              Model::MixerBus::Mixer12));

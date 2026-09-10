@@ -73,6 +73,11 @@ int usage() {
            "  # diagnostic\n"
         << "  fw1814ctl input-monitor-channel-level set analog1/2 left|right "
            "unity|-20db  # diagnostic\n"
+        << "  fw1814ctl input-monitor-pan initialize analog1/2"
+           "  # diagnostic\n"
+        << "  fw1814ctl input-monitor-pan get analog1/2  # diagnostic\n"
+        << "  fw1814ctl input-monitor-pan set analog1/2 left|right "
+           "left|center|right  # diagnostic\n"
         << "  fw1814ctl output-state get\n"
         << "  fw1814ctl output-source get 1/2|3/4\n"
         << "  fw1814ctl output-source set 1/2|3/4 mixer|aux\n"
@@ -646,6 +651,75 @@ int inputMonitorChannelLevelCommand(const std::string& action,
     return 0;
 }
 
+int inputMonitorPanCommand(const std::string& action,
+                           int argc,
+                           char** argv) {
+    const bool initializing = action == "initialize";
+    const bool getting = action == "get";
+    const bool setting = action == "set";
+    if (((initializing || getting) && argc != 4) ||
+        (setting && argc != 6) ||
+        (!initializing && !getting && !setting) ||
+        std::string(argv[3]) != "analog1/2")
+        return usage();
+
+    constexpr std::array<const char*, 2> kChannelArgs{{"left", "right"}};
+    constexpr std::array<const char*, 3> kPositionArgs{{
+        "left", "center", "right",
+    }};
+    int channel = -1;
+    int position = -1;
+    if (setting) {
+        channel = indexOf(argv[4], kChannelArgs.data(), kChannelArgs.size());
+        position = indexOf(
+            argv[5], kPositionArgs.data(), kPositionArgs.size());
+        if (channel < 0 || position < 0) return usage();
+    }
+
+    std::string command = "INPUT_MONITOR_PAN " +
+        std::string(initializing ? "INITIALIZE 0"
+                                 : getting ? "GET 0" : "SET 0 ");
+    if (setting)
+        command += std::to_string(channel) + " " +
+                   std::to_string(position);
+
+    std::string payload;
+    if (!payloadFor(command, payload)) return 1;
+    std::istringstream input(payload);
+    int returnedPair = -1;
+    int left = -1;
+    int right = -1;
+    std::string raw;
+    std::string extra;
+    if (!(input >> returnedPair >> left >> right >> raw) ||
+        (input >> extra) || returnedPair != 0 || left < 0 || left > 2 ||
+        right < 0 || right > 2) {
+        std::cerr << "fw1814ctl: invalid input-monitor-pan response: "
+                  << payload << '\n';
+        return 1;
+    }
+
+    constexpr std::array<std::uint16_t, 3> kPositions{{
+        macfw::fw1814::kPanHardLeft,
+        macfw::fw1814::kPanCenter,
+        macfw::fw1814::kPanHardRight,
+    }};
+    std::uint32_t rawValue = 0;
+    if (!parseRawWord(raw, rawValue) ||
+        macfw::fw1814::inputPanChannel(rawValue, 0) != kPositions[left] ||
+        macfw::fw1814::inputPanChannel(rawValue, 1) != kPositions[right]) {
+        std::cerr << "fw1814ctl: inconsistent analog input pan value\n";
+        return 1;
+    }
+
+    std::cout << "Analog Inputs 1/2 monitor pan: left-channel="
+              << kPositionArgs[left] << " right-channel="
+              << kPositionArgs[right] << '\n'
+              << "LR_ANA_12_IN: " << raw
+              << " (write-only diagnostic cache)\n";
+    return 0;
+}
+
 int outputStateGet() {
     std::string payload;
     if (!payloadFor("OUTPUT GET", payload)) return 1;
@@ -863,6 +937,8 @@ int main(int argc, char** argv) {
         return inputMonitorLevelCommand(action, argc, argv);
     if (control == "input-monitor-channel-level")
         return inputMonitorChannelLevelCommand(action, argc, argv);
+    if (control == "input-monitor-pan")
+        return inputMonitorPanCommand(action, argc, argv);
     if (control == "output-state")
         return action == "get" && argc == 3 ? outputStateGet() : usage();
     if (control == "output-source")

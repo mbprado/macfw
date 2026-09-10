@@ -489,8 +489,42 @@ fw1814ctl input-monitor-channel-level get analog1/2 right
 fw1814ctl input-monitor-level set-all analog1/2 unity
 ```
 
-The left write must report `GAIN_ANA_12_IN=0xec000000`. A signal on physical
-Analog Input 1 should become quieter while Analog Input 2 remains at unity. The
-two channel reads must report -20 dB and unity respectively. The final linked
-unity write must restore `0x00000000`. Do not restart while the diagnostic word
-is active.
+Hardware testing confirmed that the left-only write produced
+`GAIN_ANA_12_IN=0xec000000` and attenuated physical Input 1 normally while
+preserving the other 16-bit field. Updating the right field then produced
+`0xec00ec00`, and both input channels were tested successfully. Linked unity
+restored `0x00000000`. Independent cached gain-field updates are therefore
+validated; arbitrary attenuation ranges and persistence remain deferred.
+
+## Analog Inputs 1/2 pan diagnostic
+
+FFADO initializes each analog input-pair LR register to `0x7ffe8000`: the upper
+left-channel field is hard left (`0x7ffe`) and the lower right-channel field is
+hard right (`0x8000`). Center is `0x0000`. The first pan diagnostic is limited
+to Analog Inputs 1/2 and the exact left, center and right positions. It performs
+no startup write and is not persisted.
+
+Initialize the complete known baseline before any differential pan write:
+
+```bash
+fw1814ctl input-monitor-level set-all analog1/2 unity
+fw1814ctl input-monitor-pan initialize analog1/2
+fw1814ctl input-monitor-pan get analog1/2
+```
+
+The cache must report `LR_ANA_12_IN=0x7ffe8000`. With signals available on both
+physical inputs, center and restore one member at a time:
+
+```bash
+fw1814ctl input-monitor-pan set analog1/2 left center
+fw1814ctl input-monitor-pan set analog1/2 left left
+fw1814ctl input-monitor-pan set analog1/2 right center
+fw1814ctl input-monitor-pan set analog1/2 right right
+fw1814ctl input-monitor-pan get analog1/2
+```
+
+Centering the left member must produce `0x00008000`; restoring it must return
+`0x7ffe8000`. Centering the right member must produce `0x7ffe0000`; restoring
+it must again return `0x7ffe8000`. The audible image should follow only the
+selected input. Do not restart or test intermediate pan positions while the
+diagnostic is active.
