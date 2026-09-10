@@ -443,7 +443,11 @@ fw1814ctl input-monitor-level get analog7/8
 
 The unity command reported `GAIN_ANA_78_IN=0x00000000` and restored the direct
 monitor signal normally. Inputs 7/8 are now promoted to the known unity startup
-baseline, authoritative cache and typed persistent-state path. A launchd
-restart replay remains to be hardware-validated before this control is closed.
-Individual channels, intermediate attenuation, pan and AUX remain outside this
-bounded pass.
+baseline, authoritative cache and typed persistent-state path. After promotion,
+the initial read returned unity, a typed mute was saved, and rapid polling over
+a launchd restart passed through the readiness gate before its first successful
+read returned the restored `GAIN_ANA_78_IN=0x80008000` value. Writing unity
+again restored both the direct signal and saved state. This completes the
+startup, cache, readiness and restart-persistence validation for all four
+analog input pairs. Individual channels, intermediate attenuation, pan and AUX
+remain outside this bounded pass.

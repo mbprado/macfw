@@ -4,7 +4,7 @@ This file records visible project milestones rather than every diagnostic
 experiment. Detailed protocol, transport and routing findings remain under
 `devices/fw1814/analysis/`.
 
-## 2026-09-10 — Analog input monitoring matrix and first level control validated
+## 2026-09-10 — Analog input monitoring matrix and levels validated
 
 The complete analog half of the FW1814 `MIX_ANA_DIG_IN` register was validated
 with known signals on all four physical input pairs. Each pair routed
@@ -68,8 +68,10 @@ The final bounded test validated `GAIN_ANA_78_IN` for Analog Inputs 7/8.
 `0x80008000` completely muted its direct-monitor contribution and
 `0x00000000` restored it normally. All four analog input-pair monitor levels
 now have a known unity startup baseline, authoritative cache, typed mute/unity
-control and persistent state support. The final Inputs 7/8 restart replay is
-the remaining lifecycle check.
+control and persistent state support. A saved Inputs 7/8 mute passed through
+the control-readiness gate and was already present in the first successful
+post-restart read; writing unity again restored the signal and saved state.
+This completes restart-persistence validation for all four pairs.
 
 ## 2026-09-09 — Routing controls, persistence and headphone sources validated
 
