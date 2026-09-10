@@ -78,6 +78,8 @@ public:
         sampleRate_ = 0;
         generation_ = 0;
         routing_.loadStraightAnalogPlaybackPreset();
+        analogInput12MonitorLevelKnown_ = false;
+        gainAnalog12In_ = 0;
     }
 
     void service() {
@@ -441,6 +443,57 @@ private:
         reply("ERR unknown-command\n");
     }
 
+    void handleInputMonitorLevel(const std::string& command) {
+        const std::string getPrefix = "INPUT_MONITOR_LEVEL GET ";
+        const std::string setPrefix = "INPUT_MONITOR_LEVEL SET_ALL ";
+        const bool getting = command.rfind(getPrefix, 0) == 0;
+        const bool setting = command.rfind(setPrefix, 0) == 0;
+        if (!getting && !setting) {
+            reply("ERR unknown-command\n");
+            return;
+        }
+
+        std::istringstream input(command.substr(
+            getting ? getPrefix.size() : setPrefix.size()));
+        unsigned pair = 0;
+        unsigned level = 0;
+        std::string extra;
+        if (!(input >> pair) || (setting && !(input >> level)) ||
+            (input >> extra) || pair != 0 || level > 1) {
+            reply("ERR invalid-input-monitor-level\n");
+            return;
+        }
+
+        if (getting) {
+            if (!analogInput12MonitorLevelKnown_) {
+                reply("ERR input-monitor-level-state-uninitialized\n");
+                return;
+            }
+            const unsigned cachedLevel =
+                gainAnalog12In_ == macfw::fw1814::stereoMonitorLevelWord(
+                    macfw::fw1814::kMonitorLevelMute) ? 0u : 1u;
+            reply("OK 0 " + std::to_string(cachedLevel) + " " +
+                  hex32(gainAnalog12In_) + "\n");
+            return;
+        }
+
+        const std::uint16_t channelLevel = level == 0
+            ? macfw::fw1814::kMonitorLevelMute
+            : macfw::fw1814::kMonitorLevelUnity;
+        const std::uint32_t desired =
+            macfw::fw1814::stereoMonitorLevelWord(channelLevel);
+        const WriteResult result = writeRegister(
+            macfw::fw1814::kGainAnalog12InLo, desired);
+        if (result != WriteResult::Ok) {
+            replyWriteError(result);
+            return;
+        }
+        gainAnalog12In_ = desired;
+        analogInput12MonitorLevelKnown_ = true;
+        reply("OK 0 " + std::to_string(level) + " " +
+              hex32(gainAnalog12In_) + "\n");
+    }
+
     void handle(const std::string& command) {
         if (command == "ROUTING GET") {
             const std::string profile = routing_.isStraightAnalogPlaybackPreset()
@@ -460,6 +513,7 @@ private:
                   "headphone-source=1 "
                   "register-readback=0 state-cache=authoritative "
                   "analog-input-mixer=1 digital=deferred "
+                  "analog-input-monitor-level=diagnostic-1/2 "
                   "headphone-levels=deferred levels=deferred midi=deferred\n");
             return;
         }
@@ -474,6 +528,10 @@ private:
         }
         if (command.rfind("INPUT_MIXER ", 0) == 0) {
             handleInputMixer(command);
+            return;
+        }
+        if (command.rfind("INPUT_MONITOR_LEVEL ", 0) == 0) {
+            handleInputMonitorLevel(command);
             return;
         }
         if (command.rfind("OUTPUT ", 0) == 0) {
@@ -491,6 +549,8 @@ private:
     unsigned sampleRate_ = 0;
     UInt32 generation_ = 0;
     macfw::fw1814::SpecialMixerRoutingModel routing_{};
+    bool analogInput12MonitorLevelKnown_ = false;
+    std::uint32_t gainAnalog12In_ = 0;
     int listenFd_ = -1;
     int clientFd_ = -1;
     std::string request_;

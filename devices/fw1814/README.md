@@ -24,11 +24,13 @@ The experimental FW1814 profile currently provides:
   both physical headphone outputs;
 - hardware-validated, persistent routing of the four analog input pairs to
   Mixer 1/2 or Mixer 3/4;
+- a guarded, non-persistent stereo mute/unity diagnostic for the Analog Inputs
+  1/2 monitor-mixer level;
 - hardware-validated persistent restoration of software-return, analog-input,
   analog-output and headphone selections after transport restart, rate changes
   and reconnect.
 
-S/PDIF, ADAT, 88.2/96/176.4/192 kHz, digital-input routing, levels, headphone AUX routing and the native control panel remain under development. MIDI is intentionally deferred until the audio/control surface is complete.
+S/PDIF, ADAT, 88.2/96/176.4/192 kHz, digital-input routing, production level/pan controls, headphone AUX routing and the native control panel remain under development. MIDI is intentionally deferred until the audio/control surface is complete.
 
 ## Architecture
 
@@ -72,6 +74,9 @@ The active transport owns `/tmp/macfw-fw1814-control.sock`; clients never open F
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" input-mixer-route get analog1/2 1/2
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" input-mixer-route set analog1/2 1/2 on
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" input-mixer-route set analog1/2 1/2 off
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" input-monitor-level get analog1/2
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" input-monitor-level set-all analog1/2 mute
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" input-monitor-level set-all analog1/2 unity
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-state get
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-source get 3/4
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-source set 3/4 aux
@@ -101,3 +106,9 @@ The engine initializes `MIX_ANA_DIG_IN` to the validated zero baseline, with
 all analog and digital monitoring routes off. Differential controls expose
 only the eight proven analog routes for Inputs 1/2 through 7/8; digital-input
 bits remain zero and unavailable.
+
+The Analog Inputs 1/2 monitor-level diagnostic writes the complete documented
+stereo word and permits only mute or unity. It controls the input's contribution
+to the hardware mixer, not the preamp or CoreAudio capture level. Its cache is
+unknown after engine startup, and the diagnostic is not saved by
+`fw1814state`.

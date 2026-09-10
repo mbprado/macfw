@@ -63,6 +63,8 @@ int usage() {
            "analog1/2|analog3/4|analog5/6|analog7/8 1/2|3/4\n"
         << "  fw1814ctl input-mixer-route set "
            "analog1/2|analog3/4|analog5/6|analog7/8 1/2|3/4 on|off\n"
+        << "  fw1814ctl input-monitor-level get analog1/2\n"
+        << "  fw1814ctl input-monitor-level set-all analog1/2 mute|unity\n"
         << "  fw1814ctl output-state get\n"
         << "  fw1814ctl output-source get 1/2|3/4\n"
         << "  fw1814ctl output-source set 1/2|3/4 mixer|aux\n"
@@ -493,6 +495,62 @@ int inputMixerRouteCommand(const std::string& action,
     return 0;
 }
 
+int inputMonitorLevelCommand(const std::string& action,
+                             int argc,
+                             char** argv) {
+    const bool getting = action == "get";
+    const bool setting = action == "set-all";
+    if ((getting && argc != 4) || (setting && argc != 5) ||
+        (!getting && !setting))
+        return usage();
+
+    const int pair = indexOf(argv[3], kInputPairArgs.data(),
+                             kInputPairArgs.size());
+    if (pair != 0) return usage();
+
+    int level = -1;
+    if (setting) {
+        const std::string value = argv[4];
+        level = value == "mute" ? 0 : value == "unity" ? 1 : -1;
+        if (level < 0) return usage();
+    }
+
+    std::string command = "INPUT_MONITOR_LEVEL " +
+        std::string(getting ? "GET " : "SET_ALL ") +
+        std::to_string(pair);
+    if (setting) command += " " + std::to_string(level);
+
+    std::string payload;
+    if (!payloadFor(command, payload)) return 1;
+    std::istringstream input(payload);
+    int returnedPair = -1;
+    int returnedLevel = -1;
+    std::string raw;
+    std::string extra;
+    if (!(input >> returnedPair >> returnedLevel >> raw) ||
+        (input >> extra) || returnedPair != pair || returnedLevel < 0 ||
+        returnedLevel > 1) {
+        std::cerr << "fw1814ctl: invalid input-monitor-level response: "
+                  << payload << '\n';
+        return 1;
+    }
+
+    std::uint32_t rawValue = 0;
+    const std::uint32_t expected = macfw::fw1814::stereoMonitorLevelWord(
+        returnedLevel == 0 ? macfw::fw1814::kMonitorLevelMute
+                           : macfw::fw1814::kMonitorLevelUnity);
+    if (!parseRawWord(raw, rawValue) || rawValue != expected) {
+        std::cerr << "fw1814ctl: invalid GAIN_ANA_12_IN value\n";
+        return 1;
+    }
+
+    std::cout << "Analog Inputs 1/2 monitor level: "
+              << (returnedLevel == 0 ? "mute" : "unity (0 dB)") << '\n'
+              << "GAIN_ANA_12_IN: " << raw
+              << " (write-only diagnostic cache)\n";
+    return 0;
+}
+
 int outputStateGet() {
     std::string payload;
     if (!payloadFor("OUTPUT GET", payload)) return 1;
@@ -693,6 +751,8 @@ int main(int argc, char** argv) {
         return action == "get" || action == "set"
             ? inputMixerRouteCommand(action, argc, argv)
             : usage();
+    if (control == "input-monitor-level")
+        return inputMonitorLevelCommand(action, argc, argv);
     if (control == "output-state")
         return action == "get" && argc == 3 ? outputStateGet() : usage();
     if (control == "output-source")

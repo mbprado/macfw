@@ -13,6 +13,13 @@ inline constexpr std::uint32_t kStraightStreamToMixer = 0x00000006u;
 inline constexpr std::uint32_t kAnalogInputsMuted = 0x00000000u;
 inline constexpr std::uint32_t kAnalogFromMixers = 0x00000000u;
 inline constexpr std::uint32_t kHeadphonesFromMixer12 = 0x00010001u;
+inline constexpr std::uint16_t kMonitorLevelMute = 0x8000u;
+inline constexpr std::uint16_t kMonitorLevelUnity = 0x0000u;
+
+inline constexpr std::uint32_t stereoMonitorLevelWord(
+    std::uint16_t level) {
+    return (static_cast<std::uint32_t>(level) << 16) | level;
+}
 
 enum class HeadphoneSource : std::uint32_t {
     Mixer12 = 0x01u,
