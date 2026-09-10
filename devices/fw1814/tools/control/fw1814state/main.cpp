@@ -22,6 +22,9 @@ constexpr const char* kFormat = "macfw-fw1814-control-state-v1";
 
 constexpr std::array<const char*, 2> kMixerSources{{"sw1/2", "sw3/4"}};
 constexpr std::array<const char*, 2> kMixerBuses{{"1/2", "3/4"}};
+constexpr std::array<const char*, 4> kInputPairs{{
+    "analog1/2", "analog3/4", "analog5/6", "analog7/8",
+}};
 constexpr std::array<const char*, 2> kOutputPairs{{"1/2", "3/4"}};
 constexpr std::array<const char*, 2> kHeadphoneOutputs{{"1", "2"}};
 
@@ -68,6 +71,18 @@ bool validStoredCommand(const Entry& entry) {
         (entry.arguments[2] == "1/2" || entry.arguments[2] == "3/4") &&
         (entry.arguments[3] == "mixer" || entry.arguments[3] == "aux"))
         return entry.key == "output-source:" + entry.arguments[2];
+
+    if (entry.arguments.size() == 5 &&
+        entry.arguments[0] == "input-mixer-route" &&
+        entry.arguments[1] == "set" &&
+        (entry.arguments[2] == "analog1/2" ||
+         entry.arguments[2] == "analog3/4" ||
+         entry.arguments[2] == "analog5/6" ||
+         entry.arguments[2] == "analog7/8") &&
+        (entry.arguments[3] == "1/2" || entry.arguments[3] == "3/4") &&
+        (entry.arguments[4] == "on" || entry.arguments[4] == "off"))
+        return entry.key == "input-mixer-route:" + entry.arguments[2] +
+                                ":" + entry.arguments[3];
 
     if (entry.arguments.size() == 4 &&
         entry.arguments[0] == "headphone-source" &&
@@ -216,7 +231,7 @@ int restoreEntries(const char* argv0, const std::vector<Entry>& entries) {
 
 std::vector<Entry> defaultState() {
     std::vector<Entry> entries;
-    entries.reserve(8);
+    entries.reserve(16);
     for (const char* sourceValue : kMixerSources) {
         for (const char* busValue : kMixerBuses) {
             const std::string source(sourceValue);
@@ -239,6 +254,18 @@ std::vector<Entry> defaultState() {
         entry.key = "output-source:" + pair;
         entry.arguments = {"output-source", "set", pair, "mixer"};
         entries.push_back(std::move(entry));
+    }
+    for (const char* pairValue : kInputPairs) {
+        for (const char* busValue : kMixerBuses) {
+            const std::string pair(pairValue);
+            const std::string bus(busValue);
+            Entry entry;
+            entry.key = "input-mixer-route:" + pair + ":" + bus;
+            entry.arguments = {
+                "input-mixer-route", "set", pair, bus, "off",
+            };
+            entries.push_back(std::move(entry));
+        }
     }
     for (const char* outputValue : kHeadphoneOutputs) {
         const std::string output(outputValue);

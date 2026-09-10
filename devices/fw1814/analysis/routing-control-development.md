@@ -55,8 +55,8 @@ their respective mixer buses exactly. The engine now establishes
 individual changes. AUX remains disabled in the persistent command surface
 until its signal path is tested separately.
 
-The guarded analog-input diagnostic uses `MIX_ANA_DIG_IN` at offset `0x90`.
-Only its FFADO-documented low-byte analog routes are exposed:
+The analog-input mixer uses `MIX_ANA_DIG_IN` at offset `0x90`. Only its
+hardware-validated low-byte analog routes are exposed:
 
 | Analog input pair | -> Mixer 1/2 | -> Mixer 3/4 |
 |---|---:|---:|
@@ -65,13 +65,12 @@ Only its FFADO-documented low-byte analog routes are exposed:
 | Analog 5/6 | `0x04` | `0x40` |
 | Analog 7/8 | `0x08` | `0x80` |
 
-Unlike the production routing subset, the engine does not establish a startup
-value for this register. The diagnostic therefore rejects reads and
-differential changes until `input-mixer initialize` explicitly writes the
-complete value zero. This disables every analog and digital input route and
-establishes an authoritative temporary cache. Every later diagnostic write is
-restricted to the low byte, keeping all digital-input bits zero. The state is
-not persisted or included in `routing get`.
+The engine establishes the complete value zero at startup. This disables every
+analog and digital input route before the control socket becomes available and
+gives the backend an authoritative cache for differential updates. Every later
+write is restricted to the low byte, keeping all digital-input bits zero. The
+eight analog cells are included in `routing get`, persistent state and Reset
+Defaults.
 
 Gain, pan, digital-input and AUX-level controls remain untouched.
 
@@ -87,7 +86,6 @@ fw1814ctl output-source set 1/2|3/4 mixer|aux
 fw1814ctl headphone-state get
 fw1814ctl headphone-source get 1|2
 fw1814ctl headphone-source set 1|2 mixer1/2|mixer3/4
-fw1814ctl input-mixer initialize
 fw1814ctl input-mixer get
 fw1814ctl input-mixer-route get analog1/2|analog3/4|analog5/6|analog7/8 1/2|3/4
 fw1814ctl input-mixer-route set analog1/2|analog3/4|analog5/6|analog7/8 1/2|3/4 on|off
@@ -97,10 +95,11 @@ fw1814ctl routing get
 Successful writes to this validated subset are recorded by `fw1814state` in `/Library/Application Support/macfw/fw1814/control-state.conf`. After each native engine reports low-level readiness, the supervisor replays the saved typed `fw1814ctl` commands through the normal transport-owned socket. The state helper rejects unknown command shapes and never accepts raw register addresses or values.
 
 With no saved overrides, a new engine keeps the hardware-proven
-`MIX_STM_IN=0x00000006`, `SRC_ANA_OUT=0x00000000` and
-`SRC_HP_OUT=0x00010001` startup baseline. `fw1814state reset` applies and saves
-all eight default routing cells/selectors. `fw1814state clear` empties the saved
-file without changing current hardware state.
+`MIX_ANA_DIG_IN=0x00000000`, `MIX_STM_IN=0x00000006`,
+`SRC_ANA_OUT=0x00000000` and `SRC_HP_OUT=0x00010001` startup baseline.
+`fw1814state reset` applies and saves all sixteen default routing
+cells/selectors. `fw1814state clear` empties the saved file without changing
+current hardware state.
 
 ## Validated mixer test
 
@@ -170,8 +169,8 @@ Observed behavior on 2026-09-09:
   `MIX_STM_IN=0x00000006` and `SRC_ANA_OUT=0x00000000`.
 
 This validates the complete persistence lifecycle for the currently enabled
-register subset. Analog-input diagnostics, digital-input, gain, pan and
-AUX-level controls remain outside the persistent surface.
+register subset at that checkpoint. Digital-input, gain, pan and AUX-level
+controls remain outside the persistent surface.
 
 ## Validated headphone-source diagnostic
 
@@ -227,29 +226,28 @@ Observed behavior on 2026-09-09:
 Both headphone fields, their differential cached writes and persistence are
 now hardware-validated. The headphone AUX source remains disabled.
 
-## Analog-input mixer diagnostic
+## Validated analog-input mixer
 
-This test starts with one full-register zero write, then changes exactly one
-documented route bit. Connect a known signal at a comfortable level to physical
-Analog Input 1 and monitor Mixer 1/2 through Analog Outputs 1/2 or either
-headphone output:
+The guarded diagnostic first established `MIX_ANA_DIG_IN=0x00000000`, then
+tested every analog input pair independently against both mixer buses. Each
+route was audibly confirmed and returned cleanly to zero:
 
-```bash
-fw1814ctl input-mixer initialize
-fw1814ctl input-mixer get
-fw1814ctl input-mixer-route set analog1/2 1/2 on
-fw1814ctl input-mixer get
-fw1814ctl input-mixer-route set analog1/2 1/2 off
-fw1814ctl input-mixer get
-```
+| Analog input pair | Mixer 1/2 result | Mixer 3/4 result |
+|---|---:|---:|
+| Analog 1/2 | `0x00000001` | `0x00000010` |
+| Analog 3/4 | `0x00000002` | `0x00000020` |
+| Analog 5/6 | `0x00000004` | `0x00000040` |
+| Analog 7/8 | `0x00000008` | `0x00000080` |
 
-The initialization and final state should report
-`MIX_ANA_DIG_IN=0x00000000`. Enabling the single route should report
-`MIX_ANA_DIG_IN=0x00000001`; the input signal should become audible on Mixer
-1/2 without disturbing host playback, then disappear when the route is turned
-off. Do not test Mixer 3/4, other input pairs, digital inputs, gain, pan or AUX
-in this first pass.
+The signal appeared only on the requested mixer bus, host playback remained
+clean and every disable operation restored `MIX_ANA_DIG_IN=0x00000000`.
+Digital-input bits, gain, pan and AUX were not exercised.
 
-This diagnostic state intentionally disappears when the transport restarts.
-A new engine rejects `input-mixer get` and `input-mixer-route` until an explicit
-`input-mixer initialize` establishes the complete zero baseline again.
+The same session also compared direct hardware monitoring on Mixer 1/2 with
+Logic Pro software monitoring returned through Outputs 3/4. The full capture,
+CoreAudio and playback path worked correctly, and the observed latency was
+almost unnoticeable.
+
+With all eight analog cells proven, the engine now writes the zero baseline at
+startup and the typed differential routes use the normal authoritative cache
+and persistent state path.

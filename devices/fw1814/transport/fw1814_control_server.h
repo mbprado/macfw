@@ -78,8 +78,6 @@ public:
         sampleRate_ = 0;
         generation_ = 0;
         routing_.loadStraightAnalogPlaybackPreset();
-        inputMixerKnown_ = false;
-        mixAnalogDigitalIn_ = 0;
     }
 
     void service() {
@@ -239,36 +237,20 @@ private:
     void handleInputMixer(const std::string& command) {
         using Model = macfw::fw1814::SpecialMixerRoutingModel;
 
-        if (command == "INPUT_MIXER INITIALIZE") {
-            const WriteResult result = writeRegister(
-                macfw::fw1814::kMixAnalogDigitalInLo, 0);
-            if (result != WriteResult::Ok) {
-                replyWriteError(result);
-                return;
-            }
-            mixAnalogDigitalIn_ = 0;
-            inputMixerKnown_ = true;
-            reply("OK " + hex32(mixAnalogDigitalIn_) + "\n");
-            return;
-        }
-
-        if (!inputMixerKnown_) {
-            reply("ERR input-mixer-state-uninitialized\n");
-            return;
-        }
-
         if (command == "INPUT_MIXER GET") {
             std::string output = "OK";
             for (std::size_t source = 0;
                  source < Model::kAnalogInputPairCount; ++source) {
                 for (std::size_t destination = 0;
                      destination < Model::kMixerBusCount; ++destination) {
-                    const std::uint32_t mask =
-                        Model::kAnalogInputRouteMasks[source][destination];
-                    output += (mixAnalogDigitalIn_ & mask) != 0 ? " 1" : " 0";
+                    const bool enabled = routing_.analogInputRoute(
+                        static_cast<Model::AnalogInputPair>(source),
+                        static_cast<Model::MixerBus>(destination));
+                    output += enabled ? " 1" : " 0";
                 }
             }
-            reply(output + " " + hex32(mixAnalogDigitalIn_) + "\n");
+            reply(output + " " + hex32(routing_.mixAnalogDigitalIn()) +
+                  "\n");
             return;
         }
 
@@ -296,36 +278,32 @@ private:
             return;
         }
 
-        const std::uint32_t mask =
-            Model::kAnalogInputRouteMasks[source][destination];
+        const auto sourceId = static_cast<Model::AnalogInputPair>(source);
+        const auto destinationId = static_cast<Model::MixerBus>(destination);
         if (getting) {
-            const unsigned enabled =
-                (mixAnalogDigitalIn_ & mask) != 0 ? 1u : 0u;
             reply("OK " + std::to_string(source) + " " +
                   std::to_string(destination) + " " +
-                  std::to_string(enabled) + " " +
-                  hex32(mixAnalogDigitalIn_) + "\n");
+                  (routing_.analogInputRoute(sourceId, destinationId)
+                       ? "1" : "0") + " " +
+                  hex32(routing_.mixAnalogDigitalIn()) + "\n");
             return;
         }
 
-        std::uint32_t desired = mixAnalogDigitalIn_;
-        if (value != 0)
-            desired |= mask;
-        else
-            desired &= ~mask;
-        desired &= 0xffu;
-        if (desired != mixAnalogDigitalIn_) {
+        Model desired = routing_;
+        desired.setAnalogInputRoute(sourceId, destinationId, value != 0);
+        if (desired.mixAnalogDigitalIn() != routing_.mixAnalogDigitalIn()) {
             const WriteResult result = writeRegister(
-                macfw::fw1814::kMixAnalogDigitalInLo, desired);
+                macfw::fw1814::kMixAnalogDigitalInLo,
+                desired.mixAnalogDigitalIn());
             if (result != WriteResult::Ok) {
                 replyWriteError(result);
                 return;
             }
-            mixAnalogDigitalIn_ = desired;
+            routing_ = desired;
         }
         reply("OK " + std::to_string(source) + " " +
               std::to_string(destination) + " " + std::to_string(value) +
-              " " + hex32(mixAnalogDigitalIn_) + "\n");
+              " " + hex32(routing_.mixAnalogDigitalIn()) + "\n");
     }
 
     void handleOutput(const std::string& command) {
@@ -471,7 +449,9 @@ private:
             reply("OK " + profile + " " + std::to_string(sampleRate_) +
                   " " + hex32(routing_.mixStreamIn()) + " " +
                   hex32(routing_.srcAnalogOut()) + " " +
-                  hex32(routing_.srcHeadphoneOut()) + " write-only\n");
+                  hex32(routing_.srcHeadphoneOut()) + " " +
+                  hex32(routing_.mixAnalogDigitalIn()) +
+                  " write-only\n");
             return;
         }
         if (command == "CAPABILITIES GET") {
@@ -479,7 +459,7 @@ private:
                   "stream-mixer=1 analog-output-source=1 "
                   "headphone-source=1 "
                   "register-readback=0 state-cache=authoritative "
-                  "analog-input-mixer=diagnostic digital=deferred "
+                  "analog-input-mixer=1 digital=deferred "
                   "headphone-levels=deferred levels=deferred midi=deferred\n");
             return;
         }
@@ -511,8 +491,6 @@ private:
     unsigned sampleRate_ = 0;
     UInt32 generation_ = 0;
     macfw::fw1814::SpecialMixerRoutingModel routing_{};
-    bool inputMixerKnown_ = false;
-    std::uint32_t mixAnalogDigitalIn_ = 0;
     int listenFd_ = -1;
     int clientFd_ = -1;
     std::string request_;

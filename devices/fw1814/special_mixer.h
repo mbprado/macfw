@@ -61,12 +61,26 @@ inline bool applyStraightAnalogPlaybackRouting(FireWireDevice& device,
     if (!native) return false;
     const UInt32 expectedGeneration = device.generation();
 
+    if (!writeMixerRegister(device, kMixAnalogDigitalInLo,
+                            kAnalogInputsMuted)) {
+        if (verbose) std::cerr << "FW1814 MIX_ANA_DIG_IN write failed\n";
+        return false;
+    }
+
+    UInt32 generation = 0;
+    if ((*native)->GetBusGeneration(native, &generation) != kIOReturnSuccess ||
+        generation != expectedGeneration) {
+        if (verbose)
+            std::cerr << "FW1814 generation changed after MIX_ANA_DIG_IN; "
+                         "stopping routing sequence\n";
+        return false;
+    }
+
     if (!writeMixerRegister(device, kMixStreamInLo, kStraightStreamToMixer)) {
         if (verbose) std::cerr << "FW1814 MIX_STM_IN write failed\n";
         return false;
     }
 
-    UInt32 generation = 0;
     if ((*native)->GetBusGeneration(native, &generation) != kIOReturnSuccess ||
         generation != expectedGeneration) {
         if (verbose) std::cerr << "FW1814 generation changed after MIX_STM_IN; stopping routing sequence\n";
@@ -99,7 +113,7 @@ inline bool applyStraightAnalogPlaybackRouting(FireWireDevice& device,
     if (verbose)
         std::cout << "FW1814 analog routing: Stream 1/2->Mix 1/2->Analog 1/2, "
                      "Stream 3/4->Mix 3/4->Analog 3/4; "
-                     "Headphones 1/2->Mix 1/2\n";
+                     "Headphones 1/2->Mix 1/2; analog monitor inputs muted\n";
     return true;
 }
 

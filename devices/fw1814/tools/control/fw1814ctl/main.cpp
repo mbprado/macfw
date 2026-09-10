@@ -58,7 +58,6 @@ int usage() {
         << "  fw1814ctl mixer get\n"
         << "  fw1814ctl mixer-route get sw1/2|sw3/4 1/2|3/4\n"
         << "  fw1814ctl mixer-route set sw1/2|sw3/4 1/2|3/4 on|off\n"
-        << "  fw1814ctl input-mixer initialize\n"
         << "  fw1814ctl input-mixer get\n"
         << "  fw1814ctl input-mixer-route get "
            "analog1/2|analog3/4|analog5/6|analog7/8 1/2|3/4\n"
@@ -234,10 +233,12 @@ int routingGet() {
     std::string mixStreamText;
     std::string analogOutputText;
     std::string headphoneOutputText;
+    std::string inputMixerText;
     std::string stateSource;
     std::string extra;
     if (!(input >> profile >> rate >> mixStreamText >> analogOutputText >>
-          headphoneOutputText >> stateSource) || (input >> extra)) {
+          headphoneOutputText >> inputMixerText >> stateSource) ||
+        (input >> extra)) {
         std::cerr << "fw1814ctl: invalid routing response: " << payload
                   << '\n';
         return 1;
@@ -246,9 +247,12 @@ int routingGet() {
     std::uint32_t mixStreamIn = 0;
     std::uint32_t srcAnalogOut = 0;
     std::uint32_t srcHeadphoneOut = 0;
+    std::uint32_t mixAnalogDigitalIn = 0;
     if (!parseRawWord(mixStreamText, mixStreamIn) ||
         !parseRawWord(analogOutputText, srcAnalogOut) ||
-        !parseRawWord(headphoneOutputText, srcHeadphoneOut)) {
+        !parseRawWord(headphoneOutputText, srcHeadphoneOut) ||
+        !parseRawWord(inputMixerText, mixAnalogDigitalIn) ||
+        mixAnalogDigitalIn > 0xffu) {
         std::cerr << "fw1814ctl: invalid routing register value\n";
         return 1;
     }
@@ -264,6 +268,20 @@ int routingGet() {
             const bool enabled =
                 (mixStreamIn & RoutingModel::kStreamRouteMasks[source]
                                                           [destination]) != 0;
+            std::cout << "  " << kMixerBusArgs[destination] << '='
+                      << onOff(enabled);
+        }
+        std::cout << '\n';
+    }
+    for (std::size_t source = 0;
+         source < RoutingModel::kAnalogInputPairCount; ++source) {
+        std::cout << "  " << kInputPairLabels[source] << ":";
+        for (std::size_t destination = 0;
+             destination < RoutingModel::kMixerBusCount; ++destination) {
+            const bool enabled =
+                (mixAnalogDigitalIn &
+                 RoutingModel::kAnalogInputRouteMasks[source][destination]) !=
+                0;
             std::cout << "  " << kMixerBusArgs[destination] << '='
                       << onOff(enabled);
         }
@@ -287,6 +305,7 @@ int routingGet() {
     std::cout << "  MIX_STM_IN: " << mixStreamText << '\n'
               << "  SRC_ANA_OUT: " << analogOutputText << '\n'
               << "  SRC_HP_OUT: " << headphoneOutputText << '\n'
+              << "  MIX_ANA_DIG_IN: " << inputMixerText << '\n'
               << "  hardware readback: unavailable (" << stateSource
               << ")\n";
     return 0;
@@ -373,23 +392,6 @@ int mixerRouteCommand(const std::string& action, int argc, char** argv) {
     return 0;
 }
 
-int inputMixerInitialize() {
-    std::string payload;
-    if (!payloadFor("INPUT_MIXER INITIALIZE", payload)) return 1;
-
-    std::uint32_t raw = 0;
-    if (!parseRawWord(payload, raw) || raw != 0) {
-        std::cerr << "fw1814ctl: invalid input-mixer initialize response: "
-                  << payload << '\n';
-        return 1;
-    }
-    std::cout << "FW1814 analog input mixer initialized: all analog and "
-                 "digital input routes are off\n"
-              << "MIX_ANA_DIG_IN: " << payload
-              << " (write-only diagnostic cache)\n";
-    return 0;
-}
-
 int inputMixerGet() {
     std::string payload;
     if (!payloadFor("INPUT_MIXER GET", payload)) return 1;
@@ -418,7 +420,7 @@ int inputMixerGet() {
         return 1;
     }
 
-    std::cout << "FW1814 analog input mixer (diagnostic cache):\n";
+    std::cout << "FW1814 analog input mixer (active engine cache):\n";
     for (std::size_t source = 0; source < routes.size(); ++source) {
         std::cout << "  " << kInputPairLabels[source] << ":";
         for (std::size_t destination = 0;
@@ -428,7 +430,7 @@ int inputMixerGet() {
         std::cout << '\n';
     }
     std::cout << "  MIX_ANA_DIG_IN: " << raw
-              << " (write-only diagnostic cache)\n";
+              << " (write-only cache)\n";
     return 0;
 }
 
@@ -482,7 +484,12 @@ int inputMixerRouteCommand(const std::string& action,
               << kMixerBusArgs[destination] << ": "
               << onOff(returnedValue != 0) << '\n'
               << "MIX_ANA_DIG_IN: " << raw
-              << " (write-only diagnostic cache)\n";
+              << " (write-only cache)\n";
+    if (action == "set") {
+        const std::string key = "input-mixer-route:" +
+                                std::string(argv[3]) + ":" + argv[4];
+        persistSuccessfulSet(argv[0], key, argc, argv);
+    }
     return 0;
 }
 
@@ -570,7 +577,7 @@ int printHeadphoneState(const std::string& payload) {
         std::cerr << "fw1814ctl: invalid SRC_HP_OUT value\n";
         return 1;
     }
-    std::cout << "FW1814 headphone sources (diagnostic cache):\n"
+    std::cout << "FW1814 headphone sources (active engine cache):\n"
               << "  Headphone Output 1: " << headphoneSourceName(first)
               << '\n'
               << "  Headphone Output 2: " << headphoneSourceName(second)
@@ -681,9 +688,7 @@ int main(int argc, char** argv) {
             ? mixerRouteCommand(action, argc, argv)
             : usage();
     if (control == "input-mixer")
-        return action == "initialize" && argc == 3
-            ? inputMixerInitialize()
-            : action == "get" && argc == 3 ? inputMixerGet() : usage();
+        return action == "get" && argc == 3 ? inputMixerGet() : usage();
     if (control == "input-mixer-route")
         return action == "get" || action == "set"
             ? inputMixerRouteCommand(action, argc, argv)

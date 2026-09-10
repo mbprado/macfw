@@ -22,13 +22,13 @@ The experimental FW1814 profile currently provides:
 - experimental Mixer/AUX source selection for Analog Outputs 1/2 and 3/4;
 - hardware-validated, persistent Mixer 1/2 or Mixer 3/4 source selection for
   both physical headphone outputs;
-- a guarded, non-persistent diagnostic for routing the four analog input pairs
-  to Mixer 1/2 or Mixer 3/4;
-- hardware-validated persistent restoration of the routing subset after
-  transport restart, rate changes in both directions and reconnect at both
-  supported rates.
+- hardware-validated routing of the four analog input pairs to Mixer 1/2 or
+  Mixer 3/4, with persistent storage ready for lifecycle validation;
+- hardware-validated persistent restoration of software-return, analog-output
+  and headphone selections after transport restart, rate changes and
+  reconnect.
 
-S/PDIF, ADAT, 88.2/96/176.4/192 kHz, persistent analog-input routing, digital-input routing, levels, headphone AUX routing and the native control panel remain under development. MIDI is intentionally deferred until the audio/control surface is complete.
+S/PDIF, ADAT, 88.2/96/176.4/192 kHz, digital-input routing, levels, headphone AUX routing and the native control panel remain under development. MIDI is intentionally deferred until the audio/control surface is complete.
 
 ## Architecture
 
@@ -68,7 +68,6 @@ The active transport owns `/tmp/macfw-fw1814-control.sock`; clients never open F
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" mixer-route get sw1/2 1/2
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" mixer-route set sw1/2 3/4 on
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" mixer-route set sw1/2 3/4 off
-"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" input-mixer initialize
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" input-mixer get
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" input-mixer-route get analog1/2 1/2
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" input-mixer-route set analog1/2 1/2 on
@@ -87,19 +86,18 @@ The active transport owns `/tmp/macfw-fw1814-control.sock`; clients never open F
 "/Library/Application Support/macfw/fw1814/bin/fw1814state" reset
 ```
 
-Only the hardware-validated `MIX_STM_IN`, `SRC_ANA_OUT` and `SRC_HP_OUT`
-fields are writable through the persistent command set. Successful changes are
-recorded in `/Library/Application Support/macfw/fw1814/control-state.conf` and
-replayed after a new engine reports ready. `fw1814state reset` applies and
-saves the proven straight-through defaults; `clear` removes saved overrides
-without changing the current hardware state. Headphone AUX selection remains
-disabled pending a separate signal-path test. See
+Only the hardware-validated analog fields of `MIX_ANA_DIG_IN`, together with
+`MIX_STM_IN`, `SRC_ANA_OUT` and `SRC_HP_OUT`, are writable through the
+persistent command set. Successful changes are recorded in
+`/Library/Application Support/macfw/fw1814/control-state.conf` and replayed
+after a new engine reports ready. `fw1814state reset` applies and saves the
+proven straight-through defaults; `clear` removes saved overrides without
+changing the current hardware state. Headphone AUX selection remains disabled
+pending a separate signal-path test. See
 [`analysis/routing-control-development.md`](analysis/routing-control-development.md)
 for the enabled subset and validation sequence.
 
-The analog-input mixer is deliberately separate from the persistent command
-set. `input-mixer initialize` first writes the complete known value zero,
-disabling every analog and digital input route. Only then are differential
-routes for Analog Inputs 1/2 through 7/8 accepted. The diagnostic never exposes
-digital-input bits, is not applied at engine startup and is not saved by
-`fw1814state`.
+The engine initializes `MIX_ANA_DIG_IN` to the validated zero baseline, with
+all analog and digital monitoring routes off. Differential controls expose
+only the eight proven analog routes for Inputs 1/2 through 7/8; digital-input
+bits remain zero and unavailable.

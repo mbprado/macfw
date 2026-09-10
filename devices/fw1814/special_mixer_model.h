@@ -10,6 +10,7 @@ namespace macfw::fw1814 {
 // playback baseline. The FW1814 special mixer registers are write-only, so
 // every runtime update must be derived from this authoritative software state.
 inline constexpr std::uint32_t kStraightStreamToMixer = 0x00000006u;
+inline constexpr std::uint32_t kAnalogInputsMuted = 0x00000000u;
 inline constexpr std::uint32_t kAnalogFromMixers = 0x00000000u;
 inline constexpr std::uint32_t kHeadphonesFromMixer12 = 0x00010001u;
 
@@ -42,6 +43,13 @@ public:
     enum class MixerBus : std::size_t {
         Mixer12 = 0,
         Mixer34,
+    };
+
+    enum class AnalogInputPair : std::size_t {
+        Analog12 = 0,
+        Analog34,
+        Analog56,
+        Analog78,
     };
 
     enum class AnalogOutputPair : std::size_t {
@@ -87,12 +95,14 @@ public:
 
     void loadStraightAnalogPlaybackPreset() {
         mixStreamIn_ = kStraightStreamToMixer;
+        mixAnalogDigitalIn_ = kAnalogInputsMuted;
         srcHeadphoneOut_ = kHeadphonesFromMixer12;
         srcAnalogOut_ = kAnalogFromMixers;
     }
 
     bool isStraightAnalogPlaybackPreset() const {
         return mixStreamIn_ == kStraightStreamToMixer &&
+               mixAnalogDigitalIn_ == kAnalogInputsMuted &&
                srcHeadphoneOut_ == kHeadphonesFromMixer12 &&
                srcAnalogOut_ == kAnalogFromMixers;
     }
@@ -110,6 +120,22 @@ public:
         else
             mixStreamIn_ &= ~mask;
         mixStreamIn_ &= 0x0fu;
+    }
+
+    bool analogInputRoute(AnalogInputPair source,
+                          MixerBus destination) const {
+        return (mixAnalogDigitalIn_ & routeMask(source, destination)) != 0;
+    }
+
+    void setAnalogInputRoute(AnalogInputPair source,
+                             MixerBus destination,
+                             bool enabled) {
+        const std::uint32_t mask = routeMask(source, destination);
+        if (enabled)
+            mixAnalogDigitalIn_ |= mask;
+        else
+            mixAnalogDigitalIn_ &= ~mask;
+        mixAnalogDigitalIn_ &= 0xffu;
     }
 
     OutputSource analogOutputSource(AnalogOutputPair pair) const {
@@ -147,6 +173,7 @@ public:
     }
 
     std::uint32_t mixStreamIn() const { return mixStreamIn_; }
+    std::uint32_t mixAnalogDigitalIn() const { return mixAnalogDigitalIn_; }
     std::uint32_t srcHeadphoneOut() const { return srcHeadphoneOut_; }
     std::uint32_t srcAnalogOut() const { return srcAnalogOut_; }
 
@@ -156,6 +183,10 @@ public:
 
     static constexpr std::size_t index(MixerBus destination) {
         return static_cast<std::size_t>(destination);
+    }
+
+    static constexpr std::size_t index(AnalogInputPair pair) {
+        return static_cast<std::size_t>(pair);
     }
 
     static constexpr std::size_t index(AnalogOutputPair pair) {
@@ -172,7 +203,13 @@ private:
         return kStreamRouteMasks[index(source)][index(destination)];
     }
 
+    static constexpr std::uint32_t routeMask(AnalogInputPair source,
+                                             MixerBus destination) {
+        return kAnalogInputRouteMasks[index(source)][index(destination)];
+    }
+
     std::uint32_t mixStreamIn_ = kStraightStreamToMixer;
+    std::uint32_t mixAnalogDigitalIn_ = kAnalogInputsMuted;
     std::uint32_t srcHeadphoneOut_ = kHeadphonesFromMixer12;
     std::uint32_t srcAnalogOut_ = kAnalogFromMixers;
 };

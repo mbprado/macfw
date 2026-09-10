@@ -4,6 +4,29 @@ This file records visible project milestones rather than every diagnostic
 experiment. Detailed protocol, transport and routing findings remain under
 `devices/fw1814/analysis/`.
 
+## 2026-09-10 — Analog input monitoring matrix validated
+
+The complete analog half of the FW1814 `MIX_ANA_DIG_IN` register was validated
+with known signals on all four physical input pairs. Each pair routed
+independently to Mixer 1/2 and Mixer 3/4 with the documented low-byte values:
+
+- Analog Inputs 1/2: `0x01` and `0x10`;
+- Analog Inputs 3/4: `0x02` and `0x20`;
+- Analog Inputs 5/6: `0x04` and `0x40`;
+- Analog Inputs 7/8: `0x08` and `0x80`.
+
+Every route was audibly confirmed on the requested mixer bus, unrelated buses
+and host playback remained clean, and each route returned to the complete zero
+value when disabled. The engine now establishes
+`MIX_ANA_DIG_IN=0x00000000` at startup, exposes only the eight proven analog
+cells and saves their typed differential controls through `fw1814state`.
+Digital-input routing remains disabled.
+
+Logic Pro software monitoring was also compared with the direct hardware
+monitoring path during this work. Capture through CoreAudio and playback on a
+separate output pair operated correctly, with almost unnoticeable observed
+latency compared with the direct signal.
+
 ## 2026-09-09 — Routing controls, persistence and headphone sources validated
 
 The FW1814 gained its first end-user-style routing control surface. The active

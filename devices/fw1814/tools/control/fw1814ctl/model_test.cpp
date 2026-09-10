@@ -8,6 +8,7 @@ int main() {
     Model model;
     model.loadStraightAnalogPlaybackPreset();
     assert(model.mixStreamIn() == 0x00000006u);
+    assert(model.mixAnalogDigitalIn() == 0x00000000u);
     assert(model.srcHeadphoneOut() == 0x00010001u);
     assert(model.srcAnalogOut() == 0x00000000u);
     assert(model.isStraightAnalogPlaybackPreset());
@@ -29,6 +30,19 @@ int main() {
     assert(Model::kAnalogInputRouteMasks[2][1] == 0x40u);
     assert(Model::kAnalogInputRouteMasks[3][0] == 0x08u);
     assert(Model::kAnalogInputRouteMasks[3][1] == 0x80u);
+    assert(!model.analogInputRoute(Model::AnalogInputPair::Analog12,
+                                   Model::MixerBus::Mixer12));
+    model.setAnalogInputRoute(Model::AnalogInputPair::Analog12,
+                              Model::MixerBus::Mixer12, true);
+    assert(model.mixAnalogDigitalIn() == 0x00000001u);
+    assert(model.analogInputRoute(Model::AnalogInputPair::Analog12,
+                                  Model::MixerBus::Mixer12));
+    model.setAnalogInputRoute(Model::AnalogInputPair::Analog12,
+                              Model::MixerBus::Mixer34, true);
+    assert(model.mixAnalogDigitalIn() == 0x00000011u);
+    assert(!model.isStraightAnalogPlaybackPreset());
+    model.loadStraightAnalogPlaybackPreset();
+    assert(model.mixAnalogDigitalIn() == 0x00000000u);
 
     model.setStreamRoute(Model::StreamSource::Stream12,
                          Model::MixerBus::Mixer34, true);
