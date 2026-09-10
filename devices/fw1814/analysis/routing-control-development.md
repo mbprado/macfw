@@ -72,18 +72,25 @@ write is restricted to the low byte, keeping all digital-input bits zero. The
 eight analog cells are included in `routing get`, persistent state and Reset
 Defaults.
 
-Gain, pan, digital-input and AUX-level controls remain untouched.
+Pan, digital-input and AUX-level controls remain untouched. Analog monitor
+gain work is proceeding one stereo input pair at a time.
 
-The first guarded level diagnostic targets `GAIN_ANA_12_IN` at offset `0x10`,
+The first guarded level diagnostic targeted `GAIN_ANA_12_IN` at offset `0x10`,
 which controls the Analog Inputs 1/2 contribution to the monitor mixer. The
 upper 16 bits are the left channel and the lower 16 bits are the right channel.
 FFADO documents `0x8000` as mute/lowest and `0x0000` as unity/highest, giving
 the two complete stereo words `0x80008000` and `0x00000000`.
 
-This is not the physical preamp gain and must not change the CoreAudio capture
-signal. The diagnostic always writes both channels together, exposes no raw or
-intermediate attenuation values, performs no startup write and is not
-persisted. Its cache remains unavailable until the first full stereo write.
+Hardware testing confirmed that `0x80008000` completely mutes the Analog Inputs
+1/2 direct-monitor contribution and `0x00000000` restores it at unity. This is
+not the physical preamp gain and does not change the CoreAudio capture signal.
+The control always writes both channels together and exposes no raw or
+intermediate attenuation values. The engine now writes unity at startup, keeps
+an authoritative cache and persists successful Analog Inputs 1/2 changes.
+
+The next guarded diagnostic applies the same full-word mute/unity restriction
+to `GAIN_ANA_34_IN` at offset `0x14`. It performs no startup write and is not
+persisted until its physical signal path is validated.
 
 ## Command surface
 
@@ -100,8 +107,8 @@ fw1814ctl headphone-source set 1|2 mixer1/2|mixer3/4
 fw1814ctl input-mixer get
 fw1814ctl input-mixer-route get analog1/2|analog3/4|analog5/6|analog7/8 1/2|3/4
 fw1814ctl input-mixer-route set analog1/2|analog3/4|analog5/6|analog7/8 1/2|3/4 on|off
-fw1814ctl input-monitor-level get analog1/2
-fw1814ctl input-monitor-level set-all analog1/2 mute|unity
+fw1814ctl input-monitor-level get analog1/2|analog3/4
+fw1814ctl input-monitor-level set-all analog1/2|analog3/4 mute|unity
 fw1814ctl routing get
 ```
 
@@ -111,8 +118,9 @@ With no saved overrides, a new engine keeps the hardware-proven
 `MIX_ANA_DIG_IN=0x00000000`, `MIX_STM_IN=0x00000006`,
 `SRC_ANA_OUT=0x00000000` and `SRC_HP_OUT=0x00010001` startup baseline.
 `fw1814state reset` applies and saves all sixteen default routing
-cells/selectors. `fw1814state clear` empties the saved file without changing
-current hardware state.
+cells/selectors plus the validated Analog Inputs 1/2 unity level.
+`fw1814state clear` empties the saved file without changing current hardware
+state.
 
 ## Validated mixer test
 
@@ -272,7 +280,7 @@ disconnect/reconnect at 48 kHz. Each new engine restored Analog Inputs 1/2 to
 Mixer 1/2 while retaining the other saved routing controls. This completes the
 analog-input routing lifecycle validation.
 
-## Analog Inputs 1/2 monitor-level diagnostic
+## Analog Inputs 1/2 monitor-level validation
 
 Enable the already-validated direct-monitor route with a known low-level signal
 on Analog Input 1. Keep monitor/headphone volume low, then write the complete
@@ -285,20 +293,40 @@ fw1814ctl input-monitor-level set-all analog1/2 mute
 fw1814ctl input-monitor-level get analog1/2
 ```
 
-The first `get` must reject the unknown write-only cache. The mute command must
-report `GAIN_ANA_12_IN=0x80008000` and silence only the direct hardware-monitor
-contribution. Logic Pro input metering, recording and software monitoring
-should remain active, which distinguishes this mixer attenuation from the ADC
-capture path.
+Before promotion, the first `get` rejected the unknown write-only cache. The
+mute command reported `GAIN_ANA_12_IN=0x80008000` and silenced only the direct
+hardware-monitor contribution. Logic Pro input metering, recording and
+software monitoring remained active, distinguishing this mixer attenuation
+from the ADC capture path.
+
+The hardware test produced the expected mute word, silenced the direct monitor
+signal completely, then produced the expected unity word and restored the
+signal normally. This validates the register encoding and physical path.
+
+## Analog Inputs 3/4 monitor-level diagnostic
+
+Enable the validated Analog Inputs 3/4 route with a known low-level signal,
+then confirm the new cache begins unknown:
+
+```bash
+fw1814ctl input-mixer-route set analog3/4 1/2 on
+fw1814ctl input-monitor-level get analog3/4
+fw1814ctl input-monitor-level set-all analog3/4 mute
+fw1814ctl input-monitor-level get analog3/4
+```
+
+The first `get` must report `input-monitor-level-state-uninitialized`. The mute
+command must report `GAIN_ANA_34_IN=0x80008000` and silence the direct hardware
+monitor signal without affecting CoreAudio capture.
 
 Restore the complete unity value before ending the test:
 
 ```bash
-fw1814ctl input-monitor-level set-all analog1/2 unity
-fw1814ctl input-monitor-level get analog1/2
+fw1814ctl input-monitor-level set-all analog3/4 unity
+fw1814ctl input-monitor-level get analog3/4
 ```
 
-The command must report `GAIN_ANA_12_IN=0x00000000` and restore the direct
-monitor signal. Do not restart the transport while the diagnostic is muted,
-and do not test individual channels, intermediate attenuation, other input
-pairs, pan or AUX in this first pass.
+The command must report `GAIN_ANA_34_IN=0x00000000` and restore the direct
+monitor signal. Do not restart the transport while Analog Inputs 3/4 are
+muted, and do not test individual channels, intermediate attenuation, other
+unexposed input pairs, pan or AUX in this pass.

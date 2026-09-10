@@ -63,8 +63,9 @@ int usage() {
            "analog1/2|analog3/4|analog5/6|analog7/8 1/2|3/4\n"
         << "  fw1814ctl input-mixer-route set "
            "analog1/2|analog3/4|analog5/6|analog7/8 1/2|3/4 on|off\n"
-        << "  fw1814ctl input-monitor-level get analog1/2\n"
-        << "  fw1814ctl input-monitor-level set-all analog1/2 mute|unity\n"
+        << "  fw1814ctl input-monitor-level get analog1/2|analog3/4\n"
+        << "  fw1814ctl input-monitor-level set-all "
+           "analog1/2|analog3/4 mute|unity\n"
         << "  fw1814ctl output-state get\n"
         << "  fw1814ctl output-source get 1/2|3/4\n"
         << "  fw1814ctl output-source set 1/2|3/4 mixer|aux\n"
@@ -506,7 +507,7 @@ int inputMonitorLevelCommand(const std::string& action,
 
     const int pair = indexOf(argv[3], kInputPairArgs.data(),
                              kInputPairArgs.size());
-    if (pair != 0) return usage();
+    if (pair < 0 || pair > 1) return usage();
 
     int level = -1;
     if (setting) {
@@ -540,14 +541,22 @@ int inputMonitorLevelCommand(const std::string& action,
         returnedLevel == 0 ? macfw::fw1814::kMonitorLevelMute
                            : macfw::fw1814::kMonitorLevelUnity);
     if (!parseRawWord(raw, rawValue) || rawValue != expected) {
-        std::cerr << "fw1814ctl: invalid GAIN_ANA_12_IN value\n";
+        std::cerr << "fw1814ctl: invalid analog input gain value\n";
         return 1;
     }
 
-    std::cout << "Analog Inputs 1/2 monitor level: "
+    const char* registerName = pair == 0
+        ? "GAIN_ANA_12_IN"
+        : "GAIN_ANA_34_IN";
+    std::cout << kInputPairLabels[pair] << " monitor level: "
               << (returnedLevel == 0 ? "mute" : "unity (0 dB)") << '\n'
-              << "GAIN_ANA_12_IN: " << raw
-              << " (write-only diagnostic cache)\n";
+              << registerName << ": " << raw
+              << (pair == 0 ? " (write-only cache)\n"
+                            : " (write-only diagnostic cache)\n");
+    if (setting && pair == 0)
+        persistSuccessfulSet(
+            argv[0], "input-monitor-level:" + std::string(argv[3]),
+            argc, argv);
     return 0;
 }
 

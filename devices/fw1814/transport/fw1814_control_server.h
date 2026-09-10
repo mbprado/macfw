@@ -2,6 +2,7 @@
 
 #include "../special_mixer.h"
 
+#include <array>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -35,6 +36,11 @@ public:
         sampleRate_ = sampleRate;
         generation_ = device.generation();
         routing_.loadStraightAnalogPlaybackPreset();
+        analogInputMonitorLevelKnown_.fill(false);
+        gainAnalogIn_.fill(0);
+        analogInputMonitorLevelKnown_[0] = true;
+        gainAnalogIn_[0] = macfw::fw1814::stereoMonitorLevelWord(
+            macfw::fw1814::kMonitorLevelUnity);
 
         listenFd_ = socket(AF_UNIX, SOCK_STREAM, 0);
         if (listenFd_ < 0) return false;
@@ -78,8 +84,8 @@ public:
         sampleRate_ = 0;
         generation_ = 0;
         routing_.loadStraightAnalogPlaybackPreset();
-        analogInput12MonitorLevelKnown_ = false;
-        gainAnalog12In_ = 0;
+        analogInputMonitorLevelKnown_.fill(false);
+        gainAnalogIn_.fill(0);
     }
 
     void service() {
@@ -459,21 +465,22 @@ private:
         unsigned level = 0;
         std::string extra;
         if (!(input >> pair) || (setting && !(input >> level)) ||
-            (input >> extra) || pair != 0 || level > 1) {
+            (input >> extra) || pair > 1 || level > 1) {
             reply("ERR invalid-input-monitor-level\n");
             return;
         }
 
         if (getting) {
-            if (!analogInput12MonitorLevelKnown_) {
+            if (!analogInputMonitorLevelKnown_[pair]) {
                 reply("ERR input-monitor-level-state-uninitialized\n");
                 return;
             }
             const unsigned cachedLevel =
-                gainAnalog12In_ == macfw::fw1814::stereoMonitorLevelWord(
+                gainAnalogIn_[pair] == macfw::fw1814::stereoMonitorLevelWord(
                     macfw::fw1814::kMonitorLevelMute) ? 0u : 1u;
-            reply("OK 0 " + std::to_string(cachedLevel) + " " +
-                  hex32(gainAnalog12In_) + "\n");
+            reply("OK " + std::to_string(pair) + " " +
+                  std::to_string(cachedLevel) + " " +
+                  hex32(gainAnalogIn_[pair]) + "\n");
             return;
         }
 
@@ -482,16 +489,19 @@ private:
             : macfw::fw1814::kMonitorLevelUnity;
         const std::uint32_t desired =
             macfw::fw1814::stereoMonitorLevelWord(channelLevel);
-        const WriteResult result = writeRegister(
-            macfw::fw1814::kGainAnalog12InLo, desired);
+        const UInt32 address = pair == 0
+            ? macfw::fw1814::kGainAnalog12InLo
+            : macfw::fw1814::kGainAnalog34InLo;
+        const WriteResult result = writeRegister(address, desired);
         if (result != WriteResult::Ok) {
             replyWriteError(result);
             return;
         }
-        gainAnalog12In_ = desired;
-        analogInput12MonitorLevelKnown_ = true;
-        reply("OK 0 " + std::to_string(level) + " " +
-              hex32(gainAnalog12In_) + "\n");
+        gainAnalogIn_[pair] = desired;
+        analogInputMonitorLevelKnown_[pair] = true;
+        reply("OK " + std::to_string(pair) + " " +
+              std::to_string(level) + " " +
+              hex32(gainAnalogIn_[pair]) + "\n");
     }
 
     void handle(const std::string& command) {
@@ -513,7 +523,7 @@ private:
                   "headphone-source=1 "
                   "register-readback=0 state-cache=authoritative "
                   "analog-input-mixer=1 digital=deferred "
-                  "analog-input-monitor-level=diagnostic-1/2 "
+                  "analog-input-monitor-level=1/2-persistent,3/4-diagnostic "
                   "headphone-levels=deferred levels=deferred midi=deferred\n");
             return;
         }
@@ -549,8 +559,8 @@ private:
     unsigned sampleRate_ = 0;
     UInt32 generation_ = 0;
     macfw::fw1814::SpecialMixerRoutingModel routing_{};
-    bool analogInput12MonitorLevelKnown_ = false;
-    std::uint32_t gainAnalog12In_ = 0;
+    std::array<bool, 2> analogInputMonitorLevelKnown_{{false, false}};
+    std::array<std::uint32_t, 2> gainAnalogIn_{{0, 0}};
     int listenFd_ = -1;
     int clientFd_ = -1;
     std::string request_;

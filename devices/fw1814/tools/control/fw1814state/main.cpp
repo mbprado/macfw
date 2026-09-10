@@ -92,6 +92,14 @@ bool validStoredCommand(const Entry& entry) {
          entry.arguments[3] == "mixer3/4"))
         return entry.key == "headphone-source:" + entry.arguments[2];
 
+    if (entry.arguments.size() == 4 &&
+        entry.arguments[0] == "input-monitor-level" &&
+        entry.arguments[1] == "set-all" &&
+        entry.arguments[2] == "analog1/2" &&
+        (entry.arguments[3] == "mute" ||
+         entry.arguments[3] == "unity"))
+        return entry.key == "input-monitor-level:analog1/2";
+
     return false;
 }
 
@@ -231,7 +239,7 @@ int restoreEntries(const char* argv0, const std::vector<Entry>& entries) {
 
 std::vector<Entry> defaultState() {
     std::vector<Entry> entries;
-    entries.reserve(16);
+    entries.reserve(17);
     for (const char* sourceValue : kMixerSources) {
         for (const char* busValue : kMixerBuses) {
             const std::string source(sourceValue);
@@ -276,6 +284,12 @@ std::vector<Entry> defaultState() {
         };
         entries.push_back(std::move(entry));
     }
+    Entry monitorLevel;
+    monitorLevel.key = "input-monitor-level:analog1/2";
+    monitorLevel.arguments = {
+        "input-monitor-level", "set-all", "analog1/2", "unity",
+    };
+    entries.push_back(std::move(monitorLevel));
     return entries;
 }
 

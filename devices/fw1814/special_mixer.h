@@ -13,6 +13,7 @@ namespace macfw::fw1814 {
 // write-only on FW1814/ProjectMix; never read them back or probe nearby offsets.
 inline constexpr UInt16 kMixerAddressHi = 0xffc7;
 inline constexpr UInt32 kGainAnalog12InLo = 0x00700010; // GAIN_ANA_12_IN
+inline constexpr UInt32 kGainAnalog34InLo = 0x00700014; // GAIN_ANA_34_IN
 inline constexpr UInt32 kMixAnalogDigitalInLo = 0x00700090; // MIX_ANA_DIG_IN
 inline constexpr UInt32 kMixStreamInLo = 0x00700094;  // MIX_STM_IN
 inline constexpr UInt32 kSrcHeadphoneOutLo = 0x00700098; // SRC_HP_OUT
@@ -62,13 +63,27 @@ inline bool applyStraightAnalogPlaybackRouting(FireWireDevice& device,
     if (!native) return false;
     const UInt32 expectedGeneration = device.generation();
 
+    if (!writeMixerRegister(device, kGainAnalog12InLo,
+                            stereoMonitorLevelWord(kMonitorLevelUnity))) {
+        if (verbose) std::cerr << "FW1814 GAIN_ANA_12_IN write failed\n";
+        return false;
+    }
+
+    UInt32 generation = 0;
+    if ((*native)->GetBusGeneration(native, &generation) != kIOReturnSuccess ||
+        generation != expectedGeneration) {
+        if (verbose)
+            std::cerr << "FW1814 generation changed after GAIN_ANA_12_IN; "
+                         "stopping routing sequence\n";
+        return false;
+    }
+
     if (!writeMixerRegister(device, kMixAnalogDigitalInLo,
                             kAnalogInputsMuted)) {
         if (verbose) std::cerr << "FW1814 MIX_ANA_DIG_IN write failed\n";
         return false;
     }
 
-    UInt32 generation = 0;
     if ((*native)->GetBusGeneration(native, &generation) != kIOReturnSuccess ||
         generation != expectedGeneration) {
         if (verbose)
@@ -114,7 +129,8 @@ inline bool applyStraightAnalogPlaybackRouting(FireWireDevice& device,
     if (verbose)
         std::cout << "FW1814 analog routing: Stream 1/2->Mix 1/2->Analog 1/2, "
                      "Stream 3/4->Mix 3/4->Analog 3/4; "
-                     "Headphones 1/2->Mix 1/2; analog monitor inputs muted\n";
+                     "Headphones 1/2->Mix 1/2; analog monitor routes off; "
+                     "Analog Inputs 1/2 monitor level at unity\n";
     return true;
 }
 

@@ -4,7 +4,7 @@ This file records visible project milestones rather than every diagnostic
 experiment. Detailed protocol, transport and routing findings remain under
 `devices/fw1814/analysis/`.
 
-## 2026-09-10 — Analog input monitoring matrix validated
+## 2026-09-10 — Analog input monitoring matrix and first level control validated
 
 The complete analog half of the FW1814 `MIX_ANA_DIG_IN` register was validated
 with known signals on all four physical input pairs. Each pair routed
@@ -32,6 +32,14 @@ Logic Pro software monitoring was also compared with the direct hardware
 monitoring path during this work. Capture through CoreAudio and playback on a
 separate output pair operated correctly, with almost unnoticeable observed
 latency compared with the direct signal.
+
+The documented `GAIN_ANA_12_IN` stereo word was then tested at its two safest
+endpoints. `0x80008000` completely muted the Analog Inputs 1/2 contribution to
+the hardware mixer, while `0x00000000` restored the signal at unity. This
+confirmed that the register affects direct monitoring rather than the preamp
+or CoreAudio capture path. The engine now establishes unity as a known startup
+baseline, and the bounded mute/unity control participates in persistent state
+and Reset Defaults.
 
 ## 2026-09-09 — Routing controls, persistence and headphone sources validated
 
