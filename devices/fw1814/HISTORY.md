@@ -64,6 +64,13 @@ then a first successful read containing the saved `0x80008000` mute value.
 Unity was restored afterward. This gives scripts and the future GUI a reliable
 control-readiness contract.
 
+The final bounded test validated `GAIN_ANA_78_IN` for Analog Inputs 7/8.
+`0x80008000` completely muted its direct-monitor contribution and
+`0x00000000` restored it normally. All four analog input-pair monitor levels
+now have a known unity startup baseline, authoritative cache, typed mute/unity
+control and persistent state support. The final Inputs 7/8 restart replay is
+the remaining lifecycle check.
+
 ## 2026-09-09 — Routing controls, persistence and headphone sources validated
 
 The FW1814 gained its first end-user-style routing control surface. The active

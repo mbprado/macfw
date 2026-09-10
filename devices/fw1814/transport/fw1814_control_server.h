@@ -38,17 +38,9 @@ public:
         generation_ = device.generation();
         restoringControlState_ = std::getenv("MACFW_ENGINE_READY_FD") != nullptr;
         routing_.loadStraightAnalogPlaybackPreset();
-        analogInputMonitorLevelKnown_.fill(false);
-        gainAnalogIn_.fill(0);
-        analogInputMonitorLevelKnown_[0] = true;
-        analogInputMonitorLevelKnown_[1] = true;
-        analogInputMonitorLevelKnown_[2] = true;
-        gainAnalogIn_[0] = macfw::fw1814::stereoMonitorLevelWord(
-            macfw::fw1814::kMonitorLevelUnity);
-        gainAnalogIn_[1] = macfw::fw1814::stereoMonitorLevelWord(
-            macfw::fw1814::kMonitorLevelUnity);
-        gainAnalogIn_[2] = macfw::fw1814::stereoMonitorLevelWord(
-            macfw::fw1814::kMonitorLevelUnity);
+        analogInputMonitorLevelKnown_.fill(true);
+        gainAnalogIn_.fill(macfw::fw1814::stereoMonitorLevelWord(
+            macfw::fw1814::kMonitorLevelUnity));
 
         listenFd_ = socket(AF_UNIX, SOCK_STREAM, 0);
         if (listenFd_ < 0) return false;
@@ -552,7 +544,7 @@ private:
                   "headphone-source=1 "
                   "register-readback=0 state-cache=authoritative "
                   "analog-input-mixer=1 digital=deferred "
-                  "analog-input-monitor-level=1/2+3/4+5/6-persistent,7/8-diagnostic "
+                  "analog-input-monitor-level=all-analog-persistent "
                   "headphone-levels=deferred levels=deferred midi=deferred\n");
             return;
         }

@@ -24,13 +24,14 @@ The experimental FW1814 profile currently provides:
   both physical headphone outputs;
 - hardware-validated, persistent routing of the four analog input pairs to
   Mixer 1/2 or Mixer 3/4;
-- hardware-validated, persistent stereo mute/unity control for the Analog
-  Inputs 1/2, 3/4 and 5/6 monitor-mixer levels, plus a guarded equivalent
-  diagnostic for Analog Inputs 7/8;
+- hardware-validated stereo mute/unity control for all four analog input-pair
+  monitor-mixer levels, with a known unity startup baseline and persistent
+  typed state;
 - hardware-validated persistent restoration of software-return, analog-input,
   analog-output and headphone selections after transport restart, rate changes
-  and reconnect; the validated Analog Inputs 1/2, 3/4 and 5/6 monitor levels
-  also survive a transport restart through the same state path.
+  and reconnect; the Analog Inputs 1/2, 3/4 and 5/6 monitor levels also survive
+  a transport restart through the same state path, with Inputs 7/8 pending the
+  final restart check.
 
 S/PDIF, ADAT, 88.2/96/176.4/192 kHz, digital-input routing, production level/pan controls, headphone AUX routing and the native control panel remain under development. MIDI is intentionally deferred until the audio/control surface is complete.
 
@@ -130,9 +131,8 @@ all analog and digital monitoring routes off. Differential controls expose
 only the eight proven analog routes for Inputs 1/2 through 7/8; digital-input
 bits remain zero and unavailable.
 
-The Analog Inputs 1/2, 3/4 and 5/6 monitor-level controls write their complete
+The four analog input-pair monitor-level controls write their complete
 documented stereo words and permit only mute or unity. Hardware testing
-confirmed that they control the inputs' contribution to the hardware mixer.
-The engine establishes unity at startup and successful changes are saved by
-`fw1814state`. Analog Inputs 7/8 expose the same bounded write as a
-non-persistent diagnostic; its cache remains unknown until the first write.
+confirmed that they control each input pair's contribution to the hardware
+mixer. The engine establishes unity for all four pairs at startup and
+successful changes are saved by `fw1814state`.

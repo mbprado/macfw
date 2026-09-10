@@ -100,9 +100,11 @@ The third bounded test validated `GAIN_ANA_56_IN` at offset `0x18`.
 first three analog input pairs, and all three controls use the authoritative
 cache and persistent state path.
 
-The final analog-input gain diagnostic targets `GAIN_ANA_78_IN` at offset
-`0x1c`. It performs no startup write and is not persisted until its physical
-signal path is validated.
+The final bounded test validated `GAIN_ANA_78_IN` at offset `0x1c`.
+`0x80008000` completely muted the Analog Inputs 7/8 direct-monitor signal and
+`0x00000000` restored it normally. The engine now establishes unity for all
+four analog input pairs, and all four controls use the authoritative cache and
+persistent state path.
 
 ## Command surface
 
@@ -155,7 +157,7 @@ With no saved overrides, a new engine keeps the hardware-proven
 `MIX_ANA_DIG_IN=0x00000000`, `MIX_STM_IN=0x00000006`,
 `SRC_ANA_OUT=0x00000000` and `SRC_HP_OUT=0x00010001` startup baseline.
 `fw1814state reset` applies and saves all sixteen default routing
-cells/selectors plus the validated Analog Inputs 1/2, 3/4 and 5/6 unity levels.
+cells/selectors plus the validated unity levels for all four analog input pairs.
 `fw1814state clear` empties the saved file without changing current hardware
 state.
 
@@ -415,10 +417,10 @@ saved `GAIN_ANA_56_IN=0x80008000` value. Writing unity again restored the direct
 signal and saved state. This completes the startup, cache, readiness and
 transport-restart persistence validation for the third analog input pair.
 
-## Analog Inputs 7/8 monitor-level diagnostic
+## Analog Inputs 7/8 monitor-level validation
 
-Enable the validated Analog Inputs 7/8 route with a known low-level signal,
-then confirm the final diagnostic cache begins unknown:
+The final guarded diagnostic used the validated Analog Inputs 7/8 route with a
+known low-level signal:
 
 ```bash
 fw1814ctl input-mixer-route set analog5/6 1/2 off
@@ -428,9 +430,9 @@ fw1814ctl input-monitor-level set-all analog7/8 mute
 fw1814ctl input-monitor-level get analog7/8
 ```
 
-The first `get` must report `input-monitor-level-state-uninitialized`. The mute
-command must report `GAIN_ANA_78_IN=0x80008000` and silence the direct hardware
-monitor signal.
+The first `get` reported `input-monitor-level-state-uninitialized`. The mute
+command reported `GAIN_ANA_78_IN=0x80008000` and completely silenced the direct
+hardware-monitor signal.
 
 Restore the complete unity value before ending the test:
 
@@ -439,7 +441,9 @@ fw1814ctl input-monitor-level set-all analog7/8 unity
 fw1814ctl input-monitor-level get analog7/8
 ```
 
-The command must report `GAIN_ANA_78_IN=0x00000000` and restore the direct
-monitor signal. Do not restart the transport while Analog Inputs 7/8 are
-muted, and do not test individual channels, intermediate attenuation, pan or
-AUX in this pass.
+The unity command reported `GAIN_ANA_78_IN=0x00000000` and restored the direct
+monitor signal normally. Inputs 7/8 are now promoted to the known unity startup
+baseline, authoritative cache and typed persistent-state path. A launchd
+restart replay remains to be hardware-validated before this control is closed.
+Individual channels, intermediate attenuation, pan and AUX remain outside this
+bounded pass.

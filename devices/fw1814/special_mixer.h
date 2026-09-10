@@ -108,6 +108,20 @@ inline bool applyStraightAnalogPlaybackRouting(FireWireDevice& device,
         return false;
     }
 
+    if (!writeMixerRegister(device, kGainAnalog78InLo,
+                            stereoMonitorLevelWord(kMonitorLevelUnity))) {
+        if (verbose) std::cerr << "FW1814 GAIN_ANA_78_IN write failed\n";
+        return false;
+    }
+
+    if ((*native)->GetBusGeneration(native, &generation) != kIOReturnSuccess ||
+        generation != expectedGeneration) {
+        if (verbose)
+            std::cerr << "FW1814 generation changed after GAIN_ANA_78_IN; "
+                         "stopping routing sequence\n";
+        return false;
+    }
+
     if (!writeMixerRegister(device, kMixAnalogDigitalInLo,
                             kAnalogInputsMuted)) {
         if (verbose) std::cerr << "FW1814 MIX_ANA_DIG_IN write failed\n";
@@ -160,7 +174,7 @@ inline bool applyStraightAnalogPlaybackRouting(FireWireDevice& device,
         std::cout << "FW1814 analog routing: Stream 1/2->Mix 1/2->Analog 1/2, "
                      "Stream 3/4->Mix 3/4->Analog 3/4; "
                      "Headphones 1/2->Mix 1/2; analog monitor routes off; "
-                     "Analog Inputs 1/2, 3/4 and 5/6 monitor levels at unity\n";
+                     "all analog input monitor levels at unity\n";
     return true;
 }
 

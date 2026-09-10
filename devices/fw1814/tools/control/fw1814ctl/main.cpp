@@ -556,9 +556,8 @@ int inputMonitorLevelCommand(const std::string& action,
     std::cout << kInputPairLabels[pair] << " monitor level: "
               << (returnedLevel == 0 ? "mute" : "unity (0 dB)") << '\n'
               << kRegisterNames[pair] << ": " << raw
-              << (pair <= 2 ? " (write-only cache)\n"
-                            : " (write-only diagnostic cache)\n");
-    if (setting && pair <= 2)
+              << " (write-only cache)\n";
+    if (setting)
         persistSuccessfulSet(
             argv[0], "input-monitor-level:" + std::string(argv[3]),
             argc, argv);
