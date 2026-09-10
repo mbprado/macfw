@@ -29,8 +29,8 @@ The experimental FW1814 profile currently provides:
   diagnostic for Analog Inputs 7/8;
 - hardware-validated persistent restoration of software-return, analog-input,
   analog-output and headphone selections after transport restart, rate changes
-  and reconnect; the validated Analog Inputs 1/2 and 3/4 monitor levels also
-  survive a transport restart through the same state path.
+  and reconnect; the validated Analog Inputs 1/2, 3/4 and 5/6 monitor levels
+  also survive a transport restart through the same state path.
 
 S/PDIF, ADAT, 88.2/96/176.4/192 kHz, digital-input routing, production level/pan controls, headphone AUX routing and the native control panel remain under development. MIDI is intentionally deferred until the audio/control surface is complete.
 

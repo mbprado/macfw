@@ -55,6 +55,15 @@ the documented mute word silenced the direct-monitor signal completely and
 the unity word restored it normally. Inputs 5/6 now join the known unity
 startup baseline and persistent state model.
 
+The first immediate post-restart Inputs 5/6 read exposed a readiness race: the
+public socket could accept a read at the unity startup baseline before saved
+state replay finished. A protocol gate now returns `ERR control-state-restoring`
+to normal clients while allowing the supervisor's typed replay commands.
+Hardware retesting observed the socket unavailable, then the restoring error,
+then a first successful read containing the saved `0x80008000` mute value.
+Unity was restored afterward. This gives scripts and the future GUI a reliable
+control-readiness contract.
+
 ## 2026-09-09 — Routing controls, persistence and headphone sources validated
 
 The FW1814 gained its first end-user-style routing control surface. The active

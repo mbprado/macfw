@@ -143,10 +143,13 @@ only then can normal clients read or modify the authoritative cache. Standalone
 engines do not enable the gate because no supervisor replay follows their
 startup.
 
-This makes a successful `fw1814ctl engine get` or `routing get` a reliable
-readiness condition for scripts and the future GUI. Hardware validation must
-confirm that the first successful post-restart read now contains the restored
-Inputs 5/6 mute value without an added delay.
+Hardware validation confirmed the gate with a saved Inputs 5/6 mute value.
+Polling every 100 ms observed the socket as unavailable, then received
+`ERR control-state-restoring`, and the first successful read already contained
+the restored `GAIN_ANA_56_IN=0x80008000` value without an added delay. Unity was
+then restored normally. A successful `fw1814ctl engine get`, `routing get` or
+other control read is therefore a reliable readiness condition for scripts and
+the future GUI.
 
 With no saved overrides, a new engine keeps the hardware-proven
 `MIX_ANA_DIG_IN=0x00000000`, `MIX_STM_IN=0x00000006`,
@@ -403,6 +406,14 @@ fw1814ctl input-monitor-level get analog5/6
 
 The unity command reported `GAIN_ANA_56_IN=0x00000000` and restored the direct
 monitor signal normally, validating the register encoding and physical path.
+
+After promotion, a fresh engine reported the known Inputs 5/6 unity baseline.
+The typed mute appeared in `fw1814state` and survived a launchd transport
+restart. During rapid post-restart polling, the public interface reported
+`ERR control-state-restoring`; its first successful read then returned the
+saved `GAIN_ANA_56_IN=0x80008000` value. Writing unity again restored the direct
+signal and saved state. This completes the startup, cache, readiness and
+transport-restart persistence validation for the third analog input pair.
 
 ## Analog Inputs 7/8 monitor-level diagnostic
 
