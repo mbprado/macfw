@@ -526,6 +526,69 @@ private:
               hex32(gainAnalogIn_[pair]) + "\n");
     }
 
+    void handleInputMonitorChannelLevel(const std::string& command) {
+        const std::string getPrefix = "INPUT_MONITOR_CHANNEL_LEVEL GET ";
+        const std::string setPrefix = "INPUT_MONITOR_CHANNEL_LEVEL SET ";
+        const bool getting = command.rfind(getPrefix, 0) == 0;
+        const bool setting = command.rfind(setPrefix, 0) == 0;
+        if (!getting && !setting) {
+            reply("ERR unknown-command\n");
+            return;
+        }
+
+        std::istringstream input(command.substr(
+            getting ? getPrefix.size() : setPrefix.size()));
+        unsigned pair = 0;
+        unsigned channel = 0;
+        unsigned level = 0;
+        std::string extra;
+        if (!(input >> pair >> channel) ||
+            (setting && !(input >> level)) || (input >> extra) ||
+            pair != 0 || channel > 1 || level > 2 ||
+            (setting && level == 0)) {
+            reply("ERR invalid-input-monitor-channel-level\n");
+            return;
+        }
+        if (!analogInputMonitorLevelKnown_[pair]) {
+            reply("ERR input-monitor-level-state-uninitialized\n");
+            return;
+        }
+
+        if (getting) {
+            const std::uint16_t cached = macfw::fw1814::monitorLevelChannel(
+                gainAnalogIn_[pair], channel);
+            const unsigned cachedLevel =
+                cached == macfw::fw1814::kMonitorLevelUnity ? 1u
+                : cached == macfw::fw1814::kMonitorLevelMinus20Db ? 2u
+                : 3u;
+            if (cachedLevel > 2) {
+                reply("ERR input-monitor-channel-level-cache-invalid\n");
+                return;
+            }
+            reply("OK " + std::to_string(pair) + " " +
+                  std::to_string(channel) + " " +
+                  std::to_string(cachedLevel) + " " +
+                  hex32(gainAnalogIn_[pair]) + "\n");
+            return;
+        }
+
+        const std::uint16_t channelLevel = level == 1
+            ? macfw::fw1814::kMonitorLevelUnity
+            : macfw::fw1814::kMonitorLevelMinus20Db;
+        const std::uint32_t desired = macfw::fw1814::setMonitorLevelChannel(
+            gainAnalogIn_[pair], channel, channelLevel);
+        const WriteResult result = writeRegister(
+            macfw::fw1814::kGainAnalog12InLo, desired);
+        if (result != WriteResult::Ok) {
+            replyWriteError(result);
+            return;
+        }
+        gainAnalogIn_[pair] = desired;
+        reply("OK " + std::to_string(pair) + " " +
+              std::to_string(channel) + " " + std::to_string(level) + " " +
+              hex32(gainAnalogIn_[pair]) + "\n");
+    }
+
     void handle(const std::string& wireCommand) {
         constexpr const char* kRestorePrefix = "RESTORE ";
         const bool restoreCommand = wireCommand.rfind(kRestorePrefix, 0) == 0;
@@ -564,6 +627,7 @@ private:
                   "analog-input-mixer=1 digital=deferred "
                   "analog-input-monitor-level=all-analog-persistent "
                   "analog-input-attenuation=-20db-diagnostic "
+                  "analog-input-channel-attenuation=analog1/2-minus20db-diagnostic "
                   "headphone-levels=deferred levels=deferred midi=deferred\n");
             return;
         }
@@ -582,6 +646,10 @@ private:
         }
         if (command.rfind("INPUT_MONITOR_LEVEL ", 0) == 0) {
             handleInputMonitorLevel(command);
+            return;
+        }
+        if (command.rfind("INPUT_MONITOR_CHANNEL_LEVEL ", 0) == 0) {
+            handleInputMonitorChannelLevel(command);
             return;
         }
         if (command.rfind("OUTPUT ", 0) == 0) {

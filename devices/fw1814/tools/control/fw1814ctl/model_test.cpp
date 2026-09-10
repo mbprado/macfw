@@ -19,6 +19,16 @@ int main() {
                macfw::fw1814::kMonitorLevelUnity) == 0x00000000u);
     assert(macfw::fw1814::stereoMonitorLevelWord(
                macfw::fw1814::kMonitorLevelMinus20Db) == 0xec00ec00u);
+    assert(macfw::fw1814::setMonitorLevelChannel(
+               0x00000000u, 0,
+               macfw::fw1814::kMonitorLevelMinus20Db) == 0xec000000u);
+    assert(macfw::fw1814::setMonitorLevelChannel(
+               0xec000000u, 1,
+               macfw::fw1814::kMonitorLevelMinus20Db) == 0xec00ec00u);
+    assert(macfw::fw1814::monitorLevelChannel(0xec000000u, 0) ==
+           macfw::fw1814::kMonitorLevelMinus20Db);
+    assert(macfw::fw1814::monitorLevelChannel(0xec000000u, 1) ==
+           macfw::fw1814::kMonitorLevelUnity);
 
     assert(model.streamRoute(Model::StreamSource::Stream12,
                              Model::MixerBus::Mixer12));

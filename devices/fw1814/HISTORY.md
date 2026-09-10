@@ -73,6 +73,12 @@ the control-readiness gate and was already present in the first successful
 post-restart read; writing unity again restored the signal and saved state.
 This completes restart-persistence validation for all four pairs.
 
+The first intermediate analog monitor value was then validated on Inputs 1/2.
+The linked stereo AV/C -20 dB word `0xec00ec00` reduced the direct-monitor
+volume normally and returned identically from the authoritative cache. This
+establishes the first non-endpoint fader value; independent channel updates are
+the next guarded diagnostic.
+
 ## 2026-09-09 — Routing controls, persistence and headphone sources validated
 
 The FW1814 gained its first end-user-style routing control surface. The active

@@ -69,6 +69,10 @@ int usage() {
            "analog1/2|analog3/4|analog5/6|analog7/8 mute|unity\n"
         << "  fw1814ctl input-monitor-level set-all analog1/2 -20db"
            "  # diagnostic\n"
+        << "  fw1814ctl input-monitor-channel-level get analog1/2 left|right"
+           "  # diagnostic\n"
+        << "  fw1814ctl input-monitor-channel-level set analog1/2 left|right "
+           "unity|-20db  # diagnostic\n"
         << "  fw1814ctl output-state get\n"
         << "  fw1814ctl output-source get 1/2|3/4\n"
         << "  fw1814ctl output-source set 1/2|3/4 mixer|aux\n"
@@ -577,6 +581,71 @@ int inputMonitorLevelCommand(const std::string& action,
     return 0;
 }
 
+int inputMonitorChannelLevelCommand(const std::string& action,
+                                    int argc,
+                                    char** argv) {
+    const bool getting = action == "get";
+    const bool setting = action == "set";
+    if ((getting && argc != 5) || (setting && argc != 6) ||
+        (!getting && !setting) || std::string(argv[3]) != "analog1/2")
+        return usage();
+
+    constexpr std::array<const char*, 2> kChannelArgs{{"left", "right"}};
+    const int channel = indexOf(argv[4], kChannelArgs.data(),
+                                kChannelArgs.size());
+    if (channel < 0) return usage();
+
+    int level = -1;
+    if (setting) {
+        const std::string value = argv[5];
+        level = value == "unity" ? 1 : value == "-20db" ? 2 : -1;
+        if (level < 0) return usage();
+    }
+
+    std::string command = "INPUT_MONITOR_CHANNEL_LEVEL " +
+        std::string(getting ? "GET 0 " : "SET 0 ") +
+        std::to_string(channel);
+    if (setting) command += " " + std::to_string(level);
+
+    std::string payload;
+    if (!payloadFor(command, payload)) return 1;
+    std::istringstream input(payload);
+    int returnedPair = -1;
+    int returnedChannel = -1;
+    int returnedLevel = -1;
+    std::string raw;
+    std::string extra;
+    if (!(input >> returnedPair >> returnedChannel >> returnedLevel >> raw) ||
+        (input >> extra) || returnedPair != 0 ||
+        returnedChannel != channel || returnedLevel < 1 ||
+        returnedLevel > 2) {
+        std::cerr << "fw1814ctl: invalid input-monitor-channel-level "
+                     "response: " << payload << '\n';
+        return 1;
+    }
+
+    std::uint32_t rawValue = 0;
+    if (!parseRawWord(raw, rawValue)) {
+        std::cerr << "fw1814ctl: invalid analog input gain value\n";
+        return 1;
+    }
+    const std::uint16_t expected = returnedLevel == 1
+        ? macfw::fw1814::kMonitorLevelUnity
+        : macfw::fw1814::kMonitorLevelMinus20Db;
+    if (macfw::fw1814::monitorLevelChannel(
+            rawValue, static_cast<std::size_t>(channel)) != expected) {
+        std::cerr << "fw1814ctl: inconsistent analog input channel gain\n";
+        return 1;
+    }
+
+    std::cout << "Analog Inputs 1/2 " << kChannelArgs[channel]
+              << " channel monitor level: "
+              << (returnedLevel == 1 ? "unity (0 dB)" : "-20 dB") << '\n'
+              << "GAIN_ANA_12_IN: " << raw
+              << " (write-only diagnostic cache)\n";
+    return 0;
+}
+
 int outputStateGet() {
     std::string payload;
     if (!payloadFor("OUTPUT GET", payload)) return 1;
@@ -792,6 +861,8 @@ int main(int argc, char** argv) {
             : usage();
     if (control == "input-monitor-level")
         return inputMonitorLevelCommand(action, argc, argv);
+    if (control == "input-monitor-channel-level")
+        return inputMonitorChannelLevelCommand(action, argc, argv);
     if (control == "output-state")
         return action == "get" && argc == 3 ? outputStateGet() : usage();
     if (control == "output-source")

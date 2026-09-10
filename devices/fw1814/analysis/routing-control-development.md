@@ -470,7 +470,27 @@ fw1814ctl input-monitor-level set-all analog1/2 unity
 fw1814ctl input-monitor-level get analog1/2
 ```
 
-The diagnostic write must report `GAIN_ANA_12_IN=0xec00ec00` and reduce both
-channels substantially while leaving the signal audible. The unity write must
-report `0x00000000` and restore the original direct-monitor level. Do not test
-individual channels or other attenuation values in this pass.
+Hardware testing confirmed that the diagnostic write reported
+`GAIN_ANA_12_IN=0xec00ec00` and reduced the direct-monitor volume normally. The
+cache returned the same value. Unity remains the required restore value.
+
+## Analog Inputs 1/2 independent-channel attenuation diagnostic
+
+FFADO updates the upper 16 bits for the left channel and the lower 16 bits for
+the right channel. The next diagnostic applies the validated -20 dB value only
+to the left member of Analog Inputs 1/2 while preserving the cached right value
+at unity. It is restricted to this pair and remains non-persistent.
+
+```bash
+fw1814ctl input-monitor-level set-all analog1/2 unity
+fw1814ctl input-monitor-channel-level set analog1/2 left -20db
+fw1814ctl input-monitor-channel-level get analog1/2 left
+fw1814ctl input-monitor-channel-level get analog1/2 right
+fw1814ctl input-monitor-level set-all analog1/2 unity
+```
+
+The left write must report `GAIN_ANA_12_IN=0xec000000`. A signal on physical
+Analog Input 1 should become quieter while Analog Input 2 remains at unity. The
+two channel reads must report -20 dB and unity respectively. The final linked
+unity write must restore `0x00000000`. Do not restart while the diagnostic word
+is active.

@@ -23,6 +23,20 @@ inline constexpr std::uint32_t stereoMonitorLevelWord(
     return (static_cast<std::uint32_t>(level) << 16) | level;
 }
 
+inline constexpr std::uint16_t monitorLevelChannel(
+    std::uint32_t word, std::size_t channel) {
+    return channel == 0
+        ? static_cast<std::uint16_t>(word >> 16)
+        : static_cast<std::uint16_t>(word & 0xffffu);
+}
+
+inline constexpr std::uint32_t setMonitorLevelChannel(
+    std::uint32_t word, std::size_t channel, std::uint16_t level) {
+    return channel == 0
+        ? (word & 0x0000ffffu) | (static_cast<std::uint32_t>(level) << 16)
+        : (word & 0xffff0000u) | level;
+}
+
 enum class HeadphoneSource : std::uint32_t {
     Mixer12 = 0x01u,
     Mixer34 = 0x02u,
