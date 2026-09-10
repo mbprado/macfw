@@ -22,11 +22,11 @@ The experimental FW1814 profile currently provides:
 - experimental Mixer/AUX source selection for Analog Outputs 1/2 and 3/4;
 - hardware-validated, persistent Mixer 1/2 or Mixer 3/4 source selection for
   both physical headphone outputs;
-- hardware-validated routing of the four analog input pairs to Mixer 1/2 or
-  Mixer 3/4, with persistent storage ready for lifecycle validation;
-- hardware-validated persistent restoration of software-return, analog-output
-  and headphone selections after transport restart, rate changes and
-  reconnect.
+- hardware-validated, persistent routing of the four analog input pairs to
+  Mixer 1/2 or Mixer 3/4;
+- hardware-validated persistent restoration of software-return, analog-input,
+  analog-output and headphone selections after transport restart, rate changes
+  and reconnect.
 
 S/PDIF, ADAT, 88.2/96/176.4/192 kHz, digital-input routing, levels, headphone AUX routing and the native control panel remain under development. MIDI is intentionally deferred until the audio/control surface is complete.
 

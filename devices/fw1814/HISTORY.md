@@ -22,6 +22,12 @@ value when disabled. The engine now establishes
 cells and saves their typed differential controls through `fw1814state`.
 Digital-input routing remains disabled.
 
+The promoted Analog Inputs 1/2 -> Mixer 1/2 route was retained across a
+launchd transport restart, both 48 -> 44.1 kHz and 44.1 -> 48 kHz transitions,
+and physical disconnect/reconnect at 48 kHz. The analog-input matrix therefore
+shares the validated routing-state lifecycle used by the earlier output and
+headphone controls.
+
 Logic Pro software monitoring was also compared with the direct hardware
 monitoring path during this work. Capture through CoreAudio and playback on a
 separate output pair operated correctly, with almost unnoticeable observed

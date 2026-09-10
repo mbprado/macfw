@@ -251,3 +251,10 @@ almost unnoticeable.
 With all eight analog cells proven, the engine now writes the zero baseline at
 startup and the typed differential routes use the normal authoritative cache
 and persistent state path.
+
+The promoted route was then left enabled as
+`MIX_ANA_DIG_IN=0x00000001`. It survived a launchd transport restart, a
+48 -> 44.1 kHz transition, the reverse 44.1 -> 48 kHz transition and physical
+disconnect/reconnect at 48 kHz. Each new engine restored Analog Inputs 1/2 to
+Mixer 1/2 while retaining the other saved routing controls. This completes the
+analog-input routing lifecycle validation.
