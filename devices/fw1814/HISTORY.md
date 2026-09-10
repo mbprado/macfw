@@ -50,6 +50,11 @@ known unity startup baseline and persistent mute/unity state used by Inputs
 1/2. A saved Inputs 3/4 mute was also replayed after a launchd transport
 restart, after which unity restored both the signal and saved state.
 
+`GAIN_ANA_56_IN` produced the same hardware result for Analog Inputs 5/6:
+the documented mute word silenced the direct-monitor signal completely and
+the unity word restored it normally. Inputs 5/6 now join the known unity
+startup baseline and persistent state model.
+
 ## 2026-09-09 — Routing controls, persistence and headphone sources validated
 
 The FW1814 gained its first end-user-style routing control surface. The active

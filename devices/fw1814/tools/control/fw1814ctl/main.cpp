@@ -64,9 +64,9 @@ int usage() {
         << "  fw1814ctl input-mixer-route set "
            "analog1/2|analog3/4|analog5/6|analog7/8 1/2|3/4 on|off\n"
         << "  fw1814ctl input-monitor-level get "
-           "analog1/2|analog3/4|analog5/6\n"
+           "analog1/2|analog3/4|analog5/6|analog7/8\n"
         << "  fw1814ctl input-monitor-level set-all "
-           "analog1/2|analog3/4|analog5/6 mute|unity\n"
+           "analog1/2|analog3/4|analog5/6|analog7/8 mute|unity\n"
         << "  fw1814ctl output-state get\n"
         << "  fw1814ctl output-source get 1/2|3/4\n"
         << "  fw1814ctl output-source set 1/2|3/4 mixer|aux\n"
@@ -508,7 +508,7 @@ int inputMonitorLevelCommand(const std::string& action,
 
     const int pair = indexOf(argv[3], kInputPairArgs.data(),
                              kInputPairArgs.size());
-    if (pair < 0 || pair > 2) return usage();
+    if (pair < 0) return usage();
 
     int level = -1;
     if (setting) {
@@ -546,15 +546,16 @@ int inputMonitorLevelCommand(const std::string& action,
         return 1;
     }
 
-    constexpr std::array<const char*, 3> kRegisterNames{{
+    constexpr std::array<const char*, 4> kRegisterNames{{
         "GAIN_ANA_12_IN", "GAIN_ANA_34_IN", "GAIN_ANA_56_IN",
+        "GAIN_ANA_78_IN",
     }};
     std::cout << kInputPairLabels[pair] << " monitor level: "
               << (returnedLevel == 0 ? "mute" : "unity (0 dB)") << '\n'
               << kRegisterNames[pair] << ": " << raw
-              << (pair <= 1 ? " (write-only cache)\n"
+              << (pair <= 2 ? " (write-only cache)\n"
                             : " (write-only diagnostic cache)\n");
-    if (setting && pair <= 1)
+    if (setting && pair <= 2)
         persistSuccessfulSet(
             argv[0], "input-monitor-level:" + std::string(argv[3]),
             argc, argv);
