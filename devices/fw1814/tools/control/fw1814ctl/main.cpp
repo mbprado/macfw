@@ -160,7 +160,10 @@ bool transact(const std::string& command, std::string& response) {
         return false;
     }
 
-    const std::string request = command + "\n";
+    const bool restoring = std::getenv("MACFW_STATE_RESTORE") != nullptr;
+    const std::string request =
+        (restoring && command != "CONTROL READY" ? "RESTORE " : "") +
+        command + "\n";
     const char* cursor = request.data();
     std::size_t remaining = request.size();
     while (remaining != 0) {
@@ -741,9 +744,22 @@ int engineGet() {
     return 0;
 }
 
+int internalReady() {
+    std::string payload;
+    if (!payloadFor("CONTROL READY", payload)) return 1;
+    if (payload != "ready") {
+        std::cerr << "fw1814ctl: invalid control-ready response: "
+                  << payload << '\n';
+        return 1;
+    }
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string(argv[1]) == "internal-ready")
+        return internalReady();
     if (argc < 3) return usage();
     const std::string control = argv[1];
     const std::string action = argv[2];

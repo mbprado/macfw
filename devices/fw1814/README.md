@@ -107,6 +107,13 @@ The active transport owns `/tmp/macfw-fw1814-control.sock`; clients never open F
 "/Library/Application Support/macfw/fw1814/bin/fw1814state" reset
 ```
 
+During supervised engine startup, ordinary control requests return
+`ERR control-state-restoring` until `fw1814state` has finished replaying the
+saved controls. The supervisor then publishes control readiness, so the first
+successful client read reflects restored authoritative state rather than the
+temporary startup baseline. Direct standalone engine runs remain available
+immediately because they have no supervisor-managed replay phase.
+
 Only the hardware-validated analog fields of `MIX_ANA_DIG_IN`, together with
 `MIX_STM_IN`, `SRC_ANA_OUT` and `SRC_HP_OUT`, are writable through the
 persistent command set. Successful changes are recorded in

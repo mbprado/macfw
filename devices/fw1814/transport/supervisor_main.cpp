@@ -136,6 +136,7 @@ bool restoreControlState(const std::string& path) {
 
 int runEngine(const std::string& path,
               const std::string& stateHelper,
+              const std::string& controlHelper,
               std::uint32_t startedRate,
               bool& rateChangeRequested) {
     rateChangeRequested = false;
@@ -190,6 +191,15 @@ int runEngine(const std::string& path,
                     std::fprintf(stderr,
                                  "FW1814 saved control-state restore failed; "
                                  "audio remains online\n");
+                const int readyStatus =
+                    runChild(controlHelper, "internal-ready");
+                if (readyStatus == 0)
+                    std::printf("FW1814 control state READY\n");
+                else
+                    std::fprintf(stderr,
+                                 "FW1814 could not publish control readiness "
+                                 "(status %d)\n",
+                                 readyStatus);
             } else if (count == 0) {
                 close(readyPipe[0]);
                 readyPipe[0] = -1;
@@ -284,6 +294,7 @@ int main(int argc, char** argv) {
     const std::string engine48Path = here + "/fw1814analog48";
     const std::string engine44Path = here + "/fw1814analog44";
     const std::string stateHelperPath = here + "/fw1814state";
+    const std::string controlHelperPath = here + "/fw1814ctl";
 
     std::printf("macfw fw1814supervisor — resilient 44.1/48 kHz transport supervisor\n");
     std::printf("automatic reconnect and guarded bootloader recovery: enabled\n");
@@ -410,7 +421,8 @@ int main(int argc, char** argv) {
                         : "48 kHz analog transport engine");
         bool rateChangeRequested = false;
         const int engineStatus =
-            runEngine(enginePath, stateHelperPath, requestedRate,
+            runEngine(enginePath, stateHelperPath, controlHelperPath,
+                      requestedRate,
                       rateChangeRequested);
         if (gStopRequested) break;
 

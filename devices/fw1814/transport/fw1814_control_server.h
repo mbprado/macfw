@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <iomanip>
@@ -35,6 +36,7 @@ public:
         device_ = &device;
         sampleRate_ = sampleRate;
         generation_ = device.generation();
+        restoringControlState_ = std::getenv("MACFW_ENGINE_READY_FD") != nullptr;
         routing_.loadStraightAnalogPlaybackPreset();
         analogInputMonitorLevelKnown_.fill(false);
         gainAnalogIn_.fill(0);
@@ -89,6 +91,7 @@ public:
         device_ = nullptr;
         sampleRate_ = 0;
         generation_ = 0;
+        restoringControlState_ = false;
         routing_.loadStraightAnalogPlaybackPreset();
         analogInputMonitorLevelKnown_.fill(false);
         gainAnalogIn_.fill(0);
@@ -513,7 +516,24 @@ private:
               hex32(gainAnalogIn_[pair]) + "\n");
     }
 
-    void handle(const std::string& command) {
+    void handle(const std::string& wireCommand) {
+        constexpr const char* kRestorePrefix = "RESTORE ";
+        const bool restoreCommand = wireCommand.rfind(kRestorePrefix, 0) == 0;
+        const std::string command = restoreCommand
+            ? wireCommand.substr(std::strlen(kRestorePrefix))
+            : wireCommand;
+
+        if (command == "CONTROL READY") {
+            restoringControlState_ = false;
+            reply("OK ready\n");
+            return;
+        }
+
+        if (restoringControlState_ && !restoreCommand) {
+            reply("ERR control-state-restoring\n");
+            return;
+        }
+
         if (command == "ROUTING GET") {
             const std::string profile = routing_.isStraightAnalogPlaybackPreset()
                 ? "analog-straight"
@@ -567,6 +587,7 @@ private:
     FireWireDevice* device_ = nullptr;
     unsigned sampleRate_ = 0;
     UInt32 generation_ = 0;
+    bool restoringControlState_ = false;
     macfw::fw1814::SpecialMixerRoutingModel routing_{};
     std::array<bool, 4> analogInputMonitorLevelKnown_{{
         false, false, false, false,

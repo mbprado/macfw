@@ -126,6 +126,28 @@ fw1814ctl routing get
 
 Successful writes to this validated subset are recorded by `fw1814state` in `/Library/Application Support/macfw/fw1814/control-state.conf`. After each native engine reports low-level readiness, the supervisor replays the saved typed `fw1814ctl` commands through the normal transport-owned socket. The state helper rejects unknown command shapes and never accepts raw register addresses or values.
 
+### Restore-readiness gate
+
+The initial persistence tests polled the public control socket while the
+supervisor was starting a replacement engine. With the saved Analog Inputs 5/6
+level set to mute, the first successful read occasionally returned the engine's
+unity startup baseline. Waiting two seconds and reading again returned the
+correct restored mute state. This proved persistence was working but exposed a
+public-readiness race: socket availability preceded completion of state replay.
+
+Supervised engines now gate ordinary control commands with
+`ERR control-state-restoring`. `fw1814state` replay processes identify their
+typed requests internally and are permitted through the gate. After the replay
+attempt completes, the supervisor sends an internal `CONTROL READY` command;
+only then can normal clients read or modify the authoritative cache. Standalone
+engines do not enable the gate because no supervisor replay follows their
+startup.
+
+This makes a successful `fw1814ctl engine get` or `routing get` a reliable
+readiness condition for scripts and the future GUI. Hardware validation must
+confirm that the first successful post-restart read now contains the restored
+Inputs 5/6 mute value without an added delay.
+
 With no saved overrides, a new engine keeps the hardware-proven
 `MIX_ANA_DIG_IN=0x00000000`, `MIX_STM_IN=0x00000006`,
 `SRC_ANA_OUT=0x00000000` and `SRC_HP_OUT=0x00010001` startup baseline.
