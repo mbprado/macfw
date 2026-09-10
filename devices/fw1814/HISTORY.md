@@ -39,7 +39,9 @@ the hardware mixer, while `0x00000000` restored the signal at unity. This
 confirmed that the register affects direct monitoring rather than the preamp
 or CoreAudio capture path. The engine now establishes unity as a known startup
 baseline, and the bounded mute/unity control participates in persistent state
-and Reset Defaults.
+and Reset Defaults. A saved mute was replayed successfully after a launchd
+transport restart, the authoritative cache returned `0x80008000`, and a final
+unity write restored both the signal and saved state.
 
 ## 2026-09-09 — Routing controls, persistence and headphone sources validated
 

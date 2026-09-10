@@ -303,6 +303,13 @@ The hardware test produced the expected mute word, silenced the direct monitor
 signal completely, then produced the expected unity word and restored the
 signal normally. This validates the register encoding and physical path.
 
+After promotion, a fresh engine reported the known unity baseline immediately.
+Setting mute added the typed `input-monitor-level:analog1/2` entry to
+`fw1814state`; a launchd transport restart replayed that entry and the new
+engine reported `GAIN_ANA_12_IN=0x80008000`. Writing unity again restored the
+signal and replaced the saved mute state. This validates the control's startup,
+cache and transport-restart persistence lifecycle.
+
 ## Analog Inputs 3/4 monitor-level diagnostic
 
 Enable the validated Analog Inputs 3/4 route with a known low-level signal,
