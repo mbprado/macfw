@@ -83,6 +83,26 @@ bool validStoredCommand(const Entry& entry) {
                                 entry.arguments[3];
 
     if (entry.arguments.size() == 4 &&
+        entry.arguments[0] == "software-return-level" &&
+        entry.arguments[1] == "set-all" &&
+        (entry.arguments[2] == "sw1/2" ||
+         entry.arguments[2] == "sw3/4") &&
+        (entry.arguments[3] == "mute" ||
+         entry.arguments[3] == "unity"))
+        return entry.key ==
+            "software-return-level:" + entry.arguments[2];
+
+    if ((entry.arguments.size() == 4 || entry.arguments.size() == 5) &&
+        entry.arguments[0] == "software-return-level" &&
+        entry.arguments[1] == "set" &&
+        (entry.arguments[2] == "sw1/2" ||
+         entry.arguments[2] == "sw3/4") &&
+        validDb(entry.arguments[3]) &&
+        (entry.arguments.size() == 4 || validDb(entry.arguments[4])))
+        return entry.key ==
+            "software-return-level:" + entry.arguments[2];
+
+    if (entry.arguments.size() == 4 &&
         entry.arguments[0] == "output-source" &&
         entry.arguments[1] == "set" &&
         (entry.arguments[2] == "1/2" || entry.arguments[2] == "3/4") &&
@@ -290,7 +310,7 @@ int restoreEntries(const char* argv0, const std::vector<Entry>& entries) {
 
 std::vector<Entry> defaultState() {
     std::vector<Entry> entries;
-    entries.reserve(28);
+    entries.reserve(30);
     for (const char* sourceValue : kMixerSources) {
         for (const char* busValue : kMixerBuses) {
             const std::string source(sourceValue);
@@ -306,6 +326,15 @@ std::vector<Entry> defaultState() {
             };
             entries.push_back(std::move(entry));
         }
+    }
+    for (const char* sourceValue : kMixerSources) {
+        const std::string source(sourceValue);
+        Entry level;
+        level.key = "software-return-level:" + source;
+        level.arguments = {
+            "software-return-level", "set-all", source, "unity",
+        };
+        entries.push_back(std::move(level));
     }
     for (const char* pairValue : kOutputPairs) {
         const std::string pair(pairValue);

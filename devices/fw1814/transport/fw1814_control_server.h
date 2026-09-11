@@ -546,21 +546,32 @@ private:
 
     void handleSoftwareReturnLevel(const std::string& command) {
         const std::string getPrefix = "SOFTWARE_RETURN_LEVEL GET ";
-        const std::string setPrefix = "SOFTWARE_RETURN_LEVEL SET_ALL ";
+        const std::string setAllPrefix = "SOFTWARE_RETURN_LEVEL SET_ALL ";
+        const std::string setPrefix = "SOFTWARE_RETURN_LEVEL SET ";
         const bool getting = command.rfind(getPrefix, 0) == 0;
+        const bool settingAll = command.rfind(setAllPrefix, 0) == 0;
         const bool setting = command.rfind(setPrefix, 0) == 0;
-        if (!getting && !setting) {
+        if (!getting && !settingAll && !setting) {
             reply("ERR unknown-command\n");
             return;
         }
 
         std::istringstream input(command.substr(
-            getting ? getPrefix.size() : setPrefix.size()));
+            getting ? getPrefix.size()
+                    : settingAll ? setAllPrefix.size() : setPrefix.size()));
         unsigned pair = 0;
         unsigned level = 0;
+        int leftRaw = 0;
+        int rightRaw = 0;
         std::string extra;
-        if (!(input >> pair) || (setting && !(input >> level)) ||
-            (input >> extra) || pair > 1 || level > 1) {
+        if (!(input >> pair) ||
+            (settingAll && !(input >> level)) ||
+            (setting && !(input >> leftRaw >> rightRaw)) ||
+            (input >> extra) || pair > 1 || level > 1 ||
+            (setting &&
+             (leftRaw < -32768 || leftRaw > 0 || rightRaw < -32768 ||
+              rightRaw > 0 || leftRaw % 0x100 != 0 ||
+              rightRaw % 0x100 != 0))) {
             reply("ERR invalid-software-return-level\n");
             return;
         }
@@ -569,12 +580,20 @@ private:
             return;
         }
 
-        if (setting) {
-            const std::uint16_t channelLevel = level == 0
-                ? macfw::fw1814::kMonitorLevelMute
-                : macfw::fw1814::kMonitorLevelUnity;
-            const std::uint32_t desired =
-                macfw::fw1814::stereoMonitorLevelWord(channelLevel);
+        if (settingAll || setting) {
+            std::uint32_t desired = 0;
+            if (settingAll) {
+                const std::uint16_t channelLevel = level == 0
+                    ? macfw::fw1814::kMonitorLevelMute
+                    : macfw::fw1814::kMonitorLevelUnity;
+                desired =
+                    macfw::fw1814::stereoMonitorLevelWord(channelLevel);
+            } else {
+                desired = macfw::fw1814::setMonitorLevelChannel(
+                    desired, 0, static_cast<std::uint16_t>(leftRaw));
+                desired = macfw::fw1814::setMonitorLevelChannel(
+                    desired, 1, static_cast<std::uint16_t>(rightRaw));
+            }
             // Public identities follow CoreAudio/physical output order. The
             // FW1814 raw stream pairs are rotated: raw Stream 3/4 feeds
             // physical Outputs 1/2, while raw Stream 1/2 feeds Outputs 3/4.
@@ -590,21 +609,13 @@ private:
             gainStreamIn_[pair] = desired;
         }
 
-        const unsigned cachedLevel = gainStreamIn_[pair] ==
-                macfw::fw1814::stereoMonitorLevelWord(
-                    macfw::fw1814::kMonitorLevelMute)
-            ? 0u
-            : gainStreamIn_[pair] ==
-                  macfw::fw1814::stereoMonitorLevelWord(
-                      macfw::fw1814::kMonitorLevelUnity)
-                ? 1u
-                : 2u;
-        if (cachedLevel > 1) {
-            reply("ERR software-return-level-cache-invalid\n");
-            return;
-        }
+        const int cachedLeft = macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(gainStreamIn_[pair], 0));
+        const int cachedRight = macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(gainStreamIn_[pair], 1));
         reply("OK " + std::to_string(pair) + " " +
-              std::to_string(cachedLevel) + " " +
+              std::to_string(cachedLeft) + " " +
+              std::to_string(cachedRight) + " " +
               hex32(gainStreamIn_[pair]) + "\n");
     }
 
@@ -781,7 +792,7 @@ private:
                   "analog-input-attenuation=all-analog-continuous-persistent "
                   "analog-input-channel-attenuation=all-analog-minus20db-diagnostic "
                   "analog-input-pan=all-analog-continuous-persistent "
-                  "software-return-levels=mute-unity-diagnostic "
+                  "software-return-levels=continuous-persistent "
                   "headphone-levels=deferred levels=deferred midi=deferred\n");
             return;
         }

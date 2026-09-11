@@ -731,5 +731,27 @@ fw1814ctl software-return-level set-all sw1/2|sw3/4 mute|unity
 Mute must produce `0x80008000`, silence only playback from the selected
 software-return pair, and leave the other return and analog direct-monitor
 paths unchanged. Unity must restore clean playback and `0x00000000`. These
-diagnostic settings are intentionally not persistent until both physical paths
-are confirmed.
+diagnostic settings were initially nonpersistent.
+
+After applying the raw-pair translation, hardware tests confirmed both logical
+paths. `sw1/2` controlled Mac playback on physical Outputs 1/2 through raw
+`GAIN_STM_34_IN`, while `sw3/4` controlled physical Outputs 3/4 through raw
+`GAIN_STM_12_IN`. Mute and unity worked on both pairs. Physical-input direct
+monitoring was unaffected, which is the intended separation between the
+software-return and analog-input gain stages.
+
+The validated family is now promoted to the production whole-dB interface:
+
+```bash
+fw1814ctl software-return-level get sw1/2|sw3/4
+fw1814ctl software-return-level set sw1/2|sw3/4 \
+    <dB|-inf> [<right-dB|-inf>]
+```
+
+The range and encoding match `input-monitor-level`: -128 through 0 dB in
+whole-dB steps, with `-inf` or `mute` selecting AV/C negative infinity. One
+value links both channels; two values provide independent left/right faders.
+Successful sets replace the pair's typed persistent entry and replay behind
+the readiness gate. The original `set-all ... mute|unity` commands remain as
+persistent compatibility shortcuts, and Reset Defaults saves unity for both
+returns.

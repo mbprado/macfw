@@ -113,6 +113,13 @@ physical Outputs 1/2 occupy raw positions 2/3. The control translation now
 maps logical `sw1/2` to `GAIN_STM_34_IN` and logical `sw3/4` to
 `GAIN_STM_12_IN`, keeping the public API in CoreAudio/physical order.
 
+With that translation applied, mute and unity were validated on both logical
+software-return pairs. Each control silenced and restored only Mac playback on
+the matching physical output pair; analog direct monitoring continued as
+expected. The software-return faders now expose the same production whole-dB,
+independent-stereo and persistent-state interface as the analog monitor
+faders. Reset Defaults establishes both pairs at unity.
+
 The documented `LR_ANA_12_IN` field layout was also validated with both
 physical inputs. Hard left, center and hard right use `0x7ffe`, `0x0000` and
 `0x8000` respectively, with the left channel in the upper 16 bits and the
