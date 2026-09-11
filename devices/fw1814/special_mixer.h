@@ -126,18 +126,29 @@ inline bool applyStraightAnalogPlaybackRouting(FireWireDevice& device,
         return false;
     }
 
-    if (!writeMixerRegister(device, kLrAnalog12InLo,
-                            kAnalogInputPanBaseline)) {
-        if (verbose) std::cerr << "FW1814 LR_ANA_12_IN write failed\n";
-        return false;
-    }
-
-    if ((*native)->GetBusGeneration(native, &generation) != kIOReturnSuccess ||
-        generation != expectedGeneration) {
-        if (verbose)
-            std::cerr << "FW1814 generation changed after LR_ANA_12_IN; "
-                         "stopping routing sequence\n";
-        return false;
+    const std::array<UInt32, 4> panAddresses{{
+        kLrAnalog12InLo, kLrAnalog34InLo, kLrAnalog56InLo,
+        kLrAnalog78InLo,
+    }};
+    const std::array<const char*, 4> panNames{{
+        "LR_ANA_12_IN", "LR_ANA_34_IN", "LR_ANA_56_IN",
+        "LR_ANA_78_IN",
+    }};
+    for (std::size_t pair = 0; pair < panAddresses.size(); ++pair) {
+        if (!writeMixerRegister(device, panAddresses[pair],
+                                kAnalogInputPanBaseline)) {
+            if (verbose)
+                std::cerr << "FW1814 " << panNames[pair]
+                          << " write failed\n";
+            return false;
+        }
+        if ((*native)->GetBusGeneration(native, &generation) !=
+                kIOReturnSuccess || generation != expectedGeneration) {
+            if (verbose)
+                std::cerr << "FW1814 generation changed after "
+                          << panNames[pair] << "; stopping routing sequence\n";
+            return false;
+        }
     }
 
     if (!writeMixerRegister(device, kMixAnalogDigitalInLo,
@@ -193,7 +204,7 @@ inline bool applyStraightAnalogPlaybackRouting(FireWireDevice& device,
                      "Stream 3/4->Mix 3/4->Analog 3/4; "
                      "Headphones 1/2->Mix 1/2; analog monitor routes off; "
                      "all analog input monitor levels at unity; "
-                     "Analog Inputs 1/2 panned left/right\n";
+                     "all analog input pairs panned left/right\n";
     return true;
 }
 

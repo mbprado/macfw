@@ -528,8 +528,8 @@ fw1814ctl input-monitor-pan set analog1/2 left left|center|right
 fw1814ctl input-monitor-pan set analog1/2 right left|center|right
 ```
 
-The remaining analog input pairs and continuous intermediate pan values remain
-separate hardware-validation steps.
+Continuous intermediate pan values remained a separate hardware-validation
+step at this checkpoint.
 
 The first production persistence test set the Inputs 1/2 left member to center,
 restarted the launchd transport and polled through the socket-unavailable and
@@ -539,7 +539,7 @@ This confirms that pan participates correctly in the established readiness and
 state-replay contract. A hard-left write restores the normal `0x7ffe8000`
 stereo baseline and saved state.
 
-## Remaining analog input pan diagnostics
+## Remaining analog input pan validation and promotion
 
 The next guarded step applies the same documented layout to the remaining
 analog input-pair registers in one test build:
@@ -548,17 +548,18 @@ analog input-pair registers in one test build:
 - `LR_ANA_56_IN` at `0x00700048`;
 - `LR_ANA_78_IN` at `0x0070004c`.
 
-These diagnostics deliberately add no startup writes or persistence. Establish
-the complete known baseline for a pair before any differential write:
+The diagnostic build deliberately added no startup writes or persistence. Each
+pair was explicitly initialized to the complete known baseline before any
+differential write:
 
 ```bash
 fw1814ctl input-monitor-pan initialize PAIR
 fw1814ctl input-monitor-pan get PAIR
 ```
 
-Here, `PAIR` is `analog3/4`, `analog5/6` or `analog7/8`. The expected initial
-word is `0x7ffe8000`. With signals on both physical inputs in the selected pair,
-center and restore one channel at a time:
+Here, `PAIR` was `analog3/4`, `analog5/6` and `analog7/8` in turn. With signals
+on both physical inputs in each selected pair, both channels were centered and
+restored independently:
 
 ```bash
 fw1814ctl input-monitor-pan set PAIR left center
@@ -568,8 +569,20 @@ fw1814ctl input-monitor-pan set PAIR right right
 fw1814ctl input-monitor-pan get PAIR
 ```
 
-Expected center words are `0x00008000` and `0x7ffe0000`; the final word must be
-`0x7ffe8000` for every pair. Do not restart while any diagnostic pair is left
-at a non-baseline position. All three pairs can be validated after a single
-pull, runtime build and installation; production promotion follows only after
-the complete batch passes on hardware.
+All three registers returned the expected `0x00008000` left-center and
+`0x7ffe0000` right-center words. The audible position followed both physical
+channels of every pair, and each final read returned the `0x7ffe8000` baseline.
+
+The complete analog pan register family is therefore promoted. Engine startup
+writes `0x7ffe8000` to all four registers, and all eight channel positions have
+authoritative caches plus typed persistence. Reset Defaults records left for
+the first member and right for the second member of every pair. Explicit
+diagnostic initialization is no longer required. The production interface is:
+
+```bash
+fw1814ctl input-monitor-pan get PAIR
+fw1814ctl input-monitor-pan set PAIR left|right left|center|right
+```
+
+`PAIR` accepts all four analog input pairs. Continuous intermediate pan values
+remain deferred.

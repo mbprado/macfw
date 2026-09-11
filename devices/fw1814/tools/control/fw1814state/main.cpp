@@ -106,7 +106,10 @@ bool validStoredCommand(const Entry& entry) {
     if (entry.arguments.size() == 5 &&
         entry.arguments[0] == "input-monitor-pan" &&
         entry.arguments[1] == "set" &&
-        entry.arguments[2] == "analog1/2" &&
+        (entry.arguments[2] == "analog1/2" ||
+         entry.arguments[2] == "analog3/4" ||
+         entry.arguments[2] == "analog5/6" ||
+         entry.arguments[2] == "analog7/8") &&
         (entry.arguments[3] == "left" ||
          entry.arguments[3] == "right") &&
         (entry.arguments[4] == "left" ||
@@ -254,7 +257,7 @@ int restoreEntries(const char* argv0, const std::vector<Entry>& entries) {
 
 std::vector<Entry> defaultState() {
     std::vector<Entry> entries;
-    entries.reserve(22);
+    entries.reserve(28);
     for (const char* sourceValue : kMixerSources) {
         for (const char* busValue : kMixerBuses) {
             const std::string source(sourceValue);
@@ -308,18 +311,20 @@ std::vector<Entry> defaultState() {
         };
         entries.push_back(std::move(monitorLevel));
     }
-    for (const auto& channelAndPosition :
-         std::array<std::pair<const char*, const char*>, 2>{{
-             {"left", "left"}, {"right", "right"},
-         }}) {
-        Entry pan;
-        pan.key = "input-monitor-pan:analog1/2:" +
-                  std::string(channelAndPosition.first);
-        pan.arguments = {
-            "input-monitor-pan", "set", "analog1/2",
-            channelAndPosition.first, channelAndPosition.second,
-        };
-        entries.push_back(std::move(pan));
+    for (const char* pairValue : kInputPairs) {
+        for (const auto& channelAndPosition :
+             std::array<std::pair<const char*, const char*>, 2>{{
+                 {"left", "left"}, {"right", "right"},
+             }}) {
+            Entry pan;
+            pan.key = "input-monitor-pan:" + std::string(pairValue) + ":" +
+                      channelAndPosition.first;
+            pan.arguments = {
+                "input-monitor-pan", "set", pairValue,
+                channelAndPosition.first, channelAndPosition.second,
+            };
+            entries.push_back(std::move(pan));
+        }
     }
     return entries;
 }

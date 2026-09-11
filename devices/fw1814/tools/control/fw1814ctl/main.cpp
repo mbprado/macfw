@@ -73,17 +73,11 @@ int usage() {
            "  # diagnostic\n"
         << "  fw1814ctl input-monitor-channel-level set analog1/2 left|right "
            "unity|-20db  # diagnostic\n"
-        << "  fw1814ctl input-monitor-pan get analog1/2\n"
-        << "  fw1814ctl input-monitor-pan set analog1/2 left|right "
-           "left|center|right\n"
-        << "  fw1814ctl input-monitor-pan initialize "
-           "analog3/4|analog5/6|analog7/8"
-           "  # diagnostic\n"
         << "  fw1814ctl input-monitor-pan get "
-           "analog3/4|analog5/6|analog7/8  # diagnostic\n"
+           "analog1/2|analog3/4|analog5/6|analog7/8\n"
         << "  fw1814ctl input-monitor-pan set "
-           "analog3/4|analog5/6|analog7/8 left|right "
-           "left|center|right  # diagnostic\n"
+           "analog1/2|analog3/4|analog5/6|analog7/8 left|right "
+           "left|center|right\n"
         << "  fw1814ctl output-state get\n"
         << "  fw1814ctl output-source get 1/2|3/4\n"
         << "  fw1814ctl output-source set 1/2|3/4 mixer|aux\n"
@@ -660,17 +654,16 @@ int inputMonitorChannelLevelCommand(const std::string& action,
 int inputMonitorPanCommand(const std::string& action,
                            int argc,
                            char** argv) {
-    const bool initializing = action == "initialize";
     const bool getting = action == "get";
     const bool setting = action == "set";
-    if (((initializing || getting) && argc != 4) ||
+    if ((getting && argc != 4) ||
         (setting && argc != 6) ||
-        (!initializing && !getting && !setting))
+        (!getting && !setting))
         return usage();
 
     const int pair = indexOf(argv[3], kInputPairArgs.data(),
                              kInputPairArgs.size());
-    if (pair < 0 || pair > 3 || (initializing && pair == 0)) return usage();
+    if (pair < 0 || pair > 3) return usage();
 
     constexpr std::array<const char*, 2> kChannelArgs{{"left", "right"}};
     constexpr std::array<const char*, 3> kPositionArgs{{
@@ -685,8 +678,7 @@ int inputMonitorPanCommand(const std::string& action,
         if (channel < 0 || position < 0) return usage();
     }
 
-    const char* wireAction = initializing ? "INITIALIZE "
-                           : getting ? "GET " : "SET ";
+    const char* wireAction = getting ? "GET " : "SET ";
     std::string command = "INPUT_MONITOR_PAN " + std::string(wireAction) +
                           std::to_string(pair);
     if (setting)
@@ -729,10 +721,10 @@ int inputMonitorPanCommand(const std::string& action,
               << kPositionArgs[left] << " right-channel="
               << kPositionArgs[right] << '\n'
               << kRegisterNames[pair] << ": " << raw
-              << (pair == 0 ? " (write-only cache)\n"
-                            : " (write-only diagnostic cache)\n");
-    if (setting && pair == 0) {
-        const std::string key = "input-monitor-pan:analog1/2:" +
+              << " (write-only cache)\n";
+    if (setting) {
+        const std::string key = "input-monitor-pan:" +
+                                std::string(argv[3]) + ":" +
                                 std::string(argv[4]);
         persistSuccessfulSet(argv[0], key, argc, argv);
     }

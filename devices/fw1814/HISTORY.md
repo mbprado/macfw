@@ -93,8 +93,15 @@ engine now establishes the proven `0x7ffe8000` left/right baseline for Analog
 Inputs 1/2 at startup and exposes persistent per-channel left/center/right
 controls backed by its authoritative cache. A saved left-channel center
 position survived a launchd transport restart: polling observed the readiness
-gate, and the first successful read returned `0x00008000`. Other input pairs
-and continuous pan values remain bounded follow-up work.
+gate, and the first successful read returned `0x00008000`.
+
+The matching `LR_ANA_34_IN`, `LR_ANA_56_IN` and `LR_ANA_78_IN` registers were
+then validated together. Every pair produced the expected `0x00008000` and
+`0x7ffe0000` center transitions, both physical channels followed the requested
+audible position, and all final reads returned `0x7ffe8000`. All four analog
+input-pair pan registers now receive a known startup baseline and expose
+persistent independent left/center/right controls. Continuous pan values
+remain bounded follow-up work.
 
 ## 2026-09-09 — Routing controls, persistence and headphone sources validated
 
