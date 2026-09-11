@@ -93,6 +93,19 @@ used by `fw410ctl`: linked or independent values from -128 through 0 dB plus
 the AV/C `-inf` mute endpoint. These typed settings use the authoritative
 cache and persistent state replay.
 
+An asymmetric production value was then validated on Analog Inputs 1/2:
+left -6 dB and right -30 dB produced `GAIN_ANA_12_IN=0xfa00e200`, reduced the
+two channels by the expected different amounts, and survived a launchd
+restart through the control-readiness gate. The first successful read returned
+the same raw values, and a linked 0 dB write restored `0x00000000`. This
+completes continuous analog monitor-level conversion and persistence.
+
+The next guarded control family covers the two software-return faders shown in
+the original control panel. The engine now establishes unity in
+`GAIN_STM_12_IN` and `GAIN_STM_34_IN` at startup. A nonpersistent mute/unity
+diagnostic is exposed for both pairs before continuous level control is
+promoted.
+
 The documented `LR_ANA_12_IN` field layout was also validated with both
 physical inputs. Hard left, center and hard right use `0x7ffe`, `0x0000` and
 `0x8000` respectively, with the left channel in the upper 16 bits and the

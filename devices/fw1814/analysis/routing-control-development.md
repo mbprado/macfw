@@ -690,3 +690,35 @@ both fields; the optional second value permits independent left/right faders.
 sets replace the pair's typed saved state atomically and are replayed behind
 the established control-readiness gate. The older `set-all` mute, unity and
 `-20db` forms remain as compatibility shortcuts and now share persistence.
+
+Hardware validation used an asymmetric production setting on Analog Inputs
+1/2. Left -6 dB and right -30 dB converted to signed raw values -1536 and
+-7680 and the complete word `GAIN_ANA_12_IN=0xfa00e200`. The audible levels
+followed the requested values. After a launchd restart, polling observed the
+normal readiness-gate responses and the first successful read contained the
+same values and raw word. A final linked 0 dB write restored `0x00000000`.
+Continuous conversion, independent fields, cache and persistence are therefore
+validated.
+
+## Software-return level diagnostic
+
+The [FFADO special mixer register map](https://github.com/llekn/ffado/blob/8ba6d6415f48ccb740cf4685299ef415286f4a6e/src/bebob/maudio/special_mixer.cpp)
+identifies Stream 1/2 and Stream 3/4 input-volume words at offsets `0x00` and
+`0x04`. These are the `1/2 sw rtn` and `3/4 sw rtn` faders in the original
+FW1814 panel. They use the same stereo AV/C volume encoding already validated
+for the analog monitor inputs.
+
+The engine now writes the known unity word `0x00000000` to both registers as
+part of its generation-checked startup sequence. The first bounded diagnostic
+exposes only the mute and unity endpoints for both pairs:
+
+```bash
+fw1814ctl software-return-level get sw1/2|sw3/4
+fw1814ctl software-return-level set-all sw1/2|sw3/4 mute|unity
+```
+
+Mute must produce `0x80008000`, silence only playback from the selected
+software-return pair, and leave the other return and analog direct-monitor
+paths unchanged. Unity must restore clean playback and `0x00000000`. These
+diagnostic settings are intentionally not persistent until both physical paths
+are confirmed.

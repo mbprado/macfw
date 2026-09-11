@@ -38,6 +38,9 @@ public:
         generation_ = device.generation();
         restoringControlState_ = std::getenv("MACFW_ENGINE_READY_FD") != nullptr;
         routing_.loadStraightAnalogPlaybackPreset();
+        softwareReturnLevelKnown_.fill(true);
+        gainStreamIn_.fill(macfw::fw1814::stereoMonitorLevelWord(
+            macfw::fw1814::kMonitorLevelUnity));
         analogInputMonitorLevelKnown_.fill(true);
         gainAnalogIn_.fill(macfw::fw1814::stereoMonitorLevelWord(
             macfw::fw1814::kMonitorLevelUnity));
@@ -87,6 +90,8 @@ public:
         generation_ = 0;
         restoringControlState_ = false;
         routing_.loadStraightAnalogPlaybackPreset();
+        softwareReturnLevelKnown_.fill(false);
+        gainStreamIn_.fill(0);
         analogInputMonitorLevelKnown_.fill(false);
         gainAnalogIn_.fill(0);
         analogInputPanKnown_.fill(false);
@@ -539,6 +544,67 @@ private:
               hex32(gainAnalogIn_[pair]) + "\n");
     }
 
+    void handleSoftwareReturnLevel(const std::string& command) {
+        const std::string getPrefix = "SOFTWARE_RETURN_LEVEL GET ";
+        const std::string setPrefix = "SOFTWARE_RETURN_LEVEL SET_ALL ";
+        const bool getting = command.rfind(getPrefix, 0) == 0;
+        const bool setting = command.rfind(setPrefix, 0) == 0;
+        if (!getting && !setting) {
+            reply("ERR unknown-command\n");
+            return;
+        }
+
+        std::istringstream input(command.substr(
+            getting ? getPrefix.size() : setPrefix.size()));
+        unsigned pair = 0;
+        unsigned level = 0;
+        std::string extra;
+        if (!(input >> pair) || (setting && !(input >> level)) ||
+            (input >> extra) || pair > 1 || level > 1) {
+            reply("ERR invalid-software-return-level\n");
+            return;
+        }
+        if (!softwareReturnLevelKnown_[pair]) {
+            reply("ERR software-return-level-state-uninitialized\n");
+            return;
+        }
+
+        if (setting) {
+            const std::uint16_t channelLevel = level == 0
+                ? macfw::fw1814::kMonitorLevelMute
+                : macfw::fw1814::kMonitorLevelUnity;
+            const std::uint32_t desired =
+                macfw::fw1814::stereoMonitorLevelWord(channelLevel);
+            const std::array<UInt32, 2> addresses{{
+                macfw::fw1814::kGainStream12InLo,
+                macfw::fw1814::kGainStream34InLo,
+            }};
+            const WriteResult result = writeRegister(addresses[pair], desired);
+            if (result != WriteResult::Ok) {
+                replyWriteError(result);
+                return;
+            }
+            gainStreamIn_[pair] = desired;
+        }
+
+        const unsigned cachedLevel = gainStreamIn_[pair] ==
+                macfw::fw1814::stereoMonitorLevelWord(
+                    macfw::fw1814::kMonitorLevelMute)
+            ? 0u
+            : gainStreamIn_[pair] ==
+                  macfw::fw1814::stereoMonitorLevelWord(
+                      macfw::fw1814::kMonitorLevelUnity)
+                ? 1u
+                : 2u;
+        if (cachedLevel > 1) {
+            reply("ERR software-return-level-cache-invalid\n");
+            return;
+        }
+        reply("OK " + std::to_string(pair) + " " +
+              std::to_string(cachedLevel) + " " +
+              hex32(gainStreamIn_[pair]) + "\n");
+    }
+
     void handleInputMonitorChannelLevel(const std::string& command) {
         const std::string getPrefix = "INPUT_MONITOR_CHANNEL_LEVEL GET ";
         const std::string setPrefix = "INPUT_MONITOR_CHANNEL_LEVEL SET ";
@@ -712,6 +778,7 @@ private:
                   "analog-input-attenuation=all-analog-continuous-persistent "
                   "analog-input-channel-attenuation=all-analog-minus20db-diagnostic "
                   "analog-input-pan=all-analog-continuous-persistent "
+                  "software-return-levels=mute-unity-diagnostic "
                   "headphone-levels=deferred levels=deferred midi=deferred\n");
             return;
         }
@@ -740,6 +807,10 @@ private:
             handleInputMonitorPan(command);
             return;
         }
+        if (command.rfind("SOFTWARE_RETURN_LEVEL ", 0) == 0) {
+            handleSoftwareReturnLevel(command);
+            return;
+        }
         if (command.rfind("OUTPUT ", 0) == 0) {
             handleOutput(command);
             return;
@@ -756,6 +827,8 @@ private:
     UInt32 generation_ = 0;
     bool restoringControlState_ = false;
     macfw::fw1814::SpecialMixerRoutingModel routing_{};
+    std::array<bool, 2> softwareReturnLevelKnown_{{false, false}};
+    std::array<std::uint32_t, 2> gainStreamIn_{{0, 0}};
     std::array<bool, 4> analogInputMonitorLevelKnown_{{
         false, false, false, false,
     }};
