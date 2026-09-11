@@ -115,6 +115,9 @@ right, with the expected complete words `0x40008000` and `0x7ffec000`. Audible
 movement was correct for every pair. The control API now exposes persistent
 normalized integer pan from `-100` (left) through zero to `+100` (right),
 providing the continuous backend required by the future GUI pan controls.
+A saved asymmetric `-25`/`+35` state produced `0x2000d333` and survived a
+launchd restart through the control-readiness gate, completing continuous pan
+conversion and persistence validation.
 
 ## 2026-09-09 — Routing controls, persistence and headphone sources validated
 

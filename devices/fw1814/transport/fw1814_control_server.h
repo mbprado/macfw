@@ -470,8 +470,7 @@ private:
         unsigned level = 0;
         std::string extra;
         if (!(input >> pair) || (setting && !(input >> level)) ||
-            (input >> extra) || pair > 3 || level > 2 ||
-            (setting && level == 2 && pair != 0)) {
+            (input >> extra) || pair > 3 || level > 2) {
             reply("ERR invalid-input-monitor-level\n");
             return;
         }
@@ -548,7 +547,7 @@ private:
         std::string extra;
         if (!(input >> pair >> channel) ||
             (setting && !(input >> level)) || (input >> extra) ||
-            pair != 0 || channel > 1 || level > 2 ||
+            pair > 3 || channel > 1 || level > 2 ||
             (setting && level == 0)) {
             reply("ERR invalid-input-monitor-channel-level\n");
             return;
@@ -581,8 +580,13 @@ private:
             : macfw::fw1814::kMonitorLevelMinus20Db;
         const std::uint32_t desired = macfw::fw1814::setMonitorLevelChannel(
             gainAnalogIn_[pair], channel, channelLevel);
-        const WriteResult result = writeRegister(
-            macfw::fw1814::kGainAnalog12InLo, desired);
+        const std::array<UInt32, 4> addresses{{
+            macfw::fw1814::kGainAnalog12InLo,
+            macfw::fw1814::kGainAnalog34InLo,
+            macfw::fw1814::kGainAnalog56InLo,
+            macfw::fw1814::kGainAnalog78InLo,
+        }};
+        const WriteResult result = writeRegister(addresses[pair], desired);
         if (result != WriteResult::Ok) {
             replyWriteError(result);
             return;
@@ -700,8 +704,8 @@ private:
                   "register-readback=0 state-cache=authoritative "
                   "analog-input-mixer=1 digital=deferred "
                   "analog-input-monitor-level=all-analog-persistent "
-                  "analog-input-attenuation=-20db-diagnostic "
-                  "analog-input-channel-attenuation=analog1/2-minus20db-diagnostic "
+                  "analog-input-attenuation=-20db-all-analog-diagnostic "
+                  "analog-input-channel-attenuation=all-analog-minus20db-diagnostic "
                   "analog-input-pan=all-analog-continuous-persistent "
                   "headphone-levels=deferred levels=deferred midi=deferred\n");
             return;

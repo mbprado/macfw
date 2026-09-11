@@ -644,3 +644,36 @@ fw1814ctl input-monitor-pan get PAIR
 
 The named `left`, `center` and `right` setter remains as a convenient shortcut.
 The temporary `set-test` action is removed from the production surface.
+
+An arbitrary asymmetric production state was then validated on Analog Inputs
+3/4: left `-25` and right `+35` converted to `LR_ANA_34_IN=0x2000d333`.
+After a launchd restart and the normal readiness-gate responses, the first
+successful read returned the same `25% left` / `35% right` state and raw word.
+This completes continuous conversion, cache and persistence validation. Named
+left/right writes restore the usual `0x7ffe8000` baseline.
+
+## Remaining analog input intermediate-level diagnostic
+
+The `-20 dB` AV/C volume value `0xec00` and independent upper/lower gain fields
+were previously validated on Analog Inputs 1/2. The same bounded diagnostic is
+now available in one build for every analog input pair, without changing the
+production persistence allowlist:
+
+```bash
+fw1814ctl input-monitor-level set-all PAIR -20db
+fw1814ctl input-monitor-level set-all PAIR unity
+
+fw1814ctl input-monitor-channel-level set PAIR left -20db
+fw1814ctl input-monitor-channel-level get PAIR left
+fw1814ctl input-monitor-channel-level set PAIR left unity
+
+fw1814ctl input-monitor-channel-level set PAIR right -20db
+fw1814ctl input-monitor-channel-level get PAIR right
+fw1814ctl input-monitor-channel-level set PAIR right unity
+```
+
+For every pair, linked attenuation must produce `0xec00ec00`, left-only must
+produce `0xec000000`, right-only must produce `0x0000ec00`, and the final
+linked word must return to `0x00000000`. The attenuated signal should remain
+clean and audibly lower on only the selected channel. `-20db` remains
+nonpersistent during this batch.
