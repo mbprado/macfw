@@ -596,23 +596,27 @@ private:
     void handleInputMonitorPan(const std::string& command) {
         const std::string getPrefix = "INPUT_MONITOR_PAN GET ";
         const std::string setPrefix = "INPUT_MONITOR_PAN SET ";
+        const std::string testPrefix = "INPUT_MONITOR_PAN SET_TEST ";
         const bool getting = command.rfind(getPrefix, 0) == 0;
         const bool setting = command.rfind(setPrefix, 0) == 0;
-        if (!getting && !setting) {
+        const bool testing = command.rfind(testPrefix, 0) == 0;
+        if (!getting && !setting && !testing) {
             reply("ERR unknown-command\n");
             return;
         }
 
         const std::size_t prefixSize = getting ? getPrefix.size()
-                                               : setPrefix.size();
+            : setting ? setPrefix.size() : testPrefix.size();
         std::istringstream input(command.substr(prefixSize));
         unsigned pair = 0;
         unsigned channel = 0;
         unsigned position = 0;
         std::string extra;
         if (!(input >> pair) ||
-            (setting && (!(input >> channel >> position))) ||
-            (input >> extra) || pair > 3 || channel > 1 || position > 2) {
+            ((setting || testing) && (!(input >> channel >> position))) ||
+            (input >> extra) || pair > 3 || channel > 1 ||
+            (setting && position > 2) ||
+            (testing && (position < 3 || position > 4))) {
             reply("ERR invalid-input-monitor-pan\n");
             return;
         }
@@ -627,11 +631,13 @@ private:
             reply("ERR input-monitor-pan-state-uninitialized\n");
             return;
         }
-        if (setting) {
-            const std::array<std::uint16_t, 3> positions{{
+        if (setting || testing) {
+            const std::array<std::uint16_t, 5> positions{{
                 macfw::fw1814::kPanHardLeft,
                 macfw::fw1814::kPanCenter,
                 macfw::fw1814::kPanHardRight,
+                macfw::fw1814::kPanHalfLeft,
+                macfw::fw1814::kPanHalfRight,
             }};
             const std::uint32_t desired = macfw::fw1814::setInputPanChannel(
                 panAnalogIn_[pair], channel, positions[position]);
@@ -650,13 +656,15 @@ private:
             return pan == macfw::fw1814::kPanHardLeft ? 0u
                 : pan == macfw::fw1814::kPanCenter ? 1u
                 : pan == macfw::fw1814::kPanHardRight ? 2u
-                : 3u;
+                : pan == macfw::fw1814::kPanHalfLeft ? 3u
+                : pan == macfw::fw1814::kPanHalfRight ? 4u
+                : 5u;
         };
         const unsigned left = positionCode(macfw::fw1814::inputPanChannel(
             panAnalogIn_[pair], 0));
         const unsigned right = positionCode(macfw::fw1814::inputPanChannel(
             panAnalogIn_[pair], 1));
-        if (left > 2 || right > 2) {
+        if (left > 4 || right > 4) {
             reply("ERR input-monitor-pan-cache-invalid\n");
             return;
         }
@@ -705,6 +713,7 @@ private:
                   "analog-input-attenuation=-20db-diagnostic "
                   "analog-input-channel-attenuation=analog1/2-minus20db-diagnostic "
                   "analog-input-pan=all-analog-three-position-persistent "
+                  "analog-input-pan-intermediate=half-left-half-right-diagnostic "
                   "headphone-levels=deferred levels=deferred midi=deferred\n");
             return;
         }

@@ -18,7 +18,9 @@ inline constexpr std::uint16_t kMonitorLevelUnity = 0x0000u;
 // AV/C volume values use signed 8.8 dB units. -20 dB is -20 * 256.
 inline constexpr std::uint16_t kMonitorLevelMinus20Db = 0xec00u;
 inline constexpr std::uint16_t kPanHardRight = 0x8000u;
+inline constexpr std::uint16_t kPanHalfRight = 0xc000u;
 inline constexpr std::uint16_t kPanCenter = 0x0000u;
+inline constexpr std::uint16_t kPanHalfLeft = 0x4000u;
 inline constexpr std::uint16_t kPanHardLeft = 0x7ffeu;
 inline constexpr std::uint32_t kAnalogInputPanBaseline = 0x7ffe8000u;
 

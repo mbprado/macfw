@@ -78,6 +78,9 @@ int usage() {
         << "  fw1814ctl input-monitor-pan set "
            "analog1/2|analog3/4|analog5/6|analog7/8 left|right "
            "left|center|right\n"
+        << "  fw1814ctl input-monitor-pan set-test "
+           "analog1/2|analog3/4|analog5/6|analog7/8 left|right "
+           "half-left|half-right  # diagnostic\n"
         << "  fw1814ctl output-state get\n"
         << "  fw1814ctl output-source get 1/2|3/4\n"
         << "  fw1814ctl output-source set 1/2|3/4 mixer|aux\n"
@@ -656,9 +659,10 @@ int inputMonitorPanCommand(const std::string& action,
                            char** argv) {
     const bool getting = action == "get";
     const bool setting = action == "set";
+    const bool testing = action == "set-test";
     if ((getting && argc != 4) ||
-        (setting && argc != 6) ||
-        (!getting && !setting))
+        ((setting || testing) && argc != 6) ||
+        (!getting && !setting && !testing))
         return usage();
 
     const int pair = indexOf(argv[3], kInputPairArgs.data(),
@@ -666,22 +670,26 @@ int inputMonitorPanCommand(const std::string& action,
     if (pair < 0 || pair > 3) return usage();
 
     constexpr std::array<const char*, 2> kChannelArgs{{"left", "right"}};
-    constexpr std::array<const char*, 3> kPositionArgs{{
-        "left", "center", "right",
+    constexpr std::array<const char*, 5> kPositionArgs{{
+        "left", "center", "right", "half-left", "half-right",
     }};
     int channel = -1;
     int position = -1;
-    if (setting) {
+    if (setting || testing) {
         channel = indexOf(argv[4], kChannelArgs.data(), kChannelArgs.size());
         position = indexOf(
             argv[5], kPositionArgs.data(), kPositionArgs.size());
-        if (channel < 0 || position < 0) return usage();
+        if (channel < 0 || position < 0 ||
+            (setting && position > 2) ||
+            (testing && position < 3))
+            return usage();
     }
 
-    const char* wireAction = getting ? "GET " : "SET ";
+    const char* wireAction = getting ? "GET "
+                           : setting ? "SET " : "SET_TEST ";
     std::string command = "INPUT_MONITOR_PAN " + std::string(wireAction) +
                           std::to_string(pair);
-    if (setting)
+    if (setting || testing)
         command += " " + std::to_string(channel) + " " +
                    std::to_string(position);
 
@@ -694,17 +702,19 @@ int inputMonitorPanCommand(const std::string& action,
     std::string raw;
     std::string extra;
     if (!(input >> returnedPair >> left >> right >> raw) ||
-        (input >> extra) || returnedPair != pair || left < 0 || left > 2 ||
-        right < 0 || right > 2) {
+        (input >> extra) || returnedPair != pair || left < 0 || left > 4 ||
+        right < 0 || right > 4) {
         std::cerr << "fw1814ctl: invalid input-monitor-pan response: "
                   << payload << '\n';
         return 1;
     }
 
-    constexpr std::array<std::uint16_t, 3> kPositions{{
+    constexpr std::array<std::uint16_t, 5> kPositions{{
         macfw::fw1814::kPanHardLeft,
         macfw::fw1814::kPanCenter,
         macfw::fw1814::kPanHardRight,
+        macfw::fw1814::kPanHalfLeft,
+        macfw::fw1814::kPanHalfRight,
     }};
     std::uint32_t rawValue = 0;
     if (!parseRawWord(raw, rawValue) ||
@@ -721,7 +731,9 @@ int inputMonitorPanCommand(const std::string& action,
               << kPositionArgs[left] << " right-channel="
               << kPositionArgs[right] << '\n'
               << kRegisterNames[pair] << ": " << raw
-              << " (write-only cache)\n";
+              << ((left > 2 || right > 2)
+                      ? " (write-only diagnostic cache)\n"
+                      : " (write-only cache)\n");
     if (setting) {
         const std::string key = "input-monitor-pan:" +
                                 std::string(argv[3]) + ":" +

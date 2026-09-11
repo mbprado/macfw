@@ -586,3 +586,43 @@ fw1814ctl input-monitor-pan set PAIR left|right left|center|right
 
 `PAIR` accepts all four analog input pairs. Continuous intermediate pan values
 remain deferred.
+
+The production persistence batch then saved three distinct states:
+
+- Analog Inputs 3/4: left centered, `0x00008000`;
+- Analog Inputs 5/6: right centered, `0x7ffe0000`;
+- Analog Inputs 7/8: both centered, `0x00000000`.
+
+After a launchd restart, polling passed through socket-unavailable and
+`control-state-restoring` responses. The first successful read for every pair
+already contained its saved word. A final typed loop restored and saved
+`0x7ffe8000` for all four pairs. This completes startup, cache, readiness,
+restart-persistence and Reset Defaults coverage for all eight analog pan
+channels.
+
+## Intermediate analog pan diagnostic
+
+FFADO exposes LR balance as a signed continuous 16-bit control from `+32766`
+(hard left) through zero (center) to `-32768` (hard right). The next bounded
+diagnostic tests one midpoint on either side without allowing those unvalidated
+values into persistent state:
+
+- half-left: `+16384`, raw `0x4000`;
+- half-right: `-16384`, raw `0xc000`.
+
+For each analog input pair, start from the production left/right baseline and
+test one member at a time:
+
+```bash
+fw1814ctl input-monitor-pan set-test PAIR left half-left
+fw1814ctl input-monitor-pan get PAIR
+fw1814ctl input-monitor-pan set PAIR left left
+
+fw1814ctl input-monitor-pan set-test PAIR right half-right
+fw1814ctl input-monitor-pan get PAIR
+fw1814ctl input-monitor-pan set PAIR right right
+```
+
+Expected midpoint words are `0x40008000` and `0x7ffec000`; each production
+restore must return `0x7ffe8000`. `set-test` changes only the live authoritative
+cache and hardware. It does not update `fw1814state`.

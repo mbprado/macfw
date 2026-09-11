@@ -103,6 +103,12 @@ input-pair pan registers now receive a known startup baseline and expose
 persistent independent left/center/right controls. Continuous pan values
 remain bounded follow-up work.
 
+Persistence was validated for the complete pan family in one restart. Saved
+states `0x00008000`, `0x7ffe0000` and `0x00000000` were assigned to three
+different input pairs. After the readiness gate, the first successful read of
+each pair already contained its saved state. A final typed loop returned all
+four pairs to the normal `0x7ffe8000` baseline and updated the saved state.
+
 ## 2026-09-09 — Routing controls, persistence and headphone sources validated
 
 The FW1814 gained its first end-user-style routing control surface. The active
