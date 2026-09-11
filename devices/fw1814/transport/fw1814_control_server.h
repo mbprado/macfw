@@ -575,9 +575,12 @@ private:
                 : macfw::fw1814::kMonitorLevelUnity;
             const std::uint32_t desired =
                 macfw::fw1814::stereoMonitorLevelWord(channelLevel);
+            // Public identities follow CoreAudio/physical output order. The
+            // FW1814 raw stream pairs are rotated: raw Stream 3/4 feeds
+            // physical Outputs 1/2, while raw Stream 1/2 feeds Outputs 3/4.
             const std::array<UInt32, 2> addresses{{
-                macfw::fw1814::kGainStream12InLo,
                 macfw::fw1814::kGainStream34InLo,
+                macfw::fw1814::kGainStream12InLo,
             }};
             const WriteResult result = writeRegister(addresses[pair], desired);
             if (result != WriteResult::Ok) {

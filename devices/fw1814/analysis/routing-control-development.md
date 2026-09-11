@@ -708,6 +708,17 @@ identifies Stream 1/2 and Stream 3/4 input-volume words at offsets `0x00` and
 FW1814 panel. They use the same stereo AV/C volume encoding already validated
 for the analog monitor inputs.
 
+The names above describe the raw stream pairs. The first hardware test played
+Mac audio through CoreAudio Outputs 1/2. Writing mute to raw
+`GAIN_STM_12_IN` (`0x00`) left that audio unchanged, while writing mute to raw
+`GAIN_STM_34_IN` (`0x04`) silenced it. Physical input monitoring continued,
+as expected, because it enters through the independent analog monitor gains.
+This confirms the same raw-pair rotation already present in the playback PCM
+map: CoreAudio Outputs 1/2 use raw positions 2/3 and the Stream 3/4 gain word;
+CoreAudio Outputs 3/4 use raw positions 0/1 and the Stream 1/2 gain word.
+`fw1814ctl` now translates these raw identities so its `sw1/2` and `sw3/4`
+names remain in CoreAudio/physical order.
+
 The engine now writes the known unity word `0x00000000` to both registers as
 part of its generation-checked startup sequence. The first bounded diagnostic
 exposes only the mute and unity endpoints for both pairs:

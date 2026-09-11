@@ -509,7 +509,7 @@ int softwareReturnLevelCommand(const std::string& action,
     }
 
     constexpr std::array<const char*, 2> kRegisterNames{{
-        "GAIN_STM_12_IN", "GAIN_STM_34_IN",
+        "GAIN_STM_34_IN", "GAIN_STM_12_IN",
     }};
     std::cout << kMixerSourceLabels[pair] << " level: "
               << (returnedLevel == 0 ? "mute" : "unity (0 dB)") << '\n'

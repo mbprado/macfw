@@ -79,6 +79,18 @@ Analog Output 3 <- PCM position 0
 Analog Output 4 <- PCM position 1
 ```
 
+This rotation also applies to the FFADO-named software-return gain registers:
+
+| CoreAudio software return | Raw PCM pair | FFADO gain register |
+|---|---:|---|
+| Outputs 1/2 | positions 2/3 | `GAIN_STM_34_IN` at `0x04` |
+| Outputs 3/4 | positions 0/1 | `GAIN_STM_12_IN` at `0x00` |
+
+The public control API follows CoreAudio and physical output order. It must
+therefore translate `sw1/2` to the raw Stream 3/4 gain word and `sw3/4` to the
+raw Stream 1/2 gain word. This matches the already-validated `MIX_STM_IN`
+logical route mapping, where Software Return 1/2 uses the raw second-pair bits.
+
 The complete currently confirmed S/PDIF-mode playback position map is therefore:
 
 ```text

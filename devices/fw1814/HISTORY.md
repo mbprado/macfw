@@ -106,6 +106,13 @@ the original control panel. The engine now establishes unity in
 diagnostic is exposed for both pairs before continuous level control is
 promoted.
 
+The first hardware write also exposed the FW1814's raw playback-pair rotation.
+Muting the FFADO Stream 1/2 gain word did not affect CoreAudio Outputs 1/2;
+muting the Stream 3/4 word did. This agrees with the earlier PCM map, where
+physical Outputs 1/2 occupy raw positions 2/3. The control translation now
+maps logical `sw1/2` to `GAIN_STM_34_IN` and logical `sw3/4` to
+`GAIN_STM_12_IN`, keeping the public API in CoreAudio/physical order.
+
 The documented `LR_ANA_12_IN` field layout was also validated with both
 physical inputs. Hard left, center and hard right use `0x7ffe`, `0x0000` and
 `0x8000` respectively, with the left channel in the upper 16 bits and the
