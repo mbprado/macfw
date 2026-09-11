@@ -83,6 +83,16 @@ Input 1 normally while preserving Input 2, and updating the right field formed
 zero word. This provides the backend behavior required for independent GUI
 faders and a Link control.
 
+The same intermediate-gain test was then completed in one build for Analog
+Inputs 3/4, 5/6 and 7/8. Linked and independent left/right attenuation worked
+on every pair: `0xec00ec00`, `0xec000000` and `0x0000ec00` all affected only
+the intended direct-monitor channels, remained clean, and returned to
+`0x00000000` at unity. With the signed 8.8 dB encoding and every register field
+now hardware-validated, `fw1814ctl` exposes the production whole-dB interface
+used by `fw410ctl`: linked or independent values from -128 through 0 dB plus
+the AV/C `-inf` mute endpoint. These typed settings use the authoritative
+cache and persistent state replay.
+
 The documented `LR_ANA_12_IN` field layout was also validated with both
 physical inputs. Hard left, center and hard right use `0x7ffe`, `0x0000` and
 `0x8000` respectively, with the left channel in the upper 16 bits and the

@@ -29,6 +29,18 @@ int main() {
            macfw::fw1814::kMonitorLevelMinus20Db);
     assert(macfw::fw1814::monitorLevelChannel(0xec000000u, 1) ==
            macfw::fw1814::kMonitorLevelUnity);
+    assert(macfw::fw1814::monitorLevelFromDb(-128) ==
+           macfw::fw1814::kMonitorLevelMute);
+    assert(macfw::fw1814::monitorLevelFromDb(-20) ==
+           macfw::fw1814::kMonitorLevelMinus20Db);
+    assert(macfw::fw1814::monitorLevelFromDb(0) ==
+           macfw::fw1814::kMonitorLevelUnity);
+    assert(macfw::fw1814::monitorLevelRaw(
+               macfw::fw1814::kMonitorLevelMute) == -32768);
+    assert(macfw::fw1814::monitorLevelRaw(
+               macfw::fw1814::kMonitorLevelMinus20Db) == -5120);
+    assert(macfw::fw1814::monitorLevelDb(
+               macfw::fw1814::monitorLevelFromDb(-73)) == -73);
     assert(macfw::fw1814::inputPanChannel(
                macfw::fw1814::kAnalogInputPanBaseline, 0) ==
            macfw::fw1814::kPanHardLeft);

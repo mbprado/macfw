@@ -652,12 +652,11 @@ successful read returned the same `25% left` / `35% right` state and raw word.
 This completes continuous conversion, cache and persistence validation. Named
 left/right writes restore the usual `0x7ffe8000` baseline.
 
-## Remaining analog input intermediate-level diagnostic
+## Analog input continuous monitor levels
 
 The `-20 dB` AV/C volume value `0xec00` and independent upper/lower gain fields
-were previously validated on Analog Inputs 1/2. The same bounded diagnostic is
-now available in one build for every analog input pair, without changing the
-production persistence allowlist:
+were previously validated on Analog Inputs 1/2. The same bounded diagnostic
+was then tested in one build on Analog Inputs 3/4, 5/6 and 7/8:
 
 ```bash
 fw1814ctl input-monitor-level set-all PAIR -20db
@@ -672,8 +671,22 @@ fw1814ctl input-monitor-channel-level get PAIR right
 fw1814ctl input-monitor-channel-level set PAIR right unity
 ```
 
-For every pair, linked attenuation must produce `0xec00ec00`, left-only must
-produce `0xec000000`, right-only must produce `0x0000ec00`, and the final
-linked word must return to `0x00000000`. The attenuated signal should remain
-clean and audibly lower on only the selected channel. `-20db` remains
-nonpersistent during this batch.
+For every pair, linked attenuation produced `0xec00ec00`, left-only produced
+`0xec000000`, right-only produced `0x0000ec00`, and the final linked word
+returned to `0x00000000`. The attenuated signal remained clean and audibly
+lower on only the selected channel. This validates both 16-bit fields of all
+four `GAIN_ANA_*_IN` registers at a non-endpoint value.
+
+The production control now follows the existing `fw410ctl` volume convention:
+
+```bash
+fw1814ctl input-monitor-level get PAIR
+fw1814ctl input-monitor-level set PAIR <dB|-inf> [<right-dB|-inf>]
+```
+
+The accepted range is -128 through 0 dB in whole-dB steps. One value changes
+both fields; the optional second value permits independent left/right faders.
+`-inf` and `mute` select the AV/C negative-infinity word `0x8000`. Successful
+sets replace the pair's typed saved state atomically and are replayed behind
+the established control-readiness gate. The older `set-all` mute, unity and
+`-20db` forms remain as compatibility shortcuts and now share persistence.

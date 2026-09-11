@@ -43,6 +43,25 @@ inline constexpr std::uint32_t setMonitorLevelChannel(
         : (word & 0xffff0000u) | level;
 }
 
+// Monitor gain uses signed AV/C 8.8 dB units.  The production CLI follows
+// fw410ctl and exposes whole dB steps from -128 through 0; -128 is the AV/C
+// negative-infinity/mute endpoint.
+inline constexpr std::uint16_t monitorLevelFromDb(int db) {
+    return db <= -128
+        ? kMonitorLevelMute
+        : static_cast<std::uint16_t>(db * 0x100);
+}
+
+inline constexpr int monitorLevelRaw(std::uint16_t level) {
+    return level <= 0x7fffu
+        ? static_cast<int>(level)
+        : static_cast<int>(level) - 0x10000;
+}
+
+inline constexpr int monitorLevelDb(std::uint16_t level) {
+    return monitorLevelRaw(level) / 0x100;
+}
+
 inline constexpr std::uint16_t inputPanChannel(
     std::uint32_t word, std::size_t channel) {
     return monitorLevelChannel(word, channel);

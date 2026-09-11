@@ -62,6 +62,15 @@ bool validPanPercent(const std::string& value) {
            parsed >= -100 && parsed <= 100;
 }
 
+bool validDb(const std::string& value) {
+    if (value == "-inf" || value == "mute") return true;
+    char* end = nullptr;
+    errno = 0;
+    const long parsed = std::strtol(value.c_str(), &end, 10);
+    return errno == 0 && end && end != value.c_str() && *end == '\0' &&
+           parsed >= -128 && parsed <= 0;
+}
+
 bool validStoredCommand(const Entry& entry) {
     if (entry.arguments.size() == 5 &&
         entry.arguments[0] == "mixer-route" &&
@@ -108,7 +117,19 @@ bool validStoredCommand(const Entry& entry) {
          entry.arguments[2] == "analog5/6" ||
          entry.arguments[2] == "analog7/8") &&
         (entry.arguments[3] == "mute" ||
-         entry.arguments[3] == "unity"))
+         entry.arguments[3] == "unity" ||
+         entry.arguments[3] == "-20db"))
+        return entry.key == "input-monitor-level:" + entry.arguments[2];
+
+    if ((entry.arguments.size() == 4 || entry.arguments.size() == 5) &&
+        entry.arguments[0] == "input-monitor-level" &&
+        entry.arguments[1] == "set" &&
+        (entry.arguments[2] == "analog1/2" ||
+         entry.arguments[2] == "analog3/4" ||
+         entry.arguments[2] == "analog5/6" ||
+         entry.arguments[2] == "analog7/8") &&
+        validDb(entry.arguments[3]) &&
+        (entry.arguments.size() == 4 || validDb(entry.arguments[4])))
         return entry.key == "input-monitor-level:" + entry.arguments[2];
 
     if (entry.arguments.size() == 5 &&

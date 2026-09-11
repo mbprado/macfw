@@ -68,8 +68,10 @@ int usage() {
         << "  fw1814ctl input-monitor-level set-all "
            "analog1/2|analog3/4|analog5/6|analog7/8 mute|unity\n"
         << "  fw1814ctl input-monitor-level set-all "
-           "analog1/2|analog3/4|analog5/6|analog7/8 -20db"
-           "  # diagnostic\n"
+           "analog1/2|analog3/4|analog5/6|analog7/8 -20db\n"
+        << "  fw1814ctl input-monitor-level set "
+           "analog1/2|analog3/4|analog5/6|analog7/8 "
+           "<dB|-inf> [<right-dB|-inf>]\n"
         << "  fw1814ctl input-monitor-channel-level get "
            "analog1/2|analog3/4|analog5/6|analog7/8 left|right"
            "  # diagnostic\n"
@@ -95,7 +97,9 @@ int usage() {
         << "FW1814 mixer registers are write-only. The active transport "
            "establishes a known startup baseline and maintains the "
            "authoritative routing cache. Successful changes to validated "
-           "controls are saved and restored after engine startup.\n";
+           "controls are saved and restored after engine startup.\n"
+        << "Monitor-level range: -128..0 dB in 1 dB steps; -inf uses "
+           "AV/C negative infinity.\n";
     return 64;
 }
 
@@ -240,6 +244,27 @@ bool parseSignedRange(const std::string& text,
         return false;
     value = static_cast<int>(parsed);
     return true;
+}
+
+bool dbToRaw(const std::string& text, int& raw) {
+    if (text == "-inf" || text == "mute") {
+        raw = -32768;
+        return true;
+    }
+    int db = 0;
+    if (!parseSignedRange(text, -128, 0, db)) return false;
+    raw = db * 0x100;
+    return true;
+}
+
+std::string rawToDb(int raw) {
+    if (raw == -32768) return "-inf (mute)";
+    if (raw % 0x100 == 0)
+        return std::to_string(raw / 0x100) + " dB";
+    std::ostringstream output;
+    output << raw << " raw (" << (static_cast<double>(raw) / 256.0)
+           << " dB)";
+    return output.str();
 }
 
 int indexOf(const std::string& value,
@@ -535,9 +560,11 @@ int inputMonitorLevelCommand(const std::string& action,
                              int argc,
                              char** argv) {
     const bool getting = action == "get";
-    const bool setting = action == "set-all";
-    if ((getting && argc != 4) || (setting && argc != 5) ||
-        (!getting && !setting))
+    const bool settingAll = action == "set-all";
+    const bool setting = action == "set";
+    if ((getting && argc != 4) || (settingAll && argc != 5) ||
+        (setting && argc != 5 && argc != 6) ||
+        (!getting && !settingAll && !setting))
         return usage();
 
     const int pair = indexOf(argv[3], kInputPairArgs.data(),
@@ -545,44 +572,58 @@ int inputMonitorLevelCommand(const std::string& action,
     if (pair < 0) return usage();
 
     int level = -1;
-    if (setting) {
+    int leftRaw = 0;
+    int rightRaw = 0;
+    if (settingAll) {
         const std::string value = argv[4];
         level = value == "mute" ? 0
               : value == "unity" ? 1
               : value == "-20db" ? 2
               : -1;
         if (level < 0) return usage();
+    } else if (setting) {
+        if (!dbToRaw(argv[4], leftRaw)) return usage();
+        if (argc == 6) {
+            if (!dbToRaw(argv[5], rightRaw)) return usage();
+        } else {
+            rightRaw = leftRaw;
+        }
     }
 
     std::string command = "INPUT_MONITOR_LEVEL " +
-        std::string(getting ? "GET " : "SET_ALL ") +
+        std::string(getting ? "GET " : settingAll ? "SET_ALL " : "SET ") +
         std::to_string(pair);
-    if (setting) command += " " + std::to_string(level);
+    if (settingAll)
+        command += " " + std::to_string(level);
+    else if (setting)
+        command += " " + std::to_string(leftRaw) + " " +
+                   std::to_string(rightRaw);
 
     std::string payload;
     if (!payloadFor(command, payload)) return 1;
     std::istringstream input(payload);
     int returnedPair = -1;
-    int returnedLevel = -1;
+    int returnedLeft = 0;
+    int returnedRight = 0;
     std::string raw;
     std::string extra;
-    if (!(input >> returnedPair >> returnedLevel >> raw) ||
-        (input >> extra) || returnedPair != pair || returnedLevel < 0 ||
-        returnedLevel > 2) {
+    if (!(input >> returnedPair >> returnedLeft >> returnedRight >> raw) ||
+        (input >> extra) || returnedPair != pair || returnedLeft < -32768 ||
+        returnedLeft > 0 || returnedRight < -32768 || returnedRight > 0 ||
+        returnedLeft % 0x100 != 0 || returnedRight % 0x100 != 0) {
         std::cerr << "fw1814ctl: invalid input-monitor-level response: "
                   << payload << '\n';
         return 1;
     }
 
     std::uint32_t rawValue = 0;
-    constexpr std::array<std::uint16_t, 3> kLevels{{
-        macfw::fw1814::kMonitorLevelMute,
-        macfw::fw1814::kMonitorLevelUnity,
-        macfw::fw1814::kMonitorLevelMinus20Db,
-    }};
-    const std::uint32_t expected =
-        macfw::fw1814::stereoMonitorLevelWord(kLevels[returnedLevel]);
-    if (!parseRawWord(raw, rawValue) || rawValue != expected) {
+    if (!parseRawWord(raw, rawValue) ||
+        macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(rawValue, 0)) !=
+            returnedLeft ||
+        macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(rawValue, 1)) !=
+            returnedRight) {
         std::cerr << "fw1814ctl: invalid analog input gain value\n";
         return 1;
     }
@@ -591,15 +632,14 @@ int inputMonitorLevelCommand(const std::string& action,
         "GAIN_ANA_12_IN", "GAIN_ANA_34_IN", "GAIN_ANA_56_IN",
         "GAIN_ANA_78_IN",
     }};
-    constexpr std::array<const char*, 3> kLevelLabels{{
-        "mute", "unity (0 dB)", "-20 dB (diagnostic)",
-    }};
-    std::cout << kInputPairLabels[pair] << " monitor level: "
-              << kLevelLabels[returnedLevel] << '\n'
+    std::cout << kInputPairLabels[pair] << " monitor level:\n"
+              << "  left:  " << rawToDb(returnedLeft)
+              << " (raw " << returnedLeft << ")\n"
+              << "  right: " << rawToDb(returnedRight)
+              << " (raw " << returnedRight << ")\n"
               << kRegisterNames[pair] << ": " << raw
-              << (returnedLevel <= 1 ? " (write-only cache)\n"
-                                     : " (write-only diagnostic cache)\n");
-    if (setting && level <= 1)
+              << " (write-only cache)\n";
+    if (setting || settingAll)
         persistSuccessfulSet(
             argv[0], "input-monitor-level:" + std::string(argv[3]),
             argc, argv);
@@ -642,13 +682,13 @@ int inputMonitorChannelLevelCommand(const std::string& action,
     std::istringstream input(payload);
     int returnedPair = -1;
     int returnedChannel = -1;
-    int returnedLevel = -1;
+    int returnedRaw = 0;
     std::string raw;
     std::string extra;
-    if (!(input >> returnedPair >> returnedChannel >> returnedLevel >> raw) ||
+    if (!(input >> returnedPair >> returnedChannel >> returnedRaw >> raw) ||
         (input >> extra) || returnedPair != pair ||
-        returnedChannel != channel || returnedLevel < 1 ||
-        returnedLevel > 2) {
+        returnedChannel != channel || returnedRaw < -32768 ||
+        returnedRaw > 0 || returnedRaw % 0x100 != 0) {
         std::cerr << "fw1814ctl: invalid input-monitor-channel-level "
                      "response: " << payload << '\n';
         return 1;
@@ -659,11 +699,9 @@ int inputMonitorChannelLevelCommand(const std::string& action,
         std::cerr << "fw1814ctl: invalid analog input gain value\n";
         return 1;
     }
-    const std::uint16_t expected = returnedLevel == 1
-        ? macfw::fw1814::kMonitorLevelUnity
-        : macfw::fw1814::kMonitorLevelMinus20Db;
     if (macfw::fw1814::monitorLevelChannel(
-            rawValue, static_cast<std::size_t>(channel)) != expected) {
+            rawValue, static_cast<std::size_t>(channel)) !=
+        static_cast<std::uint16_t>(returnedRaw)) {
         std::cerr << "fw1814ctl: inconsistent analog input channel gain\n";
         return 1;
     }
@@ -673,8 +711,7 @@ int inputMonitorChannelLevelCommand(const std::string& action,
         "GAIN_ANA_78_IN",
     }};
     std::cout << kInputPairLabels[pair] << " " << kChannelArgs[channel]
-              << " channel monitor level: "
-              << (returnedLevel == 1 ? "unity (0 dB)" : "-20 dB") << '\n'
+              << " channel monitor level: " << rawToDb(returnedRaw) << '\n'
               << kRegisterNames[pair] << ": " << raw
               << " (write-only diagnostic cache)\n";
     return 0;
