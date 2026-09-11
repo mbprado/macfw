@@ -616,15 +616,17 @@ private:
         std::string extra;
         if (!(input >> pair) ||
             (setting && (!(input >> channel >> position))) ||
-            (input >> extra) || pair > 1 || channel > 1 || position > 2 ||
-            (initializing && pair != 1)) {
+            (input >> extra) || pair > 3 || channel > 1 || position > 2 ||
+            (initializing && pair == 0)) {
             reply("ERR invalid-input-monitor-pan\n");
             return;
         }
 
-        const std::array<UInt32, 2> addresses{{
+        const std::array<UInt32, 4> addresses{{
             macfw::fw1814::kLrAnalog12InLo,
             macfw::fw1814::kLrAnalog34InLo,
+            macfw::fw1814::kLrAnalog56InLo,
+            macfw::fw1814::kLrAnalog78InLo,
         }};
         if (initializing) {
             const WriteResult result = writeRegister(
@@ -717,7 +719,7 @@ private:
                   "analog-input-attenuation=-20db-diagnostic "
                   "analog-input-channel-attenuation=analog1/2-minus20db-diagnostic "
                   "analog-input-pan=analog1/2-three-position-persistent,"
-                  "analog3/4-three-position-diagnostic "
+                  "remaining-analog-three-position-diagnostic "
                   "headphone-levels=deferred levels=deferred midi=deferred\n");
             return;
         }

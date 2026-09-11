@@ -539,28 +539,37 @@ This confirms that pan participates correctly in the established readiness and
 state-replay contract. A hard-left write restores the normal `0x7ffe8000`
 stereo baseline and saved state.
 
-## Analog Inputs 3/4 pan diagnostic
+## Remaining analog input pan diagnostics
 
-The next guarded step applies the same documented register layout only to
-`LR_ANA_34_IN` at `0x00700044`. It deliberately does not add a startup write or
-persistence. Establish the complete known baseline before differential writes:
+The next guarded step applies the same documented layout to the remaining
+analog input-pair registers in one test build:
+
+- `LR_ANA_34_IN` at `0x00700044`;
+- `LR_ANA_56_IN` at `0x00700048`;
+- `LR_ANA_78_IN` at `0x0070004c`.
+
+These diagnostics deliberately add no startup writes or persistence. Establish
+the complete known baseline for a pair before any differential write:
 
 ```bash
-fw1814ctl input-monitor-pan initialize analog3/4
-fw1814ctl input-monitor-pan get analog3/4
+fw1814ctl input-monitor-pan initialize PAIR
+fw1814ctl input-monitor-pan get PAIR
 ```
 
-The expected initial word is `0x7ffe8000`. With signals on physical Inputs 3
-and 4, center and restore one channel at a time:
+Here, `PAIR` is `analog3/4`, `analog5/6` or `analog7/8`. The expected initial
+word is `0x7ffe8000`. With signals on both physical inputs in the selected pair,
+center and restore one channel at a time:
 
 ```bash
-fw1814ctl input-monitor-pan set analog3/4 left center
-fw1814ctl input-monitor-pan set analog3/4 left left
-fw1814ctl input-monitor-pan set analog3/4 right center
-fw1814ctl input-monitor-pan set analog3/4 right right
-fw1814ctl input-monitor-pan get analog3/4
+fw1814ctl input-monitor-pan set PAIR left center
+fw1814ctl input-monitor-pan set PAIR left left
+fw1814ctl input-monitor-pan set PAIR right center
+fw1814ctl input-monitor-pan set PAIR right right
+fw1814ctl input-monitor-pan get PAIR
 ```
 
 Expected center words are `0x00008000` and `0x7ffe0000`; the final word must be
-`0x7ffe8000`. Do not restart while this diagnostic is left at a non-baseline
-position.
+`0x7ffe8000` for every pair. Do not restart while any diagnostic pair is left
+at a non-baseline position. All three pairs can be validated after a single
+pull, runtime build and installation; production promotion follows only after
+the complete batch passes on hardware.

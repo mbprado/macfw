@@ -76,10 +76,13 @@ int usage() {
         << "  fw1814ctl input-monitor-pan get analog1/2\n"
         << "  fw1814ctl input-monitor-pan set analog1/2 left|right "
            "left|center|right\n"
-        << "  fw1814ctl input-monitor-pan initialize analog3/4"
+        << "  fw1814ctl input-monitor-pan initialize "
+           "analog3/4|analog5/6|analog7/8"
            "  # diagnostic\n"
-        << "  fw1814ctl input-monitor-pan get analog3/4  # diagnostic\n"
-        << "  fw1814ctl input-monitor-pan set analog3/4 left|right "
+        << "  fw1814ctl input-monitor-pan get "
+           "analog3/4|analog5/6|analog7/8  # diagnostic\n"
+        << "  fw1814ctl input-monitor-pan set "
+           "analog3/4|analog5/6|analog7/8 left|right "
            "left|center|right  # diagnostic\n"
         << "  fw1814ctl output-state get\n"
         << "  fw1814ctl output-source get 1/2|3/4\n"
@@ -667,7 +670,7 @@ int inputMonitorPanCommand(const std::string& action,
 
     const int pair = indexOf(argv[3], kInputPairArgs.data(),
                              kInputPairArgs.size());
-    if (pair < 0 || pair > 1 || (initializing && pair != 1)) return usage();
+    if (pair < 0 || pair > 3 || (initializing && pair == 0)) return usage();
 
     constexpr std::array<const char*, 2> kChannelArgs{{"left", "right"}};
     constexpr std::array<const char*, 3> kPositionArgs{{
@@ -719,8 +722,8 @@ int inputMonitorPanCommand(const std::string& action,
         return 1;
     }
 
-    constexpr std::array<const char*, 2> kRegisterNames{{
-        "LR_ANA_12_IN", "LR_ANA_34_IN",
+    constexpr std::array<const char*, 4> kRegisterNames{{
+        "LR_ANA_12_IN", "LR_ANA_34_IN", "LR_ANA_56_IN", "LR_ANA_78_IN",
     }};
     std::cout << kInputPairLabels[pair] << " monitor pan: left-channel="
               << kPositionArgs[left] << " right-channel="
