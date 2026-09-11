@@ -53,6 +53,28 @@ inline constexpr std::uint32_t setInputPanChannel(
     return setMonitorLevelChannel(word, channel, pan);
 }
 
+// User-facing pan is normalized to -100 (left), 0 (center), +100 (right).
+// The hardware uses the opposite signed direction and reserves +32767, so
+// hard left is the documented +32766 endpoint.
+inline constexpr std::uint16_t inputPanFromPercent(int percent) {
+    if (percent <= -100) return kPanHardLeft;
+    if (percent >= 100) return kPanHardRight;
+    if (percent == 0) return kPanCenter;
+    const int magnitude =
+        ((percent < 0 ? -percent : percent) * 32768 + 50) / 100;
+    return static_cast<std::uint16_t>(percent < 0 ? magnitude : -magnitude);
+}
+
+inline constexpr int inputPanPercent(std::uint16_t pan) {
+    const int signedPan = pan <= 0x7fffu
+        ? static_cast<int>(pan)
+        : static_cast<int>(pan) - 0x10000;
+    if (signedPan == 0) return 0;
+    const int magnitude = signedPan < 0 ? -signedPan : signedPan;
+    const int percent = (magnitude * 100 + 16384) / 32768;
+    return signedPan > 0 ? -percent : percent;
+}
+
 enum class HeadphoneSource : std::uint32_t {
     Mixer12 = 0x01u,
     Mixer34 = 0x02u,

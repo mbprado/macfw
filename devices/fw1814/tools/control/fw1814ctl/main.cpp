@@ -78,9 +78,9 @@ int usage() {
         << "  fw1814ctl input-monitor-pan set "
            "analog1/2|analog3/4|analog5/6|analog7/8 left|right "
            "left|center|right\n"
-        << "  fw1814ctl input-monitor-pan set-test "
+        << "  fw1814ctl input-monitor-pan set-percent "
            "analog1/2|analog3/4|analog5/6|analog7/8 left|right "
-           "half-left|half-right  # diagnostic\n"
+           "-100..100\n"
         << "  fw1814ctl output-state get\n"
         << "  fw1814ctl output-source get 1/2|3/4\n"
         << "  fw1814ctl output-source set 1/2|3/4 mixer|aux\n"
@@ -222,6 +222,20 @@ bool parseRawWord(const std::string& text, std::uint32_t& value) {
     if (errno != 0 || !end || *end != '\0' || parsed > 0xfffffffful)
         return false;
     value = static_cast<std::uint32_t>(parsed);
+    return true;
+}
+
+bool parseSignedRange(const std::string& text,
+                      int minimum,
+                      int maximum,
+                      int& value) {
+    char* end = nullptr;
+    errno = 0;
+    const long parsed = std::strtol(text.c_str(), &end, 10);
+    if (errno != 0 || !end || end == text.c_str() || *end != '\0' ||
+        parsed < minimum || parsed > maximum)
+        return false;
+    value = static_cast<int>(parsed);
     return true;
 }
 
@@ -659,10 +673,10 @@ int inputMonitorPanCommand(const std::string& action,
                            char** argv) {
     const bool getting = action == "get";
     const bool setting = action == "set";
-    const bool testing = action == "set-test";
+    const bool settingPercent = action == "set-percent";
     if ((getting && argc != 4) ||
-        ((setting || testing) && argc != 6) ||
-        (!getting && !setting && !testing))
+        ((setting || settingPercent) && argc != 6) ||
+        (!getting && !setting && !settingPercent))
         return usage();
 
     const int pair = indexOf(argv[3], kInputPairArgs.data(),
@@ -670,26 +684,28 @@ int inputMonitorPanCommand(const std::string& action,
     if (pair < 0 || pair > 3) return usage();
 
     constexpr std::array<const char*, 2> kChannelArgs{{"left", "right"}};
-    constexpr std::array<const char*, 5> kPositionArgs{{
-        "left", "center", "right", "half-left", "half-right",
+    constexpr std::array<const char*, 3> kPositionArgs{{
+        "left", "center", "right",
     }};
     int channel = -1;
     int position = -1;
-    if (setting || testing) {
+    if (setting || settingPercent) {
         channel = indexOf(argv[4], kChannelArgs.data(), kChannelArgs.size());
-        position = indexOf(
-            argv[5], kPositionArgs.data(), kPositionArgs.size());
-        if (channel < 0 || position < 0 ||
-            (setting && position > 2) ||
-            (testing && position < 3))
+        if (channel < 0) return usage();
+        if (setting)
+            position = indexOf(
+                argv[5], kPositionArgs.data(), kPositionArgs.size());
+        else if (!parseSignedRange(argv[5], -100, 100, position))
+            return usage();
+        if (setting && position < 0)
             return usage();
     }
 
     const char* wireAction = getting ? "GET "
-                           : setting ? "SET " : "SET_TEST ";
+                           : setting ? "SET " : "SET_PERCENT ";
     std::string command = "INPUT_MONITOR_PAN " + std::string(wireAction) +
                           std::to_string(pair);
-    if (setting || testing)
+    if (setting || settingPercent)
         command += " " + std::to_string(channel) + " " +
                    std::to_string(position);
 
@@ -697,29 +713,24 @@ int inputMonitorPanCommand(const std::string& action,
     if (!payloadFor(command, payload)) return 1;
     std::istringstream input(payload);
     int returnedPair = -1;
-    int left = -1;
-    int right = -1;
+    int leftPercent = 0;
+    int rightPercent = 0;
     std::string raw;
     std::string extra;
-    if (!(input >> returnedPair >> left >> right >> raw) ||
-        (input >> extra) || returnedPair != pair || left < 0 || left > 4 ||
-        right < 0 || right > 4) {
+    if (!(input >> returnedPair >> leftPercent >> rightPercent >> raw) ||
+        (input >> extra) || returnedPair != pair || leftPercent < -100 ||
+        leftPercent > 100 || rightPercent < -100 || rightPercent > 100) {
         std::cerr << "fw1814ctl: invalid input-monitor-pan response: "
                   << payload << '\n';
         return 1;
     }
 
-    constexpr std::array<std::uint16_t, 5> kPositions{{
-        macfw::fw1814::kPanHardLeft,
-        macfw::fw1814::kPanCenter,
-        macfw::fw1814::kPanHardRight,
-        macfw::fw1814::kPanHalfLeft,
-        macfw::fw1814::kPanHalfRight,
-    }};
     std::uint32_t rawValue = 0;
     if (!parseRawWord(raw, rawValue) ||
-        macfw::fw1814::inputPanChannel(rawValue, 0) != kPositions[left] ||
-        macfw::fw1814::inputPanChannel(rawValue, 1) != kPositions[right]) {
+        macfw::fw1814::inputPanChannel(rawValue, 0) !=
+            macfw::fw1814::inputPanFromPercent(leftPercent) ||
+        macfw::fw1814::inputPanChannel(rawValue, 1) !=
+            macfw::fw1814::inputPanFromPercent(rightPercent)) {
         std::cerr << "fw1814ctl: inconsistent analog input pan value\n";
         return 1;
     }
@@ -727,14 +738,20 @@ int inputMonitorPanCommand(const std::string& action,
     constexpr std::array<const char*, 4> kRegisterNames{{
         "LR_ANA_12_IN", "LR_ANA_34_IN", "LR_ANA_56_IN", "LR_ANA_78_IN",
     }};
+    const auto panLabel = [](int percent) {
+        if (percent == -100) return std::string("left");
+        if (percent == 0) return std::string("center");
+        if (percent == 100) return std::string("right");
+        if (percent < 0)
+            return std::to_string(-percent) + "% left";
+        return std::to_string(percent) + "% right";
+    };
     std::cout << kInputPairLabels[pair] << " monitor pan: left-channel="
-              << kPositionArgs[left] << " right-channel="
-              << kPositionArgs[right] << '\n'
+              << panLabel(leftPercent) << " right-channel="
+              << panLabel(rightPercent) << '\n'
               << kRegisterNames[pair] << ": " << raw
-              << ((left > 2 || right > 2)
-                      ? " (write-only diagnostic cache)\n"
-                      : " (write-only cache)\n");
-    if (setting) {
+              << " (write-only cache)\n";
+    if (setting || settingPercent) {
         const std::string key = "input-monitor-pan:" +
                                 std::string(argv[3]) + ":" +
                                 std::string(argv[4]);

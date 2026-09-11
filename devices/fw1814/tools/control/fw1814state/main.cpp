@@ -54,6 +54,14 @@ std::vector<std::string> splitTabs(const std::string& line) {
     return fields;
 }
 
+bool validPanPercent(const std::string& value) {
+    char* end = nullptr;
+    errno = 0;
+    const long parsed = std::strtol(value.c_str(), &end, 10);
+    return errno == 0 && end && end != value.c_str() && *end == '\0' &&
+           parsed >= -100 && parsed <= 100;
+}
+
 bool validStoredCommand(const Entry& entry) {
     if (entry.arguments.size() == 5 &&
         entry.arguments[0] == "mixer-route" &&
@@ -105,16 +113,20 @@ bool validStoredCommand(const Entry& entry) {
 
     if (entry.arguments.size() == 5 &&
         entry.arguments[0] == "input-monitor-pan" &&
-        entry.arguments[1] == "set" &&
+        (entry.arguments[1] == "set" ||
+         entry.arguments[1] == "set-percent") &&
         (entry.arguments[2] == "analog1/2" ||
          entry.arguments[2] == "analog3/4" ||
          entry.arguments[2] == "analog5/6" ||
          entry.arguments[2] == "analog7/8") &&
         (entry.arguments[3] == "left" ||
          entry.arguments[3] == "right") &&
-        (entry.arguments[4] == "left" ||
-         entry.arguments[4] == "center" ||
-         entry.arguments[4] == "right"))
+        ((entry.arguments[1] == "set" &&
+          (entry.arguments[4] == "left" ||
+           entry.arguments[4] == "center" ||
+           entry.arguments[4] == "right")) ||
+         (entry.arguments[1] == "set-percent" &&
+          validPanPercent(entry.arguments[4]))))
         return entry.key == "input-monitor-pan:" + entry.arguments[2] +
                                 ":" + entry.arguments[3];
 

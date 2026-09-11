@@ -109,6 +109,13 @@ different input pairs. After the readiness gate, the first successful read of
 each pair already contained its saved state. A final typed loop returned all
 four pairs to the normal `0x7ffe8000` baseline and updated the saved state.
 
+The signed midpoint values were then validated on all eight channels:
+`0x4000` positioned a channel halfway left and `0xc000` positioned it halfway
+right, with the expected complete words `0x40008000` and `0x7ffec000`. Audible
+movement was correct for every pair. The control API now exposes persistent
+normalized integer pan from `-100` (left) through zero to `+100` (right),
+providing the continuous backend required by the future GUI pan controls.
+
 ## 2026-09-09 — Routing controls, persistence and headphone sources validated
 
 The FW1814 gained its first end-user-style routing control surface. The active

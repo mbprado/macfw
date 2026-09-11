@@ -596,27 +596,28 @@ private:
     void handleInputMonitorPan(const std::string& command) {
         const std::string getPrefix = "INPUT_MONITOR_PAN GET ";
         const std::string setPrefix = "INPUT_MONITOR_PAN SET ";
-        const std::string testPrefix = "INPUT_MONITOR_PAN SET_TEST ";
+        const std::string percentPrefix = "INPUT_MONITOR_PAN SET_PERCENT ";
         const bool getting = command.rfind(getPrefix, 0) == 0;
         const bool setting = command.rfind(setPrefix, 0) == 0;
-        const bool testing = command.rfind(testPrefix, 0) == 0;
-        if (!getting && !setting && !testing) {
+        const bool settingPercent = command.rfind(percentPrefix, 0) == 0;
+        if (!getting && !setting && !settingPercent) {
             reply("ERR unknown-command\n");
             return;
         }
 
         const std::size_t prefixSize = getting ? getPrefix.size()
-            : setting ? setPrefix.size() : testPrefix.size();
+            : setting ? setPrefix.size() : percentPrefix.size();
         std::istringstream input(command.substr(prefixSize));
         unsigned pair = 0;
         unsigned channel = 0;
-        unsigned position = 0;
+        int position = 0;
         std::string extra;
         if (!(input >> pair) ||
-            ((setting || testing) && (!(input >> channel >> position))) ||
+            ((setting || settingPercent) &&
+             (!(input >> channel >> position))) ||
             (input >> extra) || pair > 3 || channel > 1 ||
-            (setting && position > 2) ||
-            (testing && (position < 3 || position > 4))) {
+            (setting && (position < 0 || position > 2)) ||
+            (settingPercent && (position < -100 || position > 100))) {
             reply("ERR invalid-input-monitor-pan\n");
             return;
         }
@@ -631,16 +632,17 @@ private:
             reply("ERR input-monitor-pan-state-uninitialized\n");
             return;
         }
-        if (setting || testing) {
-            const std::array<std::uint16_t, 5> positions{{
+        if (setting || settingPercent) {
+            const std::array<std::uint16_t, 3> positions{{
                 macfw::fw1814::kPanHardLeft,
                 macfw::fw1814::kPanCenter,
                 macfw::fw1814::kPanHardRight,
-                macfw::fw1814::kPanHalfLeft,
-                macfw::fw1814::kPanHalfRight,
             }};
+            const std::uint16_t pan = settingPercent
+                ? macfw::fw1814::inputPanFromPercent(position)
+                : positions[static_cast<std::size_t>(position)];
             const std::uint32_t desired = macfw::fw1814::setInputPanChannel(
-                panAnalogIn_[pair], channel, positions[position]);
+                panAnalogIn_[pair], channel, pan);
             if (desired != panAnalogIn_[pair]) {
                 const WriteResult result = writeRegister(addresses[pair],
                                                          desired);
@@ -652,22 +654,10 @@ private:
             }
         }
 
-        const auto positionCode = [](std::uint16_t pan) -> unsigned {
-            return pan == macfw::fw1814::kPanHardLeft ? 0u
-                : pan == macfw::fw1814::kPanCenter ? 1u
-                : pan == macfw::fw1814::kPanHardRight ? 2u
-                : pan == macfw::fw1814::kPanHalfLeft ? 3u
-                : pan == macfw::fw1814::kPanHalfRight ? 4u
-                : 5u;
-        };
-        const unsigned left = positionCode(macfw::fw1814::inputPanChannel(
-            panAnalogIn_[pair], 0));
-        const unsigned right = positionCode(macfw::fw1814::inputPanChannel(
-            panAnalogIn_[pair], 1));
-        if (left > 4 || right > 4) {
-            reply("ERR input-monitor-pan-cache-invalid\n");
-            return;
-        }
+        const int left = macfw::fw1814::inputPanPercent(
+            macfw::fw1814::inputPanChannel(panAnalogIn_[pair], 0));
+        const int right = macfw::fw1814::inputPanPercent(
+            macfw::fw1814::inputPanChannel(panAnalogIn_[pair], 1));
         reply("OK " + std::to_string(pair) + " " +
               std::to_string(left) + " " + std::to_string(right) + " " +
               hex32(panAnalogIn_[pair]) + "\n");
@@ -712,8 +702,7 @@ private:
                   "analog-input-monitor-level=all-analog-persistent "
                   "analog-input-attenuation=-20db-diagnostic "
                   "analog-input-channel-attenuation=analog1/2-minus20db-diagnostic "
-                  "analog-input-pan=all-analog-three-position-persistent "
-                  "analog-input-pan-intermediate=half-left-half-right-diagnostic "
+                  "analog-input-pan=all-analog-continuous-persistent "
                   "headphone-levels=deferred levels=deferred midi=deferred\n");
             return;
         }

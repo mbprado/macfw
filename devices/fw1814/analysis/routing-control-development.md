@@ -626,3 +626,21 @@ fw1814ctl input-monitor-pan set PAIR right right
 Expected midpoint words are `0x40008000` and `0x7ffec000`; each production
 restore must return `0x7ffe8000`. `set-test` changes only the live authoritative
 cache and hardware. It does not update `fw1814state`.
+
+Hardware testing confirmed both midpoint words and the corresponding audible
+halfway position on every analog input channel. All pairs were returned to the
+normal `0x7ffe8000` baseline afterward.
+
+With both endpoints, center and signed midpoints proven, the production API now
+exposes normalized continuous pan. User-facing values run from `-100` (hard
+left), through `0` (center), to `+100` (hard right); the model converts them to
+the documented signed hardware range. Integer percentages are persistent and
+replace the saved value for the same pair/channel key:
+
+```bash
+fw1814ctl input-monitor-pan set-percent PAIR left|right -100..100
+fw1814ctl input-monitor-pan get PAIR
+```
+
+The named `left`, `center` and `right` setter remains as a convenient shortcut.
+The temporary `set-test` action is removed from the production surface.

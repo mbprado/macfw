@@ -56,6 +56,19 @@ int main() {
     assert(macfw::fw1814::setInputPanChannel(
                macfw::fw1814::kAnalogInputPanBaseline, 1,
                macfw::fw1814::kPanHalfRight) == 0x7ffec000u);
+    assert(macfw::fw1814::inputPanFromPercent(-100) ==
+           macfw::fw1814::kPanHardLeft);
+    assert(macfw::fw1814::inputPanFromPercent(-50) ==
+           macfw::fw1814::kPanHalfLeft);
+    assert(macfw::fw1814::inputPanFromPercent(0) ==
+           macfw::fw1814::kPanCenter);
+    assert(macfw::fw1814::inputPanFromPercent(50) ==
+           macfw::fw1814::kPanHalfRight);
+    assert(macfw::fw1814::inputPanFromPercent(100) ==
+           macfw::fw1814::kPanHardRight);
+    for (int percent = -100; percent <= 100; ++percent)
+        assert(macfw::fw1814::inputPanPercent(
+                   macfw::fw1814::inputPanFromPercent(percent)) == percent);
 
     assert(model.streamRoute(Model::StreamSource::Stream12,
                              Model::MixerBus::Mixer12));
