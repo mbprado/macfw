@@ -95,9 +95,12 @@ survived a readiness-gated launchd restart. A linked 0 dB write restored the
 unity baseline, completing the analog/software AUX path.
 
 With that path established, the documented AUX source in each `SRC_HP_OUT`
-field is now enabled as a nonpersistent diagnostic. Mixer 1/2 and Mixer 3/4
-headphone selections retain their validated persistent behavior while AUX is
-tested independently on both physical connectors.
+field was enabled as a nonpersistent diagnostic. Each physical headphone
+connector followed the isolated AUX signal independently, producing
+`0x00010004` for Headphone 1 and `0x00040001` for Headphone 2; both together
+produced `0x00040004`. AUX now joins Mixer 1/2 and Mixer 3/4 as a persistent
+headphone source with readiness-gated replay. Reset Defaults keeps Mixer 1/2
+selected for both connectors.
 
 The documented `GAIN_ANA_12_IN` stereo word was then tested at its two safest
 endpoints. `0x80008000` completely muted the Analog Inputs 1/2 contribution to

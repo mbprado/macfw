@@ -20,8 +20,8 @@ The experimental FW1814 profile currently provides:
 - experimental runtime assignment of software returns 1/2 and 3/4 to Mixer
   buses 1/2 and 3/4;
 - experimental Mixer/AUX source selection for Analog Outputs 1/2 and 3/4;
-- hardware-validated, persistent Mixer 1/2 or Mixer 3/4 source selection for
-  both physical headphone outputs;
+- hardware-validated, persistent Mixer 1/2, Mixer 3/4 or AUX source selection
+  for both physical headphone outputs;
 - hardware-validated, persistent routing of the four analog input pairs to
   Mixer 1/2 or Mixer 3/4;
 - hardware-validated stereo mute/unity control for all four analog input-pair
@@ -32,7 +32,9 @@ The experimental FW1814 profile currently provides:
   and reconnect; all four analog input-pair monitor levels also survive a
   transport restart through the same state path.
 
-S/PDIF, ADAT, 88.2/96/176.4/192 kHz, digital-input routing, continuous level controls, headphone AUX routing and the native control panel remain under development. MIDI is intentionally deferred until the audio/control surface is complete.
+S/PDIF, ADAT, 88.2/96/176.4/192 kHz, digital-input routing and level controls,
+and the native control panel remain under development. MIDI is intentionally
+deferred until the audio/control surface is complete.
 
 ## Architecture
 
@@ -139,8 +141,8 @@ persistent command set. Successful changes are recorded in
 `/Library/Application Support/macfw/fw1814/control-state.conf` and replayed
 after a new engine reports ready. `fw1814state reset` applies and saves the
 proven straight-through defaults; `clear` removes saved overrides without
-changing the current hardware state. Headphone AUX selection is available as
-a nonpersistent diagnostic pending a separate signal-path test. See
+changing the current hardware state. All three documented headphone sources
+are hardware-validated and persistent. See
 [`analysis/routing-control-development.md`](analysis/routing-control-development.md)
 for the enabled subset and validation sequence.
 

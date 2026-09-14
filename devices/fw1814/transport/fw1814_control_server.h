@@ -1173,7 +1173,7 @@ private:
         if (command == "CAPABILITIES GET") {
             reply("OK routing-state=1 runtime-routing-set=1 "
                   "stream-mixer=1 analog-output-source=1 "
-                  "headphone-source=mixer-persistent,aux-diagnostic "
+                  "headphone-source=all-persistent "
                   "register-readback=0 state-cache=authoritative "
                   "analog-input-mixer=1 digital=deferred "
                   "analog-input-monitor-level=all-analog-persistent "

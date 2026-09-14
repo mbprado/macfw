@@ -951,7 +951,7 @@ audible channels followed the requested attenuation, the cache reported
 launchd restart. A final linked 0 dB write restored the unity baseline. This
 completes the AUX master.
 
-## Headphone AUX-source diagnostic
+## Headphone AUX source
 
 Now that the complete analog/software AUX signal path is established, the
 third documented `SRC_HP_OUT` source can be tested safely on both physical
@@ -963,8 +963,10 @@ fw1814ctl headphone-source set 2 aux
 fw1814ctl headphone-state get
 ```
 
-The low and high 16-bit fields must become `0x0004`, producing
-`SRC_HP_OUT=0x00040004`, and both connectors must reproduce the known AUX mix.
-Each output can then be restored independently to `mixer1/2`. AUX selections
-are deliberately nonpersistent until both physical outputs are confirmed;
-the already validated Mixer 1/2 and Mixer 3/4 selections remain persistent.
+Hardware validation confirmed each field and physical connector independently.
+Headphone Output 1 alone produced `SRC_HP_OUT=0x00010004`, Headphone Output 2
+alone produced `0x00040001`, and selecting AUX for both produced
+`0x00040004`. Only the selected connector reproduced the isolated AUX signal
+in each individual test, and both did so together. AUX now participates in the
+same typed persistence and readiness-gated replay as the two mixer sources.
+Reset Defaults continues to select Mixer 1/2 for both headphones.

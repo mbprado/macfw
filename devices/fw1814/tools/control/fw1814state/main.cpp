@@ -197,7 +197,8 @@ bool validStoredCommand(const Entry& entry) {
         entry.arguments[1] == "set" &&
         (entry.arguments[2] == "1" || entry.arguments[2] == "2") &&
         (entry.arguments[3] == "mixer1/2" ||
-         entry.arguments[3] == "mixer3/4"))
+         entry.arguments[3] == "mixer3/4" ||
+         entry.arguments[3] == "aux"))
         return entry.key == "headphone-source:" + entry.arguments[2];
 
     if (entry.arguments.size() == 4 &&
