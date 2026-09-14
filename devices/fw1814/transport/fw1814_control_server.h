@@ -41,6 +41,9 @@ public:
         softwareReturnLevelKnown_.fill(true);
         gainStreamIn_.fill(macfw::fw1814::stereoMonitorLevelWord(
             macfw::fw1814::kMonitorLevelUnity));
+        analogOutputLevelKnown_.fill(true);
+        gainAnalogOut_.fill(macfw::fw1814::stereoMonitorLevelWord(
+            macfw::fw1814::kMonitorLevelUnity));
         analogInputMonitorLevelKnown_.fill(true);
         gainAnalogIn_.fill(macfw::fw1814::stereoMonitorLevelWord(
             macfw::fw1814::kMonitorLevelUnity));
@@ -92,6 +95,8 @@ public:
         routing_.loadStraightAnalogPlaybackPreset();
         softwareReturnLevelKnown_.fill(false);
         gainStreamIn_.fill(0);
+        analogOutputLevelKnown_.fill(false);
+        gainAnalogOut_.fill(0);
         analogInputMonitorLevelKnown_.fill(false);
         gainAnalogIn_.fill(0);
         analogInputPanKnown_.fill(false);
@@ -619,6 +624,53 @@ private:
               hex32(gainStreamIn_[pair]) + "\n");
     }
 
+    void handleAnalogOutputLevel(const std::string& command) {
+        const std::string getPrefix = "ANALOG_OUTPUT_LEVEL GET ";
+        const std::string setAllPrefix = "ANALOG_OUTPUT_LEVEL SET_ALL ";
+        const bool getting = command.rfind(getPrefix, 0) == 0;
+        const bool settingAll = command.rfind(setAllPrefix, 0) == 0;
+        if (!getting && !settingAll) {
+            reply("ERR unknown-command\n");
+            return;
+        }
+
+        std::istringstream input(command.substr(
+            getting ? getPrefix.size() : setAllPrefix.size()));
+        unsigned pair = 0;
+        unsigned level = 0;
+        std::string extra;
+        if (!(input >> pair) || (settingAll && !(input >> level)) ||
+            (input >> extra) || pair > 1 || level > 1) {
+            reply("ERR invalid-analog-output-level\n");
+            return;
+        }
+        if (!analogOutputLevelKnown_[pair]) {
+            reply("ERR analog-output-level-state-uninitialized\n");
+            return;
+        }
+
+        if (settingAll) {
+            const std::uint16_t channelLevel = level == 0
+                ? macfw::fw1814::kMonitorLevelMute
+                : macfw::fw1814::kMonitorLevelUnity;
+            const std::uint32_t desired =
+                macfw::fw1814::stereoMonitorLevelWord(channelLevel);
+            const std::array<UInt32, 2> addresses{{
+                macfw::fw1814::kGainAnalog12OutLo,
+                macfw::fw1814::kGainAnalog34OutLo,
+            }};
+            const WriteResult result = writeRegister(addresses[pair], desired);
+            if (result != WriteResult::Ok) {
+                replyWriteError(result);
+                return;
+            }
+            gainAnalogOut_[pair] = desired;
+        }
+
+        reply("OK " + std::to_string(pair) + " " +
+              hex32(gainAnalogOut_[pair]) + "\n");
+    }
+
     void handleInputMonitorChannelLevel(const std::string& command) {
         const std::string getPrefix = "INPUT_MONITOR_CHANNEL_LEVEL GET ";
         const std::string setPrefix = "INPUT_MONITOR_CHANNEL_LEVEL SET ";
@@ -793,6 +845,7 @@ private:
                   "analog-input-channel-attenuation=all-analog-minus20db-diagnostic "
                   "analog-input-pan=all-analog-continuous-persistent "
                   "software-return-levels=continuous-persistent "
+                  "analog-output-levels=mute-unity-diagnostic "
                   "headphone-levels=deferred levels=deferred midi=deferred\n");
             return;
         }
@@ -825,6 +878,10 @@ private:
             handleSoftwareReturnLevel(command);
             return;
         }
+        if (command.rfind("ANALOG_OUTPUT_LEVEL ", 0) == 0) {
+            handleAnalogOutputLevel(command);
+            return;
+        }
         if (command.rfind("OUTPUT ", 0) == 0) {
             handleOutput(command);
             return;
@@ -843,6 +900,8 @@ private:
     macfw::fw1814::SpecialMixerRoutingModel routing_{};
     std::array<bool, 2> softwareReturnLevelKnown_{{false, false}};
     std::array<std::uint32_t, 2> gainStreamIn_{{0, 0}};
+    std::array<bool, 2> analogOutputLevelKnown_{{false, false}};
+    std::array<std::uint32_t, 2> gainAnalogOut_{{0, 0}};
     std::array<bool, 4> analogInputMonitorLevelKnown_{{
         false, false, false, false,
     }};

@@ -14,6 +14,8 @@ namespace macfw::fw1814 {
 inline constexpr UInt16 kMixerAddressHi = 0xffc7;
 inline constexpr UInt32 kGainStream12InLo = 0x00700000; // GAIN_STM_12_IN
 inline constexpr UInt32 kGainStream34InLo = 0x00700004; // GAIN_STM_34_IN
+inline constexpr UInt32 kGainAnalog12OutLo = 0x00700008; // GAIN_ANA_12_OUT
+inline constexpr UInt32 kGainAnalog34OutLo = 0x0070000c; // GAIN_ANA_34_OUT
 inline constexpr UInt32 kGainAnalog12InLo = 0x00700010; // GAIN_ANA_12_IN
 inline constexpr UInt32 kGainAnalog34InLo = 0x00700014; // GAIN_ANA_34_IN
 inline constexpr UInt32 kGainAnalog56InLo = 0x00700018; // GAIN_ANA_56_IN
@@ -92,6 +94,32 @@ inline bool applyStraightAnalogPlaybackRouting(FireWireDevice& device,
             if (verbose)
                 std::cerr << "FW1814 generation changed after "
                           << streamGainNames[pair]
+                          << "; stopping routing sequence\n";
+            return false;
+        }
+    }
+
+    const std::array<UInt32, 2> analogOutputGainAddresses{{
+        kGainAnalog12OutLo, kGainAnalog34OutLo,
+    }};
+    const std::array<const char*, 2> analogOutputGainNames{{
+        "GAIN_ANA_12_OUT", "GAIN_ANA_34_OUT",
+    }};
+    for (std::size_t pair = 0;
+         pair < analogOutputGainAddresses.size(); ++pair) {
+        if (!writeMixerRegister(
+                device, analogOutputGainAddresses[pair],
+                stereoMonitorLevelWord(kMonitorLevelUnity))) {
+            if (verbose)
+                std::cerr << "FW1814 " << analogOutputGainNames[pair]
+                          << " write failed\n";
+            return false;
+        }
+        if ((*native)->GetBusGeneration(native, &generation) !=
+                kIOReturnSuccess || generation != expectedGeneration) {
+            if (verbose)
+                std::cerr << "FW1814 generation changed after "
+                          << analogOutputGainNames[pair]
                           << "; stopping routing sequence\n";
             return false;
         }

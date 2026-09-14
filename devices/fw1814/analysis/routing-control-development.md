@@ -755,3 +755,35 @@ Successful sets replace the pair's typed persistent entry and replay behind
 the readiness gate. The original `set-all ... mute|unity` commands remain as
 persistent compatibility shortcuts, and Reset Defaults saves unity for both
 returns.
+
+Hardware validation then exercised the production continuous path on Software
+Return 1/2. Left -6 dB and right -30 dB converted to signed raw values -1536
+and -7680 and the complete rotated word `GAIN_STM_34_IN=0xfa00e200`. The
+levels were audibly correct, the typed `software-return-level:sw1/2` state was
+saved, and the first successful read after a launchd restart and readiness
+gate returned the same values and raw word. A final linked 0 dB write restored
+`0x00000000`. This completes conversion, pair mapping, cache and persistence
+validation for the software-return gain family.
+
+## Analog output volume diagnostic
+
+The same [FFADO special mixer register map](https://github.com/llekn/ffado/blob/8ba6d6415f48ccb740cf4685299ef415286f4a6e/src/bebob/maudio/special_mixer.cpp)
+places the physical Analog Outputs 1/2 and 3/4 volume words at offsets `0x08`
+and `0x0c`. Unlike software-return gain, these faders sit on the physical
+output buses and should therefore affect both host playback and direct input
+monitoring reaching the selected pair.
+
+The engine writes the known unity word `0x00000000` to both output registers
+during its generation-checked startup sequence. The first guarded diagnostic
+exposes only the endpoint values and is intentionally nonpersistent:
+
+```bash
+fw1814ctl output-volume get 1/2|3/4
+fw1814ctl output-volume set-all 1/2|3/4 mute|unity
+```
+
+Mute must produce `0x80008000`, silence every signal reaching only the
+selected physical output pair, and leave the other pair unchanged. Unity must
+restore clean output and `0x00000000`. Continuous and persistent output faders
+remain deferred until both physical pair identities and endpoint behavior are
+confirmed on hardware.

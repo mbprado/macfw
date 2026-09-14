@@ -94,6 +94,9 @@ int usage() {
         << "  fw1814ctl output-state get\n"
         << "  fw1814ctl output-source get 1/2|3/4\n"
         << "  fw1814ctl output-source set 1/2|3/4 mixer|aux\n"
+        << "  fw1814ctl output-volume get 1/2|3/4\n"
+        << "  fw1814ctl output-volume set-all 1/2|3/4 "
+           "mute|unity  # diagnostic\n"
         << "  fw1814ctl headphone-state get\n"
         << "  fw1814ctl headphone-source get 1|2\n"
         << "  fw1814ctl headphone-source set 1|2 mixer1/2|mixer3/4\n"
@@ -543,6 +546,60 @@ int softwareReturnLevelCommand(const std::string& action,
         persistSuccessfulSet(
             argv[0], "software-return-level:" + std::string(argv[3]),
             argc, argv);
+    return 0;
+}
+
+int outputVolumeCommand(const std::string& action, int argc, char** argv) {
+    const bool getting = action == "get";
+    const bool settingAll = action == "set-all";
+    if ((getting && argc != 4) || (settingAll && argc != 5) ||
+        (!getting && !settingAll))
+        return usage();
+
+    const int pair = indexOf(argv[3], kOutputPairArgs.data(),
+                             kOutputPairArgs.size());
+    if (pair < 0) return usage();
+
+    int level = -1;
+    if (settingAll) {
+        const std::string value = argv[4];
+        level = value == "mute" ? 0 : value == "unity" ? 1 : -1;
+        if (level < 0) return usage();
+    }
+
+    std::string command = "ANALOG_OUTPUT_LEVEL " +
+        std::string(getting ? "GET " : "SET_ALL ") +
+        std::to_string(pair);
+    if (settingAll) command += " " + std::to_string(level);
+
+    std::string payload;
+    if (!payloadFor(command, payload)) return 1;
+    std::istringstream input(payload);
+    int returnedPair = -1;
+    std::string raw;
+    std::string extra;
+    if (!(input >> returnedPair >> raw) || (input >> extra) ||
+        returnedPair != pair) {
+        std::cerr << "fw1814ctl: invalid output-volume response: "
+                  << payload << '\n';
+        return 1;
+    }
+
+    std::uint32_t rawValue = 0;
+    if (!parseRawWord(raw, rawValue) ||
+        (rawValue != 0x00000000u && rawValue != 0x80008000u)) {
+        std::cerr << "fw1814ctl: invalid analog output gain value\n";
+        return 1;
+    }
+
+    constexpr std::array<const char*, 2> kRegisterNames{{
+        "GAIN_ANA_12_OUT", "GAIN_ANA_34_OUT",
+    }};
+    std::cout << kOutputPairLabels[pair] << " volume: "
+              << (rawValue == 0x80008000u ? "mute" : "unity (0 dB)")
+              << '\n'
+              << kRegisterNames[pair] << ": " << raw
+              << " (write-only diagnostic cache)\n";
     return 0;
 }
 
@@ -1127,6 +1184,8 @@ int main(int argc, char** argv) {
         return action == "get" || action == "set"
             ? outputSourceCommand(action, argc, argv)
             : usage();
+    if (control == "output-volume")
+        return outputVolumeCommand(action, argc, argv);
     if (control == "headphone-state")
         return action == "get" && argc == 3 ? headphoneStateGet() : usage();
     if (control == "headphone-source")

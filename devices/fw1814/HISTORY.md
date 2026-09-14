@@ -33,6 +33,22 @@ monitoring path during this work. Capture through CoreAudio and playback on a
 separate output pair operated correctly, with almost unnoticeable observed
 latency compared with the direct signal.
 
+Software-return gain was validated across both logical pairs after accounting
+for the FW1814 raw stream rotation: public `sw1/2` uses `GAIN_STM_34_IN` and
+public `sw3/4` uses `GAIN_STM_12_IN`. Mute and unity affected only the selected
+Mac playback return and left physical-input monitoring unchanged. The promoted
+continuous control was then tested at left -6 dB and right -30 dB on `sw1/2`,
+producing `GAIN_STM_34_IN=0xfa00e200`. The audible result was correct and the
+asymmetric setting survived a launchd restart behind the control-readiness
+gate before a final unity write restored `0x00000000`.
+
+Work then moved to physical analog-output volume. The documented
+`GAIN_ANA_12_OUT` and `GAIN_ANA_34_OUT` registers at offsets `0x08` and `0x0c`
+now receive a generation-checked unity startup baseline and have a
+nonpersistent mute/unity endpoint diagnostic. This is intended to establish
+that each physical output fader affects both software playback and direct
+monitoring before continuous values are exposed.
+
 The documented `GAIN_ANA_12_IN` stereo word was then tested at its two safest
 endpoints. `0x80008000` completely muted the Analog Inputs 1/2 contribution to
 the hardware mixer, while `0x00000000` restored the signal at unity. This
