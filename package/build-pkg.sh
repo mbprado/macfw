@@ -139,19 +139,18 @@ ul { margin-top: 6px; }
 </head>
 <body>
 <p>You will be guided through the installation of the macfw FireWire Audio Driver ${VERSION}.</p>
-
 <h2>Included components</h2>
 <ul>
     <li>M-Audio FireWire 410 CoreAudio driver and transport service</li>
     <li>macfw FW410 Control application</li>
     <li>Persistent control-state restore across reboot and reconnect</li>
 </ul>
-
+<br>
 <h2>Supported audio interfaces</h2>
 <ul>
     <li>M-Audio FireWire 410</li>
 </ul>
-
+<br>
 <p>The installer checks for supported FireWire hardware before installing the driver.</p>
 </body>
 </html>
