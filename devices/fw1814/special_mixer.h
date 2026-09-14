@@ -20,12 +20,19 @@ inline constexpr UInt32 kGainAnalog12InLo = 0x00700010; // GAIN_ANA_12_IN
 inline constexpr UInt32 kGainAnalog34InLo = 0x00700014; // GAIN_ANA_34_IN
 inline constexpr UInt32 kGainAnalog56InLo = 0x00700018; // GAIN_ANA_56_IN
 inline constexpr UInt32 kGainAnalog78InLo = 0x0070001c; // GAIN_ANA_78_IN
+inline constexpr UInt32 kGainAuxOutLo = 0x00700034; // GAIN_AUX_OUT
 inline constexpr UInt32 kGainHeadphone1OutLo = 0x00700038; // GAIN_HP_1_OUT
 inline constexpr UInt32 kGainHeadphone2OutLo = 0x0070003c; // GAIN_HP_2_OUT
 inline constexpr UInt32 kLrAnalog12InLo = 0x00700040; // LR_ANA_12_IN
 inline constexpr UInt32 kLrAnalog34InLo = 0x00700044; // LR_ANA_34_IN
 inline constexpr UInt32 kLrAnalog56InLo = 0x00700048; // LR_ANA_56_IN
 inline constexpr UInt32 kLrAnalog78InLo = 0x0070004c; // LR_ANA_78_IN
+inline constexpr UInt32 kGainAuxStream12InLo = 0x00700064; // AUX_STM_12_IN
+inline constexpr UInt32 kGainAuxStream34InLo = 0x00700068; // AUX_STM_34_IN
+inline constexpr UInt32 kGainAuxAnalog12InLo = 0x0070006c; // AUX_ANA_12_IN
+inline constexpr UInt32 kGainAuxAnalog34InLo = 0x00700070; // AUX_ANA_34_IN
+inline constexpr UInt32 kGainAuxAnalog56InLo = 0x00700074; // AUX_ANA_56_IN
+inline constexpr UInt32 kGainAuxAnalog78InLo = 0x00700078; // AUX_ANA_78_IN
 inline constexpr UInt32 kMixAnalogDigitalInLo = 0x00700090; // MIX_ANA_DIG_IN
 inline constexpr UInt32 kMixStreamInLo = 0x00700094;  // MIX_STM_IN
 inline constexpr UInt32 kSrcHeadphoneOutLo = 0x00700098; // SRC_HP_OUT
@@ -125,6 +132,19 @@ inline bool applyStraightAnalogPlaybackRouting(FireWireDevice& device,
                           << "; stopping routing sequence\n";
             return false;
         }
+    }
+
+    if (!writeMixerRegister(device, kGainAuxOutLo,
+                            stereoMonitorLevelWord(kMonitorLevelUnity))) {
+        if (verbose) std::cerr << "FW1814 GAIN_AUX_OUT write failed\n";
+        return false;
+    }
+    if ((*native)->GetBusGeneration(native, &generation) != kIOReturnSuccess ||
+        generation != expectedGeneration) {
+        if (verbose)
+            std::cerr << "FW1814 generation changed after GAIN_AUX_OUT; "
+                         "stopping routing sequence\n";
+        return false;
     }
 
     const std::array<UInt32, 2> headphoneGainAddresses{{
@@ -230,6 +250,34 @@ inline bool applyStraightAnalogPlaybackRouting(FireWireDevice& device,
             if (verbose)
                 std::cerr << "FW1814 generation changed after "
                           << panNames[pair] << "; stopping routing sequence\n";
+            return false;
+        }
+    }
+
+    const std::array<UInt32, 6> auxSendAddresses{{
+        kGainAuxStream12InLo, kGainAuxStream34InLo,
+        kGainAuxAnalog12InLo, kGainAuxAnalog34InLo,
+        kGainAuxAnalog56InLo, kGainAuxAnalog78InLo,
+    }};
+    const std::array<const char*, 6> auxSendNames{{
+        "AUX_STM_12_IN", "AUX_STM_34_IN", "AUX_ANA_12_IN",
+        "AUX_ANA_34_IN", "AUX_ANA_56_IN", "AUX_ANA_78_IN",
+    }};
+    for (std::size_t source = 0; source < auxSendAddresses.size(); ++source) {
+        if (!writeMixerRegister(
+                device, auxSendAddresses[source],
+                stereoMonitorLevelWord(kMonitorLevelMute))) {
+            if (verbose)
+                std::cerr << "FW1814 " << auxSendNames[source]
+                          << " write failed\n";
+            return false;
+        }
+        if ((*native)->GetBusGeneration(native, &generation) !=
+                kIOReturnSuccess || generation != expectedGeneration) {
+            if (verbose)
+                std::cerr << "FW1814 generation changed after "
+                          << auxSendNames[source]
+                          << "; stopping routing sequence\n";
             return false;
         }
     }

@@ -60,6 +60,14 @@ mute/unity controls as Headphone Outputs 1 and 2. Both connectors passed the
 endpoint and isolation test. The headphone-volume family now exposes
 continuous independent left/right attenuation, typed persistence, readiness-
 gated replay and unity Reset Defaults.
+Arbitrary independent channel levels were subsequently confirmed on both
+connectors and survived a launchd restart before returning to saved unity.
+
+Development then entered the AUX path. The documented AUX master now starts at
+unity while the supported software-return and analog-input AUX sends start
+muted, producing a deterministic quiet bus. Both logical software-return sends
+are exposed as a nonpersistent mute/unity diagnostic with the same raw stream
+rotation already proven for main software-return gain.
 
 The documented `GAIN_ANA_12_IN` stereo word was then tested at its two safest
 endpoints. `0x80008000` completely muted the Analog Inputs 1/2 contribution to

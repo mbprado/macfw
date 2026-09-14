@@ -47,6 +47,9 @@ public:
         headphoneOutputLevelKnown_.fill(true);
         gainHeadphoneOut_.fill(macfw::fw1814::stereoMonitorLevelWord(
             macfw::fw1814::kMonitorLevelUnity));
+        auxSoftwareReturnLevelKnown_.fill(true);
+        gainAuxStreamIn_.fill(macfw::fw1814::stereoMonitorLevelWord(
+            macfw::fw1814::kMonitorLevelMute));
         analogInputMonitorLevelKnown_.fill(true);
         gainAnalogIn_.fill(macfw::fw1814::stereoMonitorLevelWord(
             macfw::fw1814::kMonitorLevelUnity));
@@ -102,6 +105,8 @@ public:
         gainAnalogOut_.fill(0);
         headphoneOutputLevelKnown_.fill(false);
         gainHeadphoneOut_.fill(0);
+        auxSoftwareReturnLevelKnown_.fill(false);
+        gainAuxStreamIn_.fill(0);
         analogInputMonitorLevelKnown_.fill(false);
         gainAnalogIn_.fill(0);
         analogInputPanKnown_.fill(false);
@@ -774,6 +779,57 @@ private:
               hex32(gainHeadphoneOut_[output]) + "\n");
     }
 
+    void handleAuxSoftwareReturnLevel(const std::string& command) {
+        const std::string getPrefix = "AUX_SOFTWARE_RETURN_LEVEL GET ";
+        const std::string setAllPrefix =
+            "AUX_SOFTWARE_RETURN_LEVEL SET_ALL ";
+        const bool getting = command.rfind(getPrefix, 0) == 0;
+        const bool settingAll = command.rfind(setAllPrefix, 0) == 0;
+        if (!getting && !settingAll) {
+            reply("ERR unknown-command\n");
+            return;
+        }
+
+        std::istringstream input(command.substr(
+            getting ? getPrefix.size() : setAllPrefix.size()));
+        unsigned source = 0;
+        unsigned level = 0;
+        std::string extra;
+        if (!(input >> source) || (settingAll && !(input >> level)) ||
+            (input >> extra) || source > 1 || level > 1) {
+            reply("ERR invalid-aux-software-return-level\n");
+            return;
+        }
+        if (!auxSoftwareReturnLevelKnown_[source]) {
+            reply("ERR aux-software-return-level-state-uninitialized\n");
+            return;
+        }
+
+        if (settingAll) {
+            const std::uint16_t channelLevel = level == 0
+                ? macfw::fw1814::kMonitorLevelMute
+                : macfw::fw1814::kMonitorLevelUnity;
+            const std::uint32_t desired =
+                macfw::fw1814::stereoMonitorLevelWord(channelLevel);
+            // CoreAudio-facing software-return identities use the same raw
+            // stream rotation as the main software-return gain controls.
+            const std::array<UInt32, 2> addresses{{
+                macfw::fw1814::kGainAuxStream34InLo,
+                macfw::fw1814::kGainAuxStream12InLo,
+            }};
+            const WriteResult result =
+                writeRegister(addresses[source], desired);
+            if (result != WriteResult::Ok) {
+                replyWriteError(result);
+                return;
+            }
+            gainAuxStreamIn_[source] = desired;
+        }
+
+        reply("OK " + std::to_string(source) + " " +
+              hex32(gainAuxStreamIn_[source]) + "\n");
+    }
+
     void handleInputMonitorChannelLevel(const std::string& command) {
         const std::string getPrefix = "INPUT_MONITOR_CHANNEL_LEVEL GET ";
         const std::string setPrefix = "INPUT_MONITOR_CHANNEL_LEVEL SET ";
@@ -950,6 +1006,8 @@ private:
                   "software-return-levels=continuous-persistent "
                   "analog-output-levels=continuous-persistent "
                   "headphone-levels=continuous-persistent "
+                  "aux-software-return-sends=mute-unity-diagnostic "
+                  "aux-output-level=unity-baseline "
                   "levels=deferred midi=deferred\n");
             return;
         }
@@ -990,6 +1048,10 @@ private:
             handleHeadphoneOutputLevel(command);
             return;
         }
+        if (command.rfind("AUX_SOFTWARE_RETURN_LEVEL ", 0) == 0) {
+            handleAuxSoftwareReturnLevel(command);
+            return;
+        }
         if (command.rfind("OUTPUT ", 0) == 0) {
             handleOutput(command);
             return;
@@ -1012,6 +1074,8 @@ private:
     std::array<std::uint32_t, 2> gainAnalogOut_{{0, 0}};
     std::array<bool, 2> headphoneOutputLevelKnown_{{false, false}};
     std::array<std::uint32_t, 2> gainHeadphoneOut_{{0, 0}};
+    std::array<bool, 2> auxSoftwareReturnLevelKnown_{{false, false}};
+    std::array<std::uint32_t, 2> gainAuxStreamIn_{{0, 0}};
     std::array<bool, 4> analogInputMonitorLevelKnown_{{
         false, false, false, false,
     }};

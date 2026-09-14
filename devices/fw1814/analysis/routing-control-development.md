@@ -842,3 +842,32 @@ independent left/right values. `-inf` and `mute` use AV/C negative infinity.
 Successful `set` and compatibility `set-all` commands replace one typed saved
 entry per physical headphone output and replay behind the readiness gate.
 Reset Defaults records unity for both headphone faders.
+
+Hardware validation confirmed arbitrary independent left/right headphone
+levels on both physical connectors. The cached words matched the requested
+values, each connector remained isolated, and both asymmetric settings
+survived a launchd restart behind the readiness gate. Both headphone outputs
+were then returned to saved unity, completing the headphone-volume family.
+
+## Software-return AUX send diagnostic
+
+FFADO maps the AUX master output to `0x34`, raw Stream 1/2 and 3/4 AUX sends to
+`0x64` and `0x68`, and the four analog-input AUX sends to `0x6c` through
+`0x78`. All use the same stereo AV/C gain words already proven elsewhere.
+
+The engine now establishes a quiet, deterministic AUX baseline: AUX master is
+unity while the two software-return and four analog-input sends are muted.
+This prevents unrelated inputs from appearing when a line or headphone output
+is switched to AUX. The first AUX diagnostic exposes both logical software
+returns and applies the already proven raw stream rotation:
+
+```bash
+fw1814ctl aux-send-level get sw1/2|sw3/4
+fw1814ctl aux-send-level set-all sw1/2|sw3/4 mute|unity
+```
+
+With a physical output sourced from AUX, enabling `sw1/2` must send only
+CoreAudio Outputs 1/2 to AUX through raw `AUX_STM_34_IN`; `sw3/4` must send
+only CoreAudio Outputs 3/4 through raw `AUX_STM_12_IN`. Mute must restore the
+quiet AUX bus. These endpoint controls are intentionally nonpersistent until
+both logical mappings are confirmed on hardware.

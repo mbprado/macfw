@@ -107,6 +107,9 @@ int usage() {
            "mute|unity\n"
         << "  fw1814ctl headphone-volume set 1|2 "
            "<dB|-inf> [<right-dB|-inf>]\n"
+        << "  fw1814ctl aux-send-level get sw1/2|sw3/4\n"
+        << "  fw1814ctl aux-send-level set-all sw1/2|sw3/4 "
+           "mute|unity  # diagnostic\n"
         << "  fw1814ctl capabilities get\n"
         << "  fw1814ctl engine get\n\n"
         << "FW1814 mixer registers are write-only. The active transport "
@@ -725,6 +728,60 @@ int headphoneVolumeCommand(const std::string& action,
     return 0;
 }
 
+int auxSendLevelCommand(const std::string& action, int argc, char** argv) {
+    const bool getting = action == "get";
+    const bool settingAll = action == "set-all";
+    if ((getting && argc != 4) || (settingAll && argc != 5) ||
+        (!getting && !settingAll))
+        return usage();
+
+    const int source = indexOf(argv[3], kMixerSourceArgs.data(),
+                               kMixerSourceArgs.size());
+    if (source < 0) return usage();
+
+    int level = -1;
+    if (settingAll) {
+        const std::string value = argv[4];
+        level = value == "mute" ? 0 : value == "unity" ? 1 : -1;
+        if (level < 0) return usage();
+    }
+
+    std::string command = "AUX_SOFTWARE_RETURN_LEVEL " +
+        std::string(getting ? "GET " : "SET_ALL ") +
+        std::to_string(source);
+    if (settingAll) command += " " + std::to_string(level);
+
+    std::string payload;
+    if (!payloadFor(command, payload)) return 1;
+    std::istringstream input(payload);
+    int returnedSource = -1;
+    std::string raw;
+    std::string extra;
+    if (!(input >> returnedSource >> raw) || (input >> extra) ||
+        returnedSource != source) {
+        std::cerr << "fw1814ctl: invalid aux-send-level response: "
+                  << payload << '\n';
+        return 1;
+    }
+
+    std::uint32_t rawValue = 0;
+    if (!parseRawWord(raw, rawValue) ||
+        (rawValue != 0x00000000u && rawValue != 0x80008000u)) {
+        std::cerr << "fw1814ctl: invalid AUX software return value\n";
+        return 1;
+    }
+
+    constexpr std::array<const char*, 2> kRegisterNames{{
+        "AUX_STM_34_IN", "AUX_STM_12_IN",
+    }};
+    std::cout << kMixerSourceLabels[source] << " AUX send: "
+              << (rawValue == 0x80008000u ? "mute" : "unity (0 dB)")
+              << '\n'
+              << kRegisterNames[source] << ": " << raw
+              << " (write-only diagnostic cache)\n";
+    return 0;
+}
+
 int inputMixerGet() {
     std::string payload;
     if (!payloadFor("INPUT_MIXER GET", payload)) return 1;
@@ -1316,6 +1373,8 @@ int main(int argc, char** argv) {
             : usage();
     if (control == "headphone-volume")
         return headphoneVolumeCommand(action, argc, argv);
+    if (control == "aux-send-level")
+        return auxSendLevelCommand(action, argc, argv);
     if (control == "capabilities")
         return action == "get" && argc == 3 ? capabilitiesGet() : usage();
     if (control == "engine")
