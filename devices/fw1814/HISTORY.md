@@ -50,6 +50,14 @@ software playback and direct monitoring, while the other pair remained
 unchanged. The output-volume family now exposes continuous independent
 left/right attenuation, typed persistence and unity Reset Defaults using the
 same proven AV/C gain encoding as the input and software-return faders.
+Continuous asymmetric settings on both pairs were audibly correct and
+survived a launchd restart before both outputs were returned to saved unity.
+
+The next bounded diagnostic covers the two physical headphone faders. FFADO's
+documented HP 1/2 and HP 3/4 volume words at offsets `0x38` and `0x3c` now
+receive a generation-checked unity startup baseline and expose nonpersistent
+mute/unity controls as Headphone Outputs 1 and 2. Continuous headphone values
+remain deferred until both connector identities are proven on hardware.
 
 The documented `GAIN_ANA_12_IN` stereo word was then tested at its two safest
 endpoints. `0x80008000` completely muted the Analog Inputs 1/2 contribution to

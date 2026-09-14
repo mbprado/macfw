@@ -102,6 +102,9 @@ int usage() {
         << "  fw1814ctl headphone-state get\n"
         << "  fw1814ctl headphone-source get 1|2\n"
         << "  fw1814ctl headphone-source set 1|2 mixer1/2|mixer3/4\n"
+        << "  fw1814ctl headphone-volume get 1|2\n"
+        << "  fw1814ctl headphone-volume set-all 1|2 "
+           "mute|unity  # diagnostic\n"
         << "  fw1814ctl capabilities get\n"
         << "  fw1814ctl engine get\n\n"
         << "FW1814 mixer registers are write-only. The active transport "
@@ -631,6 +634,62 @@ int outputVolumeCommand(const std::string& action, int argc, char** argv) {
     if (setting || settingAll)
         persistSuccessfulSet(
             argv[0], "output-volume:" + std::string(argv[3]), argc, argv);
+    return 0;
+}
+
+int headphoneVolumeCommand(const std::string& action,
+                           int argc,
+                           char** argv) {
+    const bool getting = action == "get";
+    const bool settingAll = action == "set-all";
+    if ((getting && argc != 4) || (settingAll && argc != 5) ||
+        (!getting && !settingAll))
+        return usage();
+
+    const int output = indexOf(argv[3], kHeadphoneOutputArgs.data(),
+                               kHeadphoneOutputArgs.size());
+    if (output < 0) return usage();
+
+    int level = -1;
+    if (settingAll) {
+        const std::string value = argv[4];
+        level = value == "mute" ? 0 : value == "unity" ? 1 : -1;
+        if (level < 0) return usage();
+    }
+
+    std::string command = "HEADPHONE_OUTPUT_LEVEL " +
+        std::string(getting ? "GET " : "SET_ALL ") +
+        std::to_string(output);
+    if (settingAll) command += " " + std::to_string(level);
+
+    std::string payload;
+    if (!payloadFor(command, payload)) return 1;
+    std::istringstream input(payload);
+    int returnedOutput = -1;
+    std::string raw;
+    std::string extra;
+    if (!(input >> returnedOutput >> raw) || (input >> extra) ||
+        returnedOutput != output) {
+        std::cerr << "fw1814ctl: invalid headphone-volume response: "
+                  << payload << '\n';
+        return 1;
+    }
+
+    std::uint32_t rawValue = 0;
+    if (!parseRawWord(raw, rawValue) ||
+        (rawValue != 0x00000000u && rawValue != 0x80008000u)) {
+        std::cerr << "fw1814ctl: invalid headphone output gain value\n";
+        return 1;
+    }
+
+    constexpr std::array<const char*, 2> kRegisterNames{{
+        "GAIN_HP_1_OUT", "GAIN_HP_2_OUT",
+    }};
+    std::cout << kHeadphoneOutputLabels[output] << " volume: "
+              << (rawValue == 0x80008000u ? "mute" : "unity (0 dB)")
+              << '\n'
+              << kRegisterNames[output] << ": " << raw
+              << " (write-only diagnostic cache)\n";
     return 0;
 }
 
@@ -1223,6 +1282,8 @@ int main(int argc, char** argv) {
         return action == "get" || action == "set"
             ? headphoneSourceCommand(action, argc, argv)
             : usage();
+    if (control == "headphone-volume")
+        return headphoneVolumeCommand(action, argc, argv);
     if (control == "capabilities")
         return action == "get" && argc == 3 ? capabilitiesGet() : usage();
     if (control == "engine")

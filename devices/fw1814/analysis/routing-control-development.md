@@ -800,3 +800,33 @@ channels and two values set them independently; `-inf` or `mute` selects AV/C
 negative infinity. Successful `set` and compatibility `set-all` commands
 replace the pair's typed saved state and replay behind the readiness gate.
 Reset Defaults records unity for both physical output pairs.
+
+Hardware testing confirmed the continuous production control on both physical
+output pairs, including independent left/right attenuation and isolation from
+the other pair. The asymmetric settings survived a launchd restart and were
+already present in the first successful readiness-gated reads. Both pairs were
+then returned to the saved unity baseline. This completes the analog-output
+volume family.
+
+## Headphone output volume diagnostic
+
+The [FFADO special mixer register map](https://github.com/llekn/ffado/blob/8ba6d6415f48ccb740cf4685299ef415286f4a6e/src/bebob/maudio/special_mixer.cpp)
+identifies the two headphone stereo output-volume words as HP 1/2 at offset
+`0x38` and HP 3/4 at `0x3c`. macfw exposes these physical stereo connectors as
+Headphone Output 1 and Headphone Output 2, matching the existing source
+selector API.
+
+The engine now writes unity to both words during the generation-checked mixer
+startup sequence. A nonpersistent endpoint diagnostic is available for both
+headphone outputs in one build:
+
+```bash
+fw1814ctl headphone-volume get 1|2
+fw1814ctl headphone-volume set-all 1|2 mute|unity
+```
+
+Mute must produce `0x80008000` and silence only the selected physical
+headphone connector; unity must restore clean output and `0x00000000`. The
+other headphone output and analog line outputs must remain unchanged.
+Continuous values and persistence remain deferred until both identities and
+endpoint behavior are confirmed on hardware.

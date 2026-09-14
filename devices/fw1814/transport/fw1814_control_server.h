@@ -44,6 +44,9 @@ public:
         analogOutputLevelKnown_.fill(true);
         gainAnalogOut_.fill(macfw::fw1814::stereoMonitorLevelWord(
             macfw::fw1814::kMonitorLevelUnity));
+        headphoneOutputLevelKnown_.fill(true);
+        gainHeadphoneOut_.fill(macfw::fw1814::stereoMonitorLevelWord(
+            macfw::fw1814::kMonitorLevelUnity));
         analogInputMonitorLevelKnown_.fill(true);
         gainAnalogIn_.fill(macfw::fw1814::stereoMonitorLevelWord(
             macfw::fw1814::kMonitorLevelUnity));
@@ -97,6 +100,8 @@ public:
         gainStreamIn_.fill(0);
         analogOutputLevelKnown_.fill(false);
         gainAnalogOut_.fill(0);
+        headphoneOutputLevelKnown_.fill(false);
+        gainHeadphoneOut_.fill(0);
         analogInputMonitorLevelKnown_.fill(false);
         gainAnalogIn_.fill(0);
         analogInputPanKnown_.fill(false);
@@ -695,6 +700,54 @@ private:
               hex32(gainAnalogOut_[pair]) + "\n");
     }
 
+    void handleHeadphoneOutputLevel(const std::string& command) {
+        const std::string getPrefix = "HEADPHONE_OUTPUT_LEVEL GET ";
+        const std::string setAllPrefix = "HEADPHONE_OUTPUT_LEVEL SET_ALL ";
+        const bool getting = command.rfind(getPrefix, 0) == 0;
+        const bool settingAll = command.rfind(setAllPrefix, 0) == 0;
+        if (!getting && !settingAll) {
+            reply("ERR unknown-command\n");
+            return;
+        }
+
+        std::istringstream input(command.substr(
+            getting ? getPrefix.size() : setAllPrefix.size()));
+        unsigned output = 0;
+        unsigned level = 0;
+        std::string extra;
+        if (!(input >> output) || (settingAll && !(input >> level)) ||
+            (input >> extra) || output > 1 || level > 1) {
+            reply("ERR invalid-headphone-output-level\n");
+            return;
+        }
+        if (!headphoneOutputLevelKnown_[output]) {
+            reply("ERR headphone-output-level-state-uninitialized\n");
+            return;
+        }
+
+        if (settingAll) {
+            const std::uint16_t channelLevel = level == 0
+                ? macfw::fw1814::kMonitorLevelMute
+                : macfw::fw1814::kMonitorLevelUnity;
+            const std::uint32_t desired =
+                macfw::fw1814::stereoMonitorLevelWord(channelLevel);
+            const std::array<UInt32, 2> addresses{{
+                macfw::fw1814::kGainHeadphone1OutLo,
+                macfw::fw1814::kGainHeadphone2OutLo,
+            }};
+            const WriteResult result =
+                writeRegister(addresses[output], desired);
+            if (result != WriteResult::Ok) {
+                replyWriteError(result);
+                return;
+            }
+            gainHeadphoneOut_[output] = desired;
+        }
+
+        reply("OK " + std::to_string(output) + " " +
+              hex32(gainHeadphoneOut_[output]) + "\n");
+    }
+
     void handleInputMonitorChannelLevel(const std::string& command) {
         const std::string getPrefix = "INPUT_MONITOR_CHANNEL_LEVEL GET ";
         const std::string setPrefix = "INPUT_MONITOR_CHANNEL_LEVEL SET ";
@@ -870,7 +923,8 @@ private:
                   "analog-input-pan=all-analog-continuous-persistent "
                   "software-return-levels=continuous-persistent "
                   "analog-output-levels=continuous-persistent "
-                  "headphone-levels=deferred levels=deferred midi=deferred\n");
+                  "headphone-levels=mute-unity-diagnostic "
+                  "levels=deferred midi=deferred\n");
             return;
         }
         if (command == "ENGINE GET") {
@@ -906,6 +960,10 @@ private:
             handleAnalogOutputLevel(command);
             return;
         }
+        if (command.rfind("HEADPHONE_OUTPUT_LEVEL ", 0) == 0) {
+            handleHeadphoneOutputLevel(command);
+            return;
+        }
         if (command.rfind("OUTPUT ", 0) == 0) {
             handleOutput(command);
             return;
@@ -926,6 +984,8 @@ private:
     std::array<std::uint32_t, 2> gainStreamIn_{{0, 0}};
     std::array<bool, 2> analogOutputLevelKnown_{{false, false}};
     std::array<std::uint32_t, 2> gainAnalogOut_{{0, 0}};
+    std::array<bool, 2> headphoneOutputLevelKnown_{{false, false}};
+    std::array<std::uint32_t, 2> gainHeadphoneOut_{{0, 0}};
     std::array<bool, 4> analogInputMonitorLevelKnown_{{
         false, false, false, false,
     }};
