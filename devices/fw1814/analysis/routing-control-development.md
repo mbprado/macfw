@@ -919,3 +919,24 @@ encoding, they now accept continuous independent left/right attenuation and
 participate in typed saved state, readiness-gated replay and Reset Defaults.
 Reset Defaults keeps all four sends muted to preserve the deterministic quiet
 AUX bus.
+
+Hardware validation then exercised distinct asymmetric continuous values on
+all four analog pairs. The reported register words matched the requested
+levels, and every typed value survived a readiness-gated launchd restart.
+This completes the analog-input AUX-send family.
+
+## AUX output-volume diagnostic
+
+The AUX bus master uses the documented `GAIN_AUX_OUT` register at offset
+`0x34`. Its existing unity startup write is now represented by an authoritative
+cache and exposed first through bounded endpoints:
+
+```bash
+fw1814ctl aux-output-volume get
+fw1814ctl aux-output-volume set-all mute|unity
+```
+
+With an analog output sourced from AUX and one known send enabled, mute must
+silence the complete AUX mix and produce `0x80008000`; unity must restore it
+and produce `0x00000000`. This control remains nonpersistent until its audible
+master-bus behavior is confirmed on hardware.

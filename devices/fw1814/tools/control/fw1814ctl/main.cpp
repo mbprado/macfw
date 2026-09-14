@@ -115,6 +115,9 @@ int usage() {
         << "  fw1814ctl aux-send-level set "
            "sw1/2|sw3/4|analog1/2|analog3/4|analog5/6|analog7/8 "
            "<dB|-inf> [<right-dB|-inf>]\n"
+        << "  fw1814ctl aux-output-volume get\n"
+        << "  fw1814ctl aux-output-volume set-all mute|unity"
+           "  # diagnostic\n"
         << "  fw1814ctl capabilities get\n"
         << "  fw1814ctl engine get\n\n"
         << "FW1814 mixer registers are write-only. The active transport "
@@ -831,6 +834,63 @@ int auxSendLevelCommand(const std::string& action, int argc, char** argv) {
     return 0;
 }
 
+int auxOutputVolumeCommand(const std::string& action,
+                           int argc,
+                           char** argv) {
+    const bool getting = action == "get";
+    const bool settingAll = action == "set-all";
+    if ((getting && argc != 3) || (settingAll && argc != 4) ||
+        (!getting && !settingAll))
+        return usage();
+
+    int level = -1;
+    if (settingAll) {
+        const std::string value = argv[3];
+        level = value == "mute" ? 0 : value == "unity" ? 1 : -1;
+        if (level < 0) return usage();
+    }
+
+    std::string command = "AUX_OUTPUT_LEVEL " +
+        std::string(getting ? "GET" : "SET_ALL " + std::to_string(level));
+    std::string payload;
+    if (!payloadFor(command, payload)) return 1;
+
+    std::istringstream input(payload);
+    int returnedLeft = 0;
+    int returnedRight = 0;
+    std::string raw;
+    std::string extra;
+    if (!(input >> returnedLeft >> returnedRight >> raw) ||
+        (input >> extra) || returnedLeft < -32768 || returnedLeft > 0 ||
+        returnedRight < -32768 || returnedRight > 0 ||
+        returnedLeft % 0x100 != 0 || returnedRight % 0x100 != 0) {
+        std::cerr << "fw1814ctl: invalid aux-output-volume response: "
+                  << payload << '\n';
+        return 1;
+    }
+
+    std::uint32_t rawValue = 0;
+    if (!parseRawWord(raw, rawValue) ||
+        macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(rawValue, 0)) !=
+            returnedLeft ||
+        macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(rawValue, 1)) !=
+            returnedRight) {
+        std::cerr << "fw1814ctl: invalid AUX output gain value\n";
+        return 1;
+    }
+
+    std::cout << "AUX bus output volume:\n"
+              << "  left:  " << rawToDb(returnedLeft)
+              << " (raw " << returnedLeft << ")\n"
+              << "  right: " << rawToDb(returnedRight)
+              << " (raw " << returnedRight << ")\n"
+              << "GAIN_AUX_OUT: " << raw
+              << " (write-only diagnostic cache)\n";
+    return 0;
+}
+
 int inputMixerGet() {
     std::string payload;
     if (!payloadFor("INPUT_MIXER GET", payload)) return 1;
@@ -1424,6 +1484,8 @@ int main(int argc, char** argv) {
         return headphoneVolumeCommand(action, argc, argv);
     if (control == "aux-send-level")
         return auxSendLevelCommand(action, argc, argv);
+    if (control == "aux-output-volume")
+        return auxOutputVolumeCommand(action, argc, argv);
     if (control == "capabilities")
         return action == "get" && argc == 3 ? capabilitiesGet() : usage();
     if (control == "engine")
