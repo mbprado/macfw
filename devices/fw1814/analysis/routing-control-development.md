@@ -825,8 +825,20 @@ fw1814ctl headphone-volume get 1|2
 fw1814ctl headphone-volume set-all 1|2 mute|unity
 ```
 
-Mute must produce `0x80008000` and silence only the selected physical
-headphone connector; unity must restore clean output and `0x00000000`. The
-other headphone output and analog line outputs must remain unchanged.
-Continuous values and persistence remain deferred until both identities and
-endpoint behavior are confirmed on hardware.
+Mute produced `0x80008000` and silenced only the selected physical headphone
+connector; unity restored clean output and `0x00000000`. Both headphone
+connectors passed independently while the other headphone and analog line
+outputs remained unchanged, confirming both register identities.
+
+The headphone family is now promoted to the production whole-dB interface:
+
+```bash
+fw1814ctl headphone-volume get 1|2
+fw1814ctl headphone-volume set 1|2 <dB|-inf> [<right-dB|-inf>]
+```
+
+The range is -128 through 0 dB in whole-dB steps, with one linked value or
+independent left/right values. `-inf` and `mute` use AV/C negative infinity.
+Successful `set` and compatibility `set-all` commands replace one typed saved
+entry per physical headphone output and replay behind the readiness gate.
+Reset Defaults records unity for both headphone faders.

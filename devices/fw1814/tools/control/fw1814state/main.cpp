@@ -119,6 +119,22 @@ bool validStoredCommand(const Entry& entry) {
         return entry.key == "output-volume:" + entry.arguments[2];
 
     if (entry.arguments.size() == 4 &&
+        entry.arguments[0] == "headphone-volume" &&
+        entry.arguments[1] == "set-all" &&
+        (entry.arguments[2] == "1" || entry.arguments[2] == "2") &&
+        (entry.arguments[3] == "mute" ||
+         entry.arguments[3] == "unity"))
+        return entry.key == "headphone-volume:" + entry.arguments[2];
+
+    if ((entry.arguments.size() == 4 || entry.arguments.size() == 5) &&
+        entry.arguments[0] == "headphone-volume" &&
+        entry.arguments[1] == "set" &&
+        (entry.arguments[2] == "1" || entry.arguments[2] == "2") &&
+        validDb(entry.arguments[3]) &&
+        (entry.arguments.size() == 4 || validDb(entry.arguments[4])))
+        return entry.key == "headphone-volume:" + entry.arguments[2];
+
+    if (entry.arguments.size() == 4 &&
         entry.arguments[0] == "output-source" &&
         entry.arguments[1] == "set" &&
         (entry.arguments[2] == "1/2" || entry.arguments[2] == "3/4") &&
@@ -326,7 +342,7 @@ int restoreEntries(const char* argv0, const std::vector<Entry>& entries) {
 
 std::vector<Entry> defaultState() {
     std::vector<Entry> entries;
-    entries.reserve(32);
+    entries.reserve(34);
     for (const char* sourceValue : kMixerSources) {
         for (const char* busValue : kMixerBuses) {
             const std::string source(sourceValue);
@@ -384,6 +400,13 @@ std::vector<Entry> defaultState() {
             "headphone-source", "set", output, "mixer1/2",
         };
         entries.push_back(std::move(entry));
+
+        Entry volume;
+        volume.key = "headphone-volume:" + output;
+        volume.arguments = {
+            "headphone-volume", "set-all", output, "unity",
+        };
+        entries.push_back(std::move(volume));
     }
     for (std::size_t index = 0; index < kInputPairs.size(); ++index) {
         const std::string pair(kInputPairs[index]);

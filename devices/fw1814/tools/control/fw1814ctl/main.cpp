@@ -104,7 +104,9 @@ int usage() {
         << "  fw1814ctl headphone-source set 1|2 mixer1/2|mixer3/4\n"
         << "  fw1814ctl headphone-volume get 1|2\n"
         << "  fw1814ctl headphone-volume set-all 1|2 "
-           "mute|unity  # diagnostic\n"
+           "mute|unity\n"
+        << "  fw1814ctl headphone-volume set 1|2 "
+           "<dB|-inf> [<right-dB|-inf>]\n"
         << "  fw1814ctl capabilities get\n"
         << "  fw1814ctl engine get\n\n"
         << "FW1814 mixer registers are write-only. The active transport "
@@ -642,8 +644,10 @@ int headphoneVolumeCommand(const std::string& action,
                            char** argv) {
     const bool getting = action == "get";
     const bool settingAll = action == "set-all";
+    const bool setting = action == "set";
     if ((getting && argc != 4) || (settingAll && argc != 5) ||
-        (!getting && !settingAll))
+        (setting && argc != 5 && argc != 6) ||
+        (!getting && !settingAll && !setting))
         return usage();
 
     const int output = indexOf(argv[3], kHeadphoneOutputArgs.data(),
@@ -651,25 +655,43 @@ int headphoneVolumeCommand(const std::string& action,
     if (output < 0) return usage();
 
     int level = -1;
+    int leftRaw = 0;
+    int rightRaw = 0;
     if (settingAll) {
         const std::string value = argv[4];
         level = value == "mute" ? 0 : value == "unity" ? 1 : -1;
         if (level < 0) return usage();
+    } else if (setting) {
+        if (!dbToRaw(argv[4], leftRaw)) return usage();
+        if (argc == 6) {
+            if (!dbToRaw(argv[5], rightRaw)) return usage();
+        } else {
+            rightRaw = leftRaw;
+        }
     }
 
     std::string command = "HEADPHONE_OUTPUT_LEVEL " +
-        std::string(getting ? "GET " : "SET_ALL ") +
+        std::string(getting ? "GET " : settingAll ? "SET_ALL " : "SET ") +
         std::to_string(output);
-    if (settingAll) command += " " + std::to_string(level);
+    if (settingAll)
+        command += " " + std::to_string(level);
+    else if (setting)
+        command += " " + std::to_string(leftRaw) + " " +
+                   std::to_string(rightRaw);
 
     std::string payload;
     if (!payloadFor(command, payload)) return 1;
     std::istringstream input(payload);
     int returnedOutput = -1;
+    int returnedLeft = 0;
+    int returnedRight = 0;
     std::string raw;
     std::string extra;
-    if (!(input >> returnedOutput >> raw) || (input >> extra) ||
-        returnedOutput != output) {
+    if (!(input >> returnedOutput >> returnedLeft >> returnedRight >> raw) ||
+        (input >> extra) || returnedOutput != output ||
+        returnedLeft < -32768 || returnedLeft > 0 ||
+        returnedRight < -32768 || returnedRight > 0 ||
+        returnedLeft % 0x100 != 0 || returnedRight % 0x100 != 0) {
         std::cerr << "fw1814ctl: invalid headphone-volume response: "
                   << payload << '\n';
         return 1;
@@ -677,7 +699,12 @@ int headphoneVolumeCommand(const std::string& action,
 
     std::uint32_t rawValue = 0;
     if (!parseRawWord(raw, rawValue) ||
-        (rawValue != 0x00000000u && rawValue != 0x80008000u)) {
+        macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(rawValue, 0)) !=
+            returnedLeft ||
+        macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(rawValue, 1)) !=
+            returnedRight) {
         std::cerr << "fw1814ctl: invalid headphone output gain value\n";
         return 1;
     }
@@ -685,11 +712,16 @@ int headphoneVolumeCommand(const std::string& action,
     constexpr std::array<const char*, 2> kRegisterNames{{
         "GAIN_HP_1_OUT", "GAIN_HP_2_OUT",
     }};
-    std::cout << kHeadphoneOutputLabels[output] << " volume: "
-              << (rawValue == 0x80008000u ? "mute" : "unity (0 dB)")
-              << '\n'
+    std::cout << kHeadphoneOutputLabels[output] << " volume:\n"
+              << "  left:  " << rawToDb(returnedLeft)
+              << " (raw " << returnedLeft << ")\n"
+              << "  right: " << rawToDb(returnedRight)
+              << " (raw " << returnedRight << ")\n"
               << kRegisterNames[output] << ": " << raw
-              << " (write-only diagnostic cache)\n";
+              << " (write-only cache)\n";
+    if (setting || settingAll)
+        persistSuccessfulSet(
+            argv[0], "headphone-volume:" + std::string(argv[3]), argc, argv);
     return 0;
 }
 
