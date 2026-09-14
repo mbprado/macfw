@@ -97,6 +97,9 @@ The active transport owns `/tmp/macfw-fw1814-control.sock`; clients never open F
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-source get 3/4
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-source set 3/4 aux
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-source set 3/4 mixer
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-volume get 1/2
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-volume set 1/2 -6 -30
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" output-volume set 1/2 0
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-state get
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-source get 2
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-source set 2 mixer3/4

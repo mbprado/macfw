@@ -44,10 +44,12 @@ gate before a final unity write restored `0x00000000`.
 
 Work then moved to physical analog-output volume. The documented
 `GAIN_ANA_12_OUT` and `GAIN_ANA_34_OUT` registers at offsets `0x08` and `0x0c`
-now receive a generation-checked unity startup baseline and have a
-nonpersistent mute/unity endpoint diagnostic. This is intended to establish
-that each physical output fader affects both software playback and direct
-monitoring before continuous values are exposed.
+received a generation-checked unity startup baseline. Mute and unity were
+validated on both output pairs: each selected physical pair affected both
+software playback and direct monitoring, while the other pair remained
+unchanged. The output-volume family now exposes continuous independent
+left/right attenuation, typed persistence and unity Reset Defaults using the
+same proven AV/C gain encoding as the input and software-return faders.
 
 The documented `GAIN_ANA_12_IN` stereo word was then tested at its two safest
 endpoints. `0x80008000` completely muted the Analog Inputs 1/2 contribution to

@@ -96,7 +96,9 @@ int usage() {
         << "  fw1814ctl output-source set 1/2|3/4 mixer|aux\n"
         << "  fw1814ctl output-volume get 1/2|3/4\n"
         << "  fw1814ctl output-volume set-all 1/2|3/4 "
-           "mute|unity  # diagnostic\n"
+           "mute|unity\n"
+        << "  fw1814ctl output-volume set 1/2|3/4 "
+           "<dB|-inf> [<right-dB|-inf>]\n"
         << "  fw1814ctl headphone-state get\n"
         << "  fw1814ctl headphone-source get 1|2\n"
         << "  fw1814ctl headphone-source set 1|2 mixer1/2|mixer3/4\n"
@@ -106,7 +108,7 @@ int usage() {
            "establishes a known startup baseline and maintains the "
            "authoritative routing cache. Successful changes to validated "
            "controls are saved and restored after engine startup.\n"
-        << "Monitor-level range: -128..0 dB in 1 dB steps; -inf uses "
+        << "Level range: -128..0 dB in 1 dB steps; -inf uses "
            "AV/C negative infinity.\n";
     return 64;
 }
@@ -552,8 +554,10 @@ int softwareReturnLevelCommand(const std::string& action,
 int outputVolumeCommand(const std::string& action, int argc, char** argv) {
     const bool getting = action == "get";
     const bool settingAll = action == "set-all";
+    const bool setting = action == "set";
     if ((getting && argc != 4) || (settingAll && argc != 5) ||
-        (!getting && !settingAll))
+        (setting && argc != 5 && argc != 6) ||
+        (!getting && !settingAll && !setting))
         return usage();
 
     const int pair = indexOf(argv[3], kOutputPairArgs.data(),
@@ -561,25 +565,42 @@ int outputVolumeCommand(const std::string& action, int argc, char** argv) {
     if (pair < 0) return usage();
 
     int level = -1;
+    int leftRaw = 0;
+    int rightRaw = 0;
     if (settingAll) {
         const std::string value = argv[4];
         level = value == "mute" ? 0 : value == "unity" ? 1 : -1;
         if (level < 0) return usage();
+    } else if (setting) {
+        if (!dbToRaw(argv[4], leftRaw)) return usage();
+        if (argc == 6) {
+            if (!dbToRaw(argv[5], rightRaw)) return usage();
+        } else {
+            rightRaw = leftRaw;
+        }
     }
 
     std::string command = "ANALOG_OUTPUT_LEVEL " +
-        std::string(getting ? "GET " : "SET_ALL ") +
+        std::string(getting ? "GET " : settingAll ? "SET_ALL " : "SET ") +
         std::to_string(pair);
-    if (settingAll) command += " " + std::to_string(level);
+    if (settingAll)
+        command += " " + std::to_string(level);
+    else if (setting)
+        command += " " + std::to_string(leftRaw) + " " +
+                   std::to_string(rightRaw);
 
     std::string payload;
     if (!payloadFor(command, payload)) return 1;
     std::istringstream input(payload);
     int returnedPair = -1;
+    int returnedLeft = 0;
+    int returnedRight = 0;
     std::string raw;
     std::string extra;
-    if (!(input >> returnedPair >> raw) || (input >> extra) ||
-        returnedPair != pair) {
+    if (!(input >> returnedPair >> returnedLeft >> returnedRight >> raw) ||
+        (input >> extra) || returnedPair != pair || returnedLeft < -32768 ||
+        returnedLeft > 0 || returnedRight < -32768 || returnedRight > 0 ||
+        returnedLeft % 0x100 != 0 || returnedRight % 0x100 != 0) {
         std::cerr << "fw1814ctl: invalid output-volume response: "
                   << payload << '\n';
         return 1;
@@ -587,7 +608,12 @@ int outputVolumeCommand(const std::string& action, int argc, char** argv) {
 
     std::uint32_t rawValue = 0;
     if (!parseRawWord(raw, rawValue) ||
-        (rawValue != 0x00000000u && rawValue != 0x80008000u)) {
+        macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(rawValue, 0)) !=
+            returnedLeft ||
+        macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(rawValue, 1)) !=
+            returnedRight) {
         std::cerr << "fw1814ctl: invalid analog output gain value\n";
         return 1;
     }
@@ -595,11 +621,16 @@ int outputVolumeCommand(const std::string& action, int argc, char** argv) {
     constexpr std::array<const char*, 2> kRegisterNames{{
         "GAIN_ANA_12_OUT", "GAIN_ANA_34_OUT",
     }};
-    std::cout << kOutputPairLabels[pair] << " volume: "
-              << (rawValue == 0x80008000u ? "mute" : "unity (0 dB)")
-              << '\n'
+    std::cout << kOutputPairLabels[pair] << " volume:\n"
+              << "  left:  " << rawToDb(returnedLeft)
+              << " (raw " << returnedLeft << ")\n"
+              << "  right: " << rawToDb(returnedRight)
+              << " (raw " << returnedRight << ")\n"
               << kRegisterNames[pair] << ": " << raw
-              << " (write-only diagnostic cache)\n";
+              << " (write-only cache)\n";
+    if (setting || settingAll)
+        persistSuccessfulSet(
+            argv[0], "output-volume:" + std::string(argv[3]), argc, argv);
     return 0;
 }
 

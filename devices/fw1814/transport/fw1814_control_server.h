@@ -627,20 +627,30 @@ private:
     void handleAnalogOutputLevel(const std::string& command) {
         const std::string getPrefix = "ANALOG_OUTPUT_LEVEL GET ";
         const std::string setAllPrefix = "ANALOG_OUTPUT_LEVEL SET_ALL ";
+        const std::string setPrefix = "ANALOG_OUTPUT_LEVEL SET ";
         const bool getting = command.rfind(getPrefix, 0) == 0;
         const bool settingAll = command.rfind(setAllPrefix, 0) == 0;
-        if (!getting && !settingAll) {
+        const bool setting = command.rfind(setPrefix, 0) == 0;
+        if (!getting && !settingAll && !setting) {
             reply("ERR unknown-command\n");
             return;
         }
 
         std::istringstream input(command.substr(
-            getting ? getPrefix.size() : setAllPrefix.size()));
+            getting ? getPrefix.size()
+                    : settingAll ? setAllPrefix.size() : setPrefix.size()));
         unsigned pair = 0;
         unsigned level = 0;
+        int leftRaw = 0;
+        int rightRaw = 0;
         std::string extra;
         if (!(input >> pair) || (settingAll && !(input >> level)) ||
-            (input >> extra) || pair > 1 || level > 1) {
+            (setting && !(input >> leftRaw >> rightRaw)) ||
+            (input >> extra) || pair > 1 || level > 1 ||
+            (setting &&
+             (leftRaw < -32768 || leftRaw > 0 || rightRaw < -32768 ||
+              rightRaw > 0 || leftRaw % 0x100 != 0 ||
+              rightRaw % 0x100 != 0))) {
             reply("ERR invalid-analog-output-level\n");
             return;
         }
@@ -649,12 +659,20 @@ private:
             return;
         }
 
-        if (settingAll) {
-            const std::uint16_t channelLevel = level == 0
-                ? macfw::fw1814::kMonitorLevelMute
-                : macfw::fw1814::kMonitorLevelUnity;
-            const std::uint32_t desired =
-                macfw::fw1814::stereoMonitorLevelWord(channelLevel);
+        if (settingAll || setting) {
+            std::uint32_t desired = 0;
+            if (settingAll) {
+                const std::uint16_t channelLevel = level == 0
+                    ? macfw::fw1814::kMonitorLevelMute
+                    : macfw::fw1814::kMonitorLevelUnity;
+                desired =
+                    macfw::fw1814::stereoMonitorLevelWord(channelLevel);
+            } else {
+                desired = macfw::fw1814::setMonitorLevelChannel(
+                    desired, 0, static_cast<std::uint16_t>(leftRaw));
+                desired = macfw::fw1814::setMonitorLevelChannel(
+                    desired, 1, static_cast<std::uint16_t>(rightRaw));
+            }
             const std::array<UInt32, 2> addresses{{
                 macfw::fw1814::kGainAnalog12OutLo,
                 macfw::fw1814::kGainAnalog34OutLo,
@@ -667,7 +685,13 @@ private:
             gainAnalogOut_[pair] = desired;
         }
 
+        const int cachedLeft = macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(gainAnalogOut_[pair], 0));
+        const int cachedRight = macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(gainAnalogOut_[pair], 1));
         reply("OK " + std::to_string(pair) + " " +
+              std::to_string(cachedLeft) + " " +
+              std::to_string(cachedRight) + " " +
               hex32(gainAnalogOut_[pair]) + "\n");
     }
 
@@ -845,7 +869,7 @@ private:
                   "analog-input-channel-attenuation=all-analog-minus20db-diagnostic "
                   "analog-input-pan=all-analog-continuous-persistent "
                   "software-return-levels=continuous-persistent "
-                  "analog-output-levels=mute-unity-diagnostic "
+                  "analog-output-levels=continuous-persistent "
                   "headphone-levels=deferred levels=deferred midi=deferred\n");
             return;
         }

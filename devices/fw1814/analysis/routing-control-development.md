@@ -782,8 +782,21 @@ fw1814ctl output-volume get 1/2|3/4
 fw1814ctl output-volume set-all 1/2|3/4 mute|unity
 ```
 
-Mute must produce `0x80008000`, silence every signal reaching only the
-selected physical output pair, and leave the other pair unchanged. Unity must
-restore clean output and `0x00000000`. Continuous and persistent output faders
-remain deferred until both physical pair identities and endpoint behavior are
-confirmed on hardware.
+Mute produced `0x80008000` and silenced every signal reaching only the selected
+physical output pair, including host playback and direct input monitoring.
+Unity restored clean output and `0x00000000`; the other pair remained
+unchanged. Both Outputs 1/2 and Outputs 3/4 passed the same test, confirming the
+physical register identities and endpoint behavior.
+
+The validated family is now promoted to the production whole-dB interface:
+
+```bash
+fw1814ctl output-volume get 1/2|3/4
+fw1814ctl output-volume set 1/2|3/4 <dB|-inf> [<right-dB|-inf>]
+```
+
+The accepted range is -128 through 0 dB in whole-dB steps. One value links the
+channels and two values set them independently; `-inf` or `mute` selects AV/C
+negative infinity. Successful `set` and compatibility `set-all` commands
+replace the pair's typed saved state and replay behind the readiness gate.
+Reset Defaults records unity for both physical output pairs.
