@@ -84,9 +84,11 @@ Distinct asymmetric values on all four analog pairs then produced their exact
 expected raw words and survived the readiness gate after a launchd restart,
 completing the analog-input AUX-send family.
 
-The documented `GAIN_AUX_OUT` AUX master is now exposed as a nonpersistent
-mute/unity diagnostic. It retains the established unity startup baseline while
-hardware testing confirms that it controls the complete AUX mix.
+The documented `GAIN_AUX_OUT` AUX master was then exposed as a mute/unity
+diagnostic. Hardware testing confirmed that mute silenced the complete isolated
+AUX mix and unity restored it. The AUX master now supports continuous
+independent left/right attenuation, typed persistence and readiness-gated
+replay, with unity retained as its Reset Default.
 
 The documented `GAIN_ANA_12_IN` stereo word was then tested at its two safest
 endpoints. `0x80008000` completely muted the Analog Inputs 1/2 contribution to

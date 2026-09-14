@@ -160,6 +160,19 @@ bool validStoredCommand(const Entry& entry) {
         (entry.arguments.size() == 4 || validDb(entry.arguments[4])))
         return entry.key == "aux-send-level:" + entry.arguments[2];
 
+    if (entry.arguments.size() == 3 &&
+        entry.arguments[0] == "aux-output-volume" &&
+        entry.arguments[1] == "set-all" &&
+        (entry.arguments[2] == "mute" ||
+         entry.arguments[2] == "unity"))
+        return entry.key == "aux-output-volume";
+
+    if ((entry.arguments.size() == 3 || entry.arguments.size() == 4) &&
+        entry.arguments[0] == "aux-output-volume" &&
+        entry.arguments[1] == "set" && validDb(entry.arguments[2]) &&
+        (entry.arguments.size() == 3 || validDb(entry.arguments[3])))
+        return entry.key == "aux-output-volume";
+
     if (entry.arguments.size() == 4 &&
         entry.arguments[0] == "output-source" &&
         entry.arguments[1] == "set" &&
@@ -368,7 +381,7 @@ int restoreEntries(const char* argv0, const std::vector<Entry>& entries) {
 
 std::vector<Entry> defaultState() {
     std::vector<Entry> entries;
-    entries.reserve(40);
+    entries.reserve(41);
     for (const char* sourceValue : kMixerSources) {
         for (const char* busValue : kMixerBuses) {
             const std::string source(sourceValue);
@@ -401,6 +414,12 @@ std::vector<Entry> defaultState() {
         };
         entries.push_back(std::move(auxSend));
     }
+    Entry auxOutput;
+    auxOutput.key = "aux-output-volume";
+    auxOutput.arguments = {
+        "aux-output-volume", "set-all", "unity",
+    };
+    entries.push_back(std::move(auxOutput));
     for (const char* pairValue : kOutputPairs) {
         const std::string pair(pairValue);
         Entry entry;

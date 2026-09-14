@@ -941,18 +941,31 @@ private:
     void handleAuxOutputLevel(const std::string& command) {
         const std::string getCommand = "AUX_OUTPUT_LEVEL GET";
         const std::string setAllPrefix = "AUX_OUTPUT_LEVEL SET_ALL ";
+        const std::string setPrefix = "AUX_OUTPUT_LEVEL SET ";
         const bool getting = command == getCommand;
         const bool settingAll = command.rfind(setAllPrefix, 0) == 0;
-        if (!getting && !settingAll) {
+        const bool setting = command.rfind(setPrefix, 0) == 0;
+        if (!getting && !settingAll && !setting) {
             reply("ERR unknown-command\n");
             return;
         }
 
         unsigned level = 0;
+        int leftRaw = 0;
+        int rightRaw = 0;
         std::string extra;
         if (settingAll) {
             std::istringstream input(command.substr(setAllPrefix.size()));
             if (!(input >> level) || (input >> extra) || level > 1) {
+                reply("ERR invalid-aux-output-level\n");
+                return;
+            }
+        } else if (setting) {
+            std::istringstream input(command.substr(setPrefix.size()));
+            if (!(input >> leftRaw >> rightRaw) || (input >> extra) ||
+                leftRaw < -32768 || leftRaw > 0 || rightRaw < -32768 ||
+                rightRaw > 0 || leftRaw % 0x100 != 0 ||
+                rightRaw % 0x100 != 0) {
                 reply("ERR invalid-aux-output-level\n");
                 return;
             }
@@ -962,12 +975,20 @@ private:
             return;
         }
 
-        if (settingAll) {
-            const std::uint16_t channelLevel = level == 0
-                ? macfw::fw1814::kMonitorLevelMute
-                : macfw::fw1814::kMonitorLevelUnity;
-            const std::uint32_t desired =
-                macfw::fw1814::stereoMonitorLevelWord(channelLevel);
+        if (settingAll || setting) {
+            std::uint32_t desired = 0;
+            if (settingAll) {
+                const std::uint16_t channelLevel = level == 0
+                    ? macfw::fw1814::kMonitorLevelMute
+                    : macfw::fw1814::kMonitorLevelUnity;
+                desired =
+                    macfw::fw1814::stereoMonitorLevelWord(channelLevel);
+            } else {
+                desired = macfw::fw1814::setMonitorLevelChannel(
+                    desired, 0, static_cast<std::uint16_t>(leftRaw));
+                desired = macfw::fw1814::setMonitorLevelChannel(
+                    desired, 1, static_cast<std::uint16_t>(rightRaw));
+            }
             const WriteResult result = writeRegister(
                 macfw::fw1814::kGainAuxOutLo, desired);
             if (result != WriteResult::Ok) {
@@ -1164,7 +1185,7 @@ private:
                   "headphone-levels=continuous-persistent "
                   "aux-software-return-sends=continuous-persistent "
                   "aux-analog-input-sends=continuous-persistent "
-                  "aux-output-level=mute-unity-diagnostic "
+                  "aux-output-level=continuous-persistent "
                   "levels=deferred midi=deferred\n");
             return;
         }

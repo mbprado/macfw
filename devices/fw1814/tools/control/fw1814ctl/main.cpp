@@ -116,8 +116,9 @@ int usage() {
            "sw1/2|sw3/4|analog1/2|analog3/4|analog5/6|analog7/8 "
            "<dB|-inf> [<right-dB|-inf>]\n"
         << "  fw1814ctl aux-output-volume get\n"
-        << "  fw1814ctl aux-output-volume set-all mute|unity"
-           "  # diagnostic\n"
+        << "  fw1814ctl aux-output-volume set-all mute|unity\n"
+        << "  fw1814ctl aux-output-volume set "
+           "<dB|-inf> [<right-dB|-inf>]\n"
         << "  fw1814ctl capabilities get\n"
         << "  fw1814ctl engine get\n\n"
         << "FW1814 mixer registers are write-only. The active transport "
@@ -839,19 +840,35 @@ int auxOutputVolumeCommand(const std::string& action,
                            char** argv) {
     const bool getting = action == "get";
     const bool settingAll = action == "set-all";
+    const bool setting = action == "set";
     if ((getting && argc != 3) || (settingAll && argc != 4) ||
-        (!getting && !settingAll))
+        (setting && argc != 4 && argc != 5) ||
+        (!getting && !settingAll && !setting))
         return usage();
 
     int level = -1;
+    int leftRaw = 0;
+    int rightRaw = 0;
     if (settingAll) {
         const std::string value = argv[3];
         level = value == "mute" ? 0 : value == "unity" ? 1 : -1;
         if (level < 0) return usage();
+    } else if (setting) {
+        if (!dbToRaw(argv[3], leftRaw)) return usage();
+        if (argc == 5) {
+            if (!dbToRaw(argv[4], rightRaw)) return usage();
+        } else {
+            rightRaw = leftRaw;
+        }
     }
 
-    std::string command = "AUX_OUTPUT_LEVEL " +
-        std::string(getting ? "GET" : "SET_ALL " + std::to_string(level));
+    std::string command = "AUX_OUTPUT_LEVEL " + std::string(
+        getting ? "GET" : settingAll ? "SET_ALL" : "SET");
+    if (settingAll)
+        command += " " + std::to_string(level);
+    else if (setting)
+        command += " " + std::to_string(leftRaw) + " " +
+                   std::to_string(rightRaw);
     std::string payload;
     if (!payloadFor(command, payload)) return 1;
 
@@ -887,7 +904,9 @@ int auxOutputVolumeCommand(const std::string& action,
               << "  right: " << rawToDb(returnedRight)
               << " (raw " << returnedRight << ")\n"
               << "GAIN_AUX_OUT: " << raw
-              << " (write-only diagnostic cache)\n";
+              << " (write-only cache)\n";
+    if (setting || settingAll)
+        persistSuccessfulSet(argv[0], "aux-output-volume", argc, argv);
     return 0;
 }
 

@@ -115,6 +115,7 @@ The active transport owns `/tmp/macfw-fw1814-control.sock`; clients never open F
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" aux-send-level set-all analog1/2 unity
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" aux-send-level set-all analog1/2 mute
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" aux-output-volume get
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" aux-output-volume set -6 -30
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" aux-output-volume set-all mute
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" aux-output-volume set-all unity
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" capabilities get

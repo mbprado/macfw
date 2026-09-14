@@ -925,18 +925,21 @@ all four analog pairs. The reported register words matched the requested
 levels, and every typed value survived a readiness-gated launchd restart.
 This completes the analog-input AUX-send family.
 
-## AUX output-volume diagnostic
+## AUX output volume
 
 The AUX bus master uses the documented `GAIN_AUX_OUT` register at offset
-`0x34`. Its existing unity startup write is now represented by an authoritative
-cache and exposed first through bounded endpoints:
+`0x34`. Its existing unity startup write is represented by an authoritative
+cache and exposed through:
 
 ```bash
 fw1814ctl aux-output-volume get
 fw1814ctl aux-output-volume set-all mute|unity
+fw1814ctl aux-output-volume set <dB|-inf> [<right-dB|-inf>]
 ```
 
-With an analog output sourced from AUX and one known send enabled, mute must
-silence the complete AUX mix and produce `0x80008000`; unity must restore it
-and produce `0x00000000`. This control remains nonpersistent until its audible
-master-bus behavior is confirmed on hardware.
+With Analog Outputs 3/4 sourced from AUX and only Analog Inputs 1/2 enabled as
+a send, hardware validation confirmed that mute silenced the complete AUX mix
+and produced `0x80008000`, while unity restored it and produced `0x00000000`.
+The validated master now accepts continuous independent left/right attenuation
+and participates in typed saved state and readiness-gated replay. Reset
+Defaults records unity, matching the established startup baseline.
