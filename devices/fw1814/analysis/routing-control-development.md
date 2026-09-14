@@ -885,3 +885,29 @@ both channels and two values set them independently. Successful `set` and
 compatibility `set-all` commands replace one typed saved entry per return and
 replay behind the readiness gate. Unlike main-path gains, Reset Defaults saves
 both AUX sends as muted to preserve the deterministic quiet bus.
+
+Hardware validation exercised asymmetric continuous values on both software
+returns: `sw1/2` produced `AUX_STM_34_IN=0xfa00e200` for -6/-30 dB and
+`sw3/4` produced `AUX_STM_12_IN=0xf400e800` for -12/-24 dB. Both were audible
+at the requested levels, saved as typed state, and returned unchanged in the
+first successful reads after a launchd restart and readiness gate. This
+completes the software-return AUX-send family.
+
+## Analog-input AUX send diagnostic
+
+All four documented analog-input AUX sends are now exposed together through
+the same public command:
+
+```bash
+fw1814ctl aux-send-level get \
+    analog1/2|analog3/4|analog5/6|analog7/8
+fw1814ctl aux-send-level set-all \
+    analog1/2|analog3/4|analog5/6|analog7/8 mute|unity
+```
+
+The corresponding raw registers are `AUX_ANA_12_IN` through
+`AUX_ANA_78_IN` at offsets `0x6c`, `0x70`, `0x74` and `0x78`. Each starts
+muted. With a physical output sourced from AUX, unity must add only the
+selected physical input pair and produce `0x00000000`; mute must remove it and
+produce `0x80008000`. These controls remain nonpersistent until all four pair
+identities and isolation behavior are confirmed on hardware.

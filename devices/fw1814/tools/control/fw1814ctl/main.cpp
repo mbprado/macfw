@@ -108,10 +108,14 @@ int usage() {
         << "  fw1814ctl headphone-volume set 1|2 "
            "<dB|-inf> [<right-dB|-inf>]\n"
         << "  fw1814ctl aux-send-level get sw1/2|sw3/4\n"
-        << "  fw1814ctl aux-send-level set-all sw1/2|sw3/4 "
-           "mute|unity\n"
+        << "  fw1814ctl aux-send-level set-all sw1/2|sw3/4 mute|unity\n"
         << "  fw1814ctl aux-send-level set sw1/2|sw3/4 "
            "<dB|-inf> [<right-dB|-inf>]\n"
+        << "  fw1814ctl aux-send-level get "
+           "analog1/2|analog3/4|analog5/6|analog7/8\n"
+        << "  fw1814ctl aux-send-level set-all "
+           "analog1/2|analog3/4|analog5/6|analog7/8 "
+           "mute|unity  # diagnostic\n"
         << "  fw1814ctl capabilities get\n"
         << "  fw1814ctl engine get\n\n"
         << "FW1814 mixer registers are write-only. The active transport "
@@ -739,9 +743,13 @@ int auxSendLevelCommand(const std::string& action, int argc, char** argv) {
         (!getting && !settingAll && !setting))
         return usage();
 
-    const int source = indexOf(argv[3], kMixerSourceArgs.data(),
-                               kMixerSourceArgs.size());
-    if (source < 0) return usage();
+    const int softwareSource = indexOf(argv[3], kMixerSourceArgs.data(),
+                                       kMixerSourceArgs.size());
+    const int analogSource = indexOf(argv[3], kInputPairArgs.data(),
+                                     kInputPairArgs.size());
+    const bool software = softwareSource >= 0;
+    const int source = software ? softwareSource : analogSource;
+    if (source < 0 || (!software && setting)) return usage();
 
     int level = -1;
     int leftRaw = 0;
@@ -759,7 +767,9 @@ int auxSendLevelCommand(const std::string& action, int argc, char** argv) {
         }
     }
 
-    std::string command = "AUX_SOFTWARE_RETURN_LEVEL " +
+    std::string command = std::string(
+        software ? "AUX_SOFTWARE_RETURN_LEVEL "
+                 : "AUX_ANALOG_INPUT_LEVEL ") +
         std::string(getting ? "GET " : settingAll ? "SET_ALL " : "SET ") +
         std::to_string(source);
     if (settingAll)
@@ -794,21 +804,30 @@ int auxSendLevelCommand(const std::string& action, int argc, char** argv) {
         macfw::fw1814::monitorLevelRaw(
             macfw::fw1814::monitorLevelChannel(rawValue, 1)) !=
             returnedRight) {
-        std::cerr << "fw1814ctl: invalid AUX software return value\n";
+        std::cerr << "fw1814ctl: invalid AUX send value\n";
         return 1;
     }
 
-    constexpr std::array<const char*, 2> kRegisterNames{{
+    constexpr std::array<const char*, 2> kSoftwareRegisterNames{{
         "AUX_STM_34_IN", "AUX_STM_12_IN",
     }};
-    std::cout << kMixerSourceLabels[source] << " AUX send:\n"
+    constexpr std::array<const char*, 4> kAnalogRegisterNames{{
+        "AUX_ANA_12_IN", "AUX_ANA_34_IN", "AUX_ANA_56_IN",
+        "AUX_ANA_78_IN",
+    }};
+    const char* label = software ? kMixerSourceLabels[source]
+                                 : kInputPairLabels[source];
+    const char* registerName = software ? kSoftwareRegisterNames[source]
+                                        : kAnalogRegisterNames[source];
+    std::cout << label << " AUX send:\n"
               << "  left:  " << rawToDb(returnedLeft)
               << " (raw " << returnedLeft << ")\n"
               << "  right: " << rawToDb(returnedRight)
               << " (raw " << returnedRight << ")\n"
-              << kRegisterNames[source] << ": " << raw
-              << " (write-only cache)\n";
-    if (setting || settingAll)
+              << registerName << ": " << raw
+              << (software ? " (write-only cache)\n"
+                           : " (write-only diagnostic cache)\n");
+    if (software && (setting || settingAll))
         persistSuccessfulSet(
             argv[0], "aux-send-level:" + std::string(argv[3]), argc, argv);
     return 0;
