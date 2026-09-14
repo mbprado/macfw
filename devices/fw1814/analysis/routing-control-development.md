@@ -284,7 +284,8 @@ Observed behavior on 2026-09-09:
   rejecting the unvalidated AUX source.
 
 Both headphone fields, their differential cached writes and persistence are
-now hardware-validated. The headphone AUX source remains disabled.
+now hardware-validated. The headphone AUX source remained disabled at that
+checkpoint.
 
 ## Validated analog-input mixer
 
@@ -943,3 +944,27 @@ and produced `0x80008000`, while unity restored it and produced `0x00000000`.
 The validated master now accepts continuous independent left/right attenuation
 and participates in typed saved state and readiness-gated replay. Reset
 Defaults records unity, matching the established startup baseline.
+
+Hardware validation then applied an asymmetric -6/-30 dB master setting. The
+audible channels followed the requested attenuation, the cache reported
+`GAIN_AUX_OUT=0xfa00e200`, and the typed value survived a readiness-gated
+launchd restart. A final linked 0 dB write restored the unity baseline. This
+completes the AUX master.
+
+## Headphone AUX-source diagnostic
+
+Now that the complete analog/software AUX signal path is established, the
+third documented `SRC_HP_OUT` source can be tested safely on both physical
+headphone outputs:
+
+```bash
+fw1814ctl headphone-source set 1 aux
+fw1814ctl headphone-source set 2 aux
+fw1814ctl headphone-state get
+```
+
+The low and high 16-bit fields must become `0x0004`, producing
+`SRC_HP_OUT=0x00040004`, and both connectors must reproduce the known AUX mix.
+Each output can then be restored independently to `mixer1/2`. AUX selections
+are deliberately nonpersistent until both physical outputs are confirmed;
+the already validated Mixer 1/2 and Mixer 3/4 selections remain persistent.

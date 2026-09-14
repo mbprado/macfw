@@ -449,7 +449,7 @@ private:
             std::string extra;
             if (!(input >> output) || (setting && !(input >> source)) ||
                 (input >> extra) || output >= Model::kHeadphoneOutputCount ||
-                source > 1) {
+                source > 2) {
                 reply("ERR invalid-headphone-source\n");
                 return;
             }
@@ -1173,7 +1173,7 @@ private:
         if (command == "CAPABILITIES GET") {
             reply("OK routing-state=1 runtime-routing-set=1 "
                   "stream-mixer=1 analog-output-source=1 "
-                  "headphone-source=1 "
+                  "headphone-source=mixer-persistent,aux-diagnostic "
                   "register-readback=0 state-cache=authoritative "
                   "analog-input-mixer=1 digital=deferred "
                   "analog-input-monitor-level=all-analog-persistent "

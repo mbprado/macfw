@@ -104,6 +104,8 @@ The active transport owns `/tmp/macfw-fw1814-control.sock`; clients never open F
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-source get 2
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-source set 2 mixer3/4
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-source set 2 mixer1/2
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-source set 1 aux
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-source set 2 aux
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-volume get 1
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-volume set 1 -6 -30
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" headphone-volume set 1 0
@@ -137,8 +139,8 @@ persistent command set. Successful changes are recorded in
 `/Library/Application Support/macfw/fw1814/control-state.conf` and replayed
 after a new engine reports ready. `fw1814state reset` applies and saves the
 proven straight-through defaults; `clear` removes saved overrides without
-changing the current hardware state. Headphone AUX selection remains disabled
-pending a separate signal-path test. See
+changing the current hardware state. Headphone AUX selection is available as
+a nonpersistent diagnostic pending a separate signal-path test. See
 [`analysis/routing-control-development.md`](analysis/routing-control-development.md)
 for the enabled subset and validation sequence.
 

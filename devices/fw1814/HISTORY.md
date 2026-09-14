@@ -89,6 +89,15 @@ diagnostic. Hardware testing confirmed that mute silenced the complete isolated
 AUX mix and unity restored it. The AUX master now supports continuous
 independent left/right attenuation, typed persistence and readiness-gated
 replay, with unity retained as its Reset Default.
+An asymmetric -6/-30 dB AUX master setting then produced
+`GAIN_AUX_OUT=0xfa00e200`, changed both audible channels as requested and
+survived a readiness-gated launchd restart. A linked 0 dB write restored the
+unity baseline, completing the analog/software AUX path.
+
+With that path established, the documented AUX source in each `SRC_HP_OUT`
+field is now enabled as a nonpersistent diagnostic. Mixer 1/2 and Mixer 3/4
+headphone selections retain their validated persistent behavior while AUX is
+tested independently on both physical connectors.
 
 The documented `GAIN_ANA_12_IN` stereo word was then tested at its two safest
 endpoints. `0x80008000` completely muted the Analog Inputs 1/2 contribution to

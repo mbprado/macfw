@@ -101,7 +101,8 @@ int usage() {
            "<dB|-inf> [<right-dB|-inf>]\n"
         << "  fw1814ctl headphone-state get\n"
         << "  fw1814ctl headphone-source get 1|2\n"
-        << "  fw1814ctl headphone-source set 1|2 mixer1/2|mixer3/4\n"
+        << "  fw1814ctl headphone-source set 1|2 "
+           "mixer1/2|mixer3/4|aux  # aux diagnostic\n"
         << "  fw1814ctl headphone-volume get 1|2\n"
         << "  fw1814ctl headphone-volume set-all 1|2 "
            "mute|unity\n"
@@ -1353,7 +1354,10 @@ int printHeadphoneState(const std::string& payload) {
               << '\n'
               << "  Headphone Output 2: " << headphoneSourceName(second)
               << '\n'
-              << "  SRC_HP_OUT: " << raw << " (write-only cache)\n";
+              << "  SRC_HP_OUT: " << raw
+              << (first == 2 || second == 2
+                      ? " (write-only diagnostic cache)\n"
+                      : " (write-only cache)\n");
     return 0;
 }
 
@@ -1375,7 +1379,8 @@ int headphoneSourceCommand(const std::string& action,
 
     int source = -1;
     if (action == "set") {
-        source = indexOf(argv[4], kHeadphoneSourceArgs.data(), 2);
+        source = indexOf(argv[4], kHeadphoneSourceArgs.data(),
+                         kHeadphoneSourceArgs.size());
         if (source < 0) return usage();
     }
 
@@ -1406,8 +1411,11 @@ int headphoneSourceCommand(const std::string& action,
     std::cout << kHeadphoneOutputLabels[output] << ": "
               << headphoneSourceName(static_cast<unsigned>(returnedSource))
               << '\n'
-              << "SRC_HP_OUT: " << raw << " (write-only cache)\n";
-    if (action == "set")
+              << "SRC_HP_OUT: " << raw
+              << (returnedSource == 2
+                      ? " (write-only diagnostic cache)\n"
+                      : " (write-only cache)\n");
+    if (action == "set" && source < 2)
         persistSuccessfulSet(argv[0],
                              "headphone-source:" + std::string(argv[3]),
                              argc, argv);
