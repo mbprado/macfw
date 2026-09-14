@@ -73,10 +73,13 @@ replay. Reset Defaults intentionally records both sends as muted.
 Asymmetric continuous values on both returns then survived a readiness-gated
 launchd restart with the exact requested raw words, completing that family.
 
-All four analog-input AUX sends are now available together as a bounded,
-nonpersistent mute/unity diagnostic. The documented `AUX_ANA_12_IN` through
-`AUX_ANA_78_IN` registers retain the quiet muted startup baseline until each
-physical pair is explicitly enabled for testing.
+All four analog-input AUX sends were then exposed together as a bounded
+mute/unity diagnostic. Isolated hardware validation confirmed that Analog
+Inputs 1/2 followed its AUX send while every alternate mixer and software AUX
+path was disabled. The complete documented `AUX_ANA_12_IN` through
+`AUX_ANA_78_IN` register family now supports continuous independent left/right
+attenuation, typed persistence and readiness-gated replay. Reset Defaults
+retains the quiet muted baseline for every analog AUX send.
 
 The documented `GAIN_ANA_12_IN` stereo word was then tested at its two safest
 endpoints. `0x80008000` completely muted the Analog Inputs 1/2 contribution to

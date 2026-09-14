@@ -862,20 +862,30 @@ private:
     void handleAuxAnalogInputLevel(const std::string& command) {
         const std::string getPrefix = "AUX_ANALOG_INPUT_LEVEL GET ";
         const std::string setAllPrefix = "AUX_ANALOG_INPUT_LEVEL SET_ALL ";
+        const std::string setPrefix = "AUX_ANALOG_INPUT_LEVEL SET ";
         const bool getting = command.rfind(getPrefix, 0) == 0;
         const bool settingAll = command.rfind(setAllPrefix, 0) == 0;
-        if (!getting && !settingAll) {
+        const bool setting = command.rfind(setPrefix, 0) == 0;
+        if (!getting && !settingAll && !setting) {
             reply("ERR unknown-command\n");
             return;
         }
 
         std::istringstream input(command.substr(
-            getting ? getPrefix.size() : setAllPrefix.size()));
+            getting ? getPrefix.size()
+                    : settingAll ? setAllPrefix.size() : setPrefix.size()));
         unsigned source = 0;
         unsigned level = 0;
+        int leftRaw = 0;
+        int rightRaw = 0;
         std::string extra;
         if (!(input >> source) || (settingAll && !(input >> level)) ||
-            (input >> extra) || source > 3 || level > 1) {
+            (setting && !(input >> leftRaw >> rightRaw)) ||
+            (input >> extra) || source > 3 || level > 1 ||
+            (setting &&
+             (leftRaw < -32768 || leftRaw > 0 || rightRaw < -32768 ||
+              rightRaw > 0 || leftRaw % 0x100 != 0 ||
+              rightRaw % 0x100 != 0))) {
             reply("ERR invalid-aux-analog-input-level\n");
             return;
         }
@@ -884,12 +894,20 @@ private:
             return;
         }
 
-        if (settingAll) {
-            const std::uint16_t channelLevel = level == 0
-                ? macfw::fw1814::kMonitorLevelMute
-                : macfw::fw1814::kMonitorLevelUnity;
-            const std::uint32_t desired =
-                macfw::fw1814::stereoMonitorLevelWord(channelLevel);
+        if (settingAll || setting) {
+            std::uint32_t desired = 0;
+            if (settingAll) {
+                const std::uint16_t channelLevel = level == 0
+                    ? macfw::fw1814::kMonitorLevelMute
+                    : macfw::fw1814::kMonitorLevelUnity;
+                desired =
+                    macfw::fw1814::stereoMonitorLevelWord(channelLevel);
+            } else {
+                desired = macfw::fw1814::setMonitorLevelChannel(
+                    desired, 0, static_cast<std::uint16_t>(leftRaw));
+                desired = macfw::fw1814::setMonitorLevelChannel(
+                    desired, 1, static_cast<std::uint16_t>(rightRaw));
+            }
             const std::array<UInt32, 4> addresses{{
                 macfw::fw1814::kGainAuxAnalog12InLo,
                 macfw::fw1814::kGainAuxAnalog34InLo,
@@ -1092,7 +1110,7 @@ private:
                   "analog-output-levels=continuous-persistent "
                   "headphone-levels=continuous-persistent "
                   "aux-software-return-sends=continuous-persistent "
-                  "aux-analog-input-sends=mute-unity-diagnostic "
+                  "aux-analog-input-sends=continuous-persistent "
                   "aux-output-level=unity-baseline "
                   "levels=deferred midi=deferred\n");
             return;

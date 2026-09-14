@@ -893,21 +893,29 @@ at the requested levels, saved as typed state, and returned unchanged in the
 first successful reads after a launchd restart and readiness gate. This
 completes the software-return AUX-send family.
 
-## Analog-input AUX send diagnostic
+## Analog-input AUX sends
 
-All four documented analog-input AUX sends are now exposed together through
-the same public command:
+All four documented analog-input AUX sends are exposed together through the
+same public command:
 
 ```bash
 fw1814ctl aux-send-level get \
     analog1/2|analog3/4|analog5/6|analog7/8
 fw1814ctl aux-send-level set-all \
     analog1/2|analog3/4|analog5/6|analog7/8 mute|unity
+fw1814ctl aux-send-level set \
+    analog1/2|analog3/4|analog5/6|analog7/8 \
+    <dB|-inf> [<right-dB|-inf>]
 ```
 
 The corresponding raw registers are `AUX_ANA_12_IN` through
 `AUX_ANA_78_IN` at offsets `0x6c`, `0x70`, `0x74` and `0x78`. Each starts
 muted. With a physical output sourced from AUX, unity must add only the
 selected physical input pair and produce `0x00000000`; mute must remove it and
-produce `0x80008000`. These controls remain nonpersistent until all four pair
-identities and isolation behavior are confirmed on hardware.
+produce `0x80008000`. Hardware validation confirmed the Analog Inputs 1/2
+identity and isolated routing through the AUX bus. Because all four pair
+registers are a documented contiguous family with the same stereo gain
+encoding, they now accept continuous independent left/right attenuation and
+participate in typed saved state, readiness-gated replay and Reset Defaults.
+Reset Defaults keeps all four sends muted to preserve the deterministic quiet
+AUX bus.

@@ -107,15 +107,14 @@ int usage() {
            "mute|unity\n"
         << "  fw1814ctl headphone-volume set 1|2 "
            "<dB|-inf> [<right-dB|-inf>]\n"
-        << "  fw1814ctl aux-send-level get sw1/2|sw3/4\n"
-        << "  fw1814ctl aux-send-level set-all sw1/2|sw3/4 mute|unity\n"
-        << "  fw1814ctl aux-send-level set sw1/2|sw3/4 "
-           "<dB|-inf> [<right-dB|-inf>]\n"
         << "  fw1814ctl aux-send-level get "
-           "analog1/2|analog3/4|analog5/6|analog7/8\n"
+           "sw1/2|sw3/4|analog1/2|analog3/4|analog5/6|analog7/8\n"
         << "  fw1814ctl aux-send-level set-all "
-           "analog1/2|analog3/4|analog5/6|analog7/8 "
-           "mute|unity  # diagnostic\n"
+           "sw1/2|sw3/4|analog1/2|analog3/4|analog5/6|analog7/8 "
+           "mute|unity\n"
+        << "  fw1814ctl aux-send-level set "
+           "sw1/2|sw3/4|analog1/2|analog3/4|analog5/6|analog7/8 "
+           "<dB|-inf> [<right-dB|-inf>]\n"
         << "  fw1814ctl capabilities get\n"
         << "  fw1814ctl engine get\n\n"
         << "FW1814 mixer registers are write-only. The active transport "
@@ -749,7 +748,7 @@ int auxSendLevelCommand(const std::string& action, int argc, char** argv) {
                                      kInputPairArgs.size());
     const bool software = softwareSource >= 0;
     const int source = software ? softwareSource : analogSource;
-    if (source < 0 || (!software && setting)) return usage();
+    if (source < 0) return usage();
 
     int level = -1;
     int leftRaw = 0;
@@ -825,9 +824,8 @@ int auxSendLevelCommand(const std::string& action, int argc, char** argv) {
               << "  right: " << rawToDb(returnedRight)
               << " (raw " << returnedRight << ")\n"
               << registerName << ": " << raw
-              << (software ? " (write-only cache)\n"
-                           : " (write-only diagnostic cache)\n");
-    if (software && (setting || settingAll))
+              << " (write-only cache)\n";
+    if (setting || settingAll)
         persistSuccessfulSet(
             argv[0], "aux-send-level:" + std::string(argv[3]), argc, argv);
     return 0;
