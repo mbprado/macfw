@@ -66,8 +66,10 @@ connectors and survived a launchd restart before returning to saved unity.
 Development then entered the AUX path. The documented AUX master now starts at
 unity while the supported software-return and analog-input AUX sends start
 muted, producing a deterministic quiet bus. Both logical software-return sends
-are exposed as a nonpersistent mute/unity diagnostic with the same raw stream
-rotation already proven for main software-return gain.
+passed mute/unity routing and isolation tests with the same raw stream rotation
+already proven for main software-return gain. They now expose continuous
+independent left/right attenuation, typed persistence and readiness-gated
+replay. Reset Defaults intentionally records both sends as muted.
 
 The documented `GAIN_ANA_12_IN` stereo word was then tested at its two safest
 endpoints. `0x80008000` completely muted the Analog Inputs 1/2 contribution to

@@ -866,8 +866,22 @@ fw1814ctl aux-send-level get sw1/2|sw3/4
 fw1814ctl aux-send-level set-all sw1/2|sw3/4 mute|unity
 ```
 
-With a physical output sourced from AUX, enabling `sw1/2` must send only
-CoreAudio Outputs 1/2 to AUX through raw `AUX_STM_34_IN`; `sw3/4` must send
-only CoreAudio Outputs 3/4 through raw `AUX_STM_12_IN`. Mute must restore the
-quiet AUX bus. These endpoint controls are intentionally nonpersistent until
-both logical mappings are confirmed on hardware.
+With a physical output sourced from AUX, enabling `sw1/2` sent only CoreAudio
+Outputs 1/2 to AUX through raw `AUX_STM_34_IN`; `sw3/4` sent only CoreAudio
+Outputs 3/4 through raw `AUX_STM_12_IN`. Mute restored the quiet AUX bus in
+both cases. This confirms both logical mappings and the isolation baseline.
+
+The validated software-return AUX sends are now promoted to the production
+whole-dB interface:
+
+```bash
+fw1814ctl aux-send-level get sw1/2|sw3/4
+fw1814ctl aux-send-level set sw1/2|sw3/4 \
+    <dB|-inf> [<right-dB|-inf>]
+```
+
+The accepted range is -128 through 0 dB in whole-dB steps. One value links
+both channels and two values set them independently. Successful `set` and
+compatibility `set-all` commands replace one typed saved entry per return and
+replay behind the readiness gate. Unlike main-path gains, Reset Defaults saves
+both AUX sends as muted to preserve the deterministic quiet bus.

@@ -109,7 +109,9 @@ int usage() {
            "<dB|-inf> [<right-dB|-inf>]\n"
         << "  fw1814ctl aux-send-level get sw1/2|sw3/4\n"
         << "  fw1814ctl aux-send-level set-all sw1/2|sw3/4 "
-           "mute|unity  # diagnostic\n"
+           "mute|unity\n"
+        << "  fw1814ctl aux-send-level set sw1/2|sw3/4 "
+           "<dB|-inf> [<right-dB|-inf>]\n"
         << "  fw1814ctl capabilities get\n"
         << "  fw1814ctl engine get\n\n"
         << "FW1814 mixer registers are write-only. The active transport "
@@ -731,8 +733,10 @@ int headphoneVolumeCommand(const std::string& action,
 int auxSendLevelCommand(const std::string& action, int argc, char** argv) {
     const bool getting = action == "get";
     const bool settingAll = action == "set-all";
+    const bool setting = action == "set";
     if ((getting && argc != 4) || (settingAll && argc != 5) ||
-        (!getting && !settingAll))
+        (setting && argc != 5 && argc != 6) ||
+        (!getting && !settingAll && !setting))
         return usage();
 
     const int source = indexOf(argv[3], kMixerSourceArgs.data(),
@@ -740,25 +744,43 @@ int auxSendLevelCommand(const std::string& action, int argc, char** argv) {
     if (source < 0) return usage();
 
     int level = -1;
+    int leftRaw = 0;
+    int rightRaw = 0;
     if (settingAll) {
         const std::string value = argv[4];
         level = value == "mute" ? 0 : value == "unity" ? 1 : -1;
         if (level < 0) return usage();
+    } else if (setting) {
+        if (!dbToRaw(argv[4], leftRaw)) return usage();
+        if (argc == 6) {
+            if (!dbToRaw(argv[5], rightRaw)) return usage();
+        } else {
+            rightRaw = leftRaw;
+        }
     }
 
     std::string command = "AUX_SOFTWARE_RETURN_LEVEL " +
-        std::string(getting ? "GET " : "SET_ALL ") +
+        std::string(getting ? "GET " : settingAll ? "SET_ALL " : "SET ") +
         std::to_string(source);
-    if (settingAll) command += " " + std::to_string(level);
+    if (settingAll)
+        command += " " + std::to_string(level);
+    else if (setting)
+        command += " " + std::to_string(leftRaw) + " " +
+                   std::to_string(rightRaw);
 
     std::string payload;
     if (!payloadFor(command, payload)) return 1;
     std::istringstream input(payload);
     int returnedSource = -1;
+    int returnedLeft = 0;
+    int returnedRight = 0;
     std::string raw;
     std::string extra;
-    if (!(input >> returnedSource >> raw) || (input >> extra) ||
-        returnedSource != source) {
+    if (!(input >> returnedSource >> returnedLeft >> returnedRight >> raw) ||
+        (input >> extra) || returnedSource != source ||
+        returnedLeft < -32768 || returnedLeft > 0 ||
+        returnedRight < -32768 || returnedRight > 0 ||
+        returnedLeft % 0x100 != 0 || returnedRight % 0x100 != 0) {
         std::cerr << "fw1814ctl: invalid aux-send-level response: "
                   << payload << '\n';
         return 1;
@@ -766,7 +788,12 @@ int auxSendLevelCommand(const std::string& action, int argc, char** argv) {
 
     std::uint32_t rawValue = 0;
     if (!parseRawWord(raw, rawValue) ||
-        (rawValue != 0x00000000u && rawValue != 0x80008000u)) {
+        macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(rawValue, 0)) !=
+            returnedLeft ||
+        macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(rawValue, 1)) !=
+            returnedRight) {
         std::cerr << "fw1814ctl: invalid AUX software return value\n";
         return 1;
     }
@@ -774,11 +801,16 @@ int auxSendLevelCommand(const std::string& action, int argc, char** argv) {
     constexpr std::array<const char*, 2> kRegisterNames{{
         "AUX_STM_34_IN", "AUX_STM_12_IN",
     }};
-    std::cout << kMixerSourceLabels[source] << " AUX send: "
-              << (rawValue == 0x80008000u ? "mute" : "unity (0 dB)")
-              << '\n'
+    std::cout << kMixerSourceLabels[source] << " AUX send:\n"
+              << "  left:  " << rawToDb(returnedLeft)
+              << " (raw " << returnedLeft << ")\n"
+              << "  right: " << rawToDb(returnedRight)
+              << " (raw " << returnedRight << ")\n"
               << kRegisterNames[source] << ": " << raw
-              << " (write-only diagnostic cache)\n";
+              << " (write-only cache)\n";
+    if (setting || settingAll)
+        persistSuccessfulSet(
+            argv[0], "aux-send-level:" + std::string(argv[3]), argc, argv);
     return 0;
 }
 

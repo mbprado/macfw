@@ -783,20 +783,30 @@ private:
         const std::string getPrefix = "AUX_SOFTWARE_RETURN_LEVEL GET ";
         const std::string setAllPrefix =
             "AUX_SOFTWARE_RETURN_LEVEL SET_ALL ";
+        const std::string setPrefix = "AUX_SOFTWARE_RETURN_LEVEL SET ";
         const bool getting = command.rfind(getPrefix, 0) == 0;
         const bool settingAll = command.rfind(setAllPrefix, 0) == 0;
-        if (!getting && !settingAll) {
+        const bool setting = command.rfind(setPrefix, 0) == 0;
+        if (!getting && !settingAll && !setting) {
             reply("ERR unknown-command\n");
             return;
         }
 
         std::istringstream input(command.substr(
-            getting ? getPrefix.size() : setAllPrefix.size()));
+            getting ? getPrefix.size()
+                    : settingAll ? setAllPrefix.size() : setPrefix.size()));
         unsigned source = 0;
         unsigned level = 0;
+        int leftRaw = 0;
+        int rightRaw = 0;
         std::string extra;
         if (!(input >> source) || (settingAll && !(input >> level)) ||
-            (input >> extra) || source > 1 || level > 1) {
+            (setting && !(input >> leftRaw >> rightRaw)) ||
+            (input >> extra) || source > 1 || level > 1 ||
+            (setting &&
+             (leftRaw < -32768 || leftRaw > 0 || rightRaw < -32768 ||
+              rightRaw > 0 || leftRaw % 0x100 != 0 ||
+              rightRaw % 0x100 != 0))) {
             reply("ERR invalid-aux-software-return-level\n");
             return;
         }
@@ -805,12 +815,20 @@ private:
             return;
         }
 
-        if (settingAll) {
-            const std::uint16_t channelLevel = level == 0
-                ? macfw::fw1814::kMonitorLevelMute
-                : macfw::fw1814::kMonitorLevelUnity;
-            const std::uint32_t desired =
-                macfw::fw1814::stereoMonitorLevelWord(channelLevel);
+        if (settingAll || setting) {
+            std::uint32_t desired = 0;
+            if (settingAll) {
+                const std::uint16_t channelLevel = level == 0
+                    ? macfw::fw1814::kMonitorLevelMute
+                    : macfw::fw1814::kMonitorLevelUnity;
+                desired =
+                    macfw::fw1814::stereoMonitorLevelWord(channelLevel);
+            } else {
+                desired = macfw::fw1814::setMonitorLevelChannel(
+                    desired, 0, static_cast<std::uint16_t>(leftRaw));
+                desired = macfw::fw1814::setMonitorLevelChannel(
+                    desired, 1, static_cast<std::uint16_t>(rightRaw));
+            }
             // CoreAudio-facing software-return identities use the same raw
             // stream rotation as the main software-return gain controls.
             const std::array<UInt32, 2> addresses{{
@@ -826,7 +844,13 @@ private:
             gainAuxStreamIn_[source] = desired;
         }
 
+        const int cachedLeft = macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(gainAuxStreamIn_[source], 0));
+        const int cachedRight = macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(gainAuxStreamIn_[source], 1));
         reply("OK " + std::to_string(source) + " " +
+              std::to_string(cachedLeft) + " " +
+              std::to_string(cachedRight) + " " +
               hex32(gainAuxStreamIn_[source]) + "\n");
     }
 
@@ -1006,7 +1030,7 @@ private:
                   "software-return-levels=continuous-persistent "
                   "analog-output-levels=continuous-persistent "
                   "headphone-levels=continuous-persistent "
-                  "aux-software-return-sends=mute-unity-diagnostic "
+                  "aux-software-return-sends=continuous-persistent "
                   "aux-output-level=unity-baseline "
                   "levels=deferred midi=deferred\n");
             return;
