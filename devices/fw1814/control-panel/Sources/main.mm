@@ -60,12 +60,23 @@ static AudioObjectID FindDevice(void){
 }
 
 @interface AppDelegate:NSObject<NSApplicationDelegate>
-@property NSWindow *window; @property NSTabView *tabs; @property NSTextField *status;
-@property NSTextView *diagnostics; @property NSSegmentedControl *rate; @property NSTextField *deviceStatus;
-@property BOOL refreshing;
-@property NSMutableArray<NSButton*> *routes; @property NSMutableArray<NSPopUpButton*> *outputSources;
-@property NSMutableArray<NSPopUpButton*> *hpSources;
-@property NSMutableArray<NSDictionary*> *swRows,*inputRows,*outputRows,*hpRows,*auxRows,*panRows,*auxMasterRows;
+@property(nonatomic,strong) NSWindow *window;
+@property(nonatomic,strong) NSTabView *tabs;
+@property(nonatomic,strong) NSTextField *status;
+@property(nonatomic,strong) NSTextView *diagnostics;
+@property(nonatomic,strong) NSSegmentedControl *rate;
+@property(nonatomic,strong) NSTextField *deviceStatus;
+@property(nonatomic,assign) BOOL refreshing;
+@property(nonatomic,strong) NSMutableArray<NSButton*> *routes;
+@property(nonatomic,strong) NSMutableArray<NSPopUpButton*> *outputSources;
+@property(nonatomic,strong) NSMutableArray<NSPopUpButton*> *hpSources;
+@property(nonatomic,strong) NSMutableArray<NSDictionary*> *swRows;
+@property(nonatomic,strong) NSMutableArray<NSDictionary*> *inputRows;
+@property(nonatomic,strong) NSMutableArray<NSDictionary*> *outputRows;
+@property(nonatomic,strong) NSMutableArray<NSDictionary*> *hpRows;
+@property(nonatomic,strong) NSMutableArray<NSDictionary*> *auxRows;
+@property(nonatomic,strong) NSMutableArray<NSDictionary*> *panRows;
+@property(nonatomic,strong) NSMutableArray<NSDictionary*> *auxMasterRows;
 @end
 
 @implementation AppDelegate
