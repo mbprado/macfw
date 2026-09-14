@@ -23,6 +23,6 @@ Device-specific stream geometry, channel maps, startup quirks, clock rules, mixe
 
 ## Migration rule
 
-The released FW410 implementation under `fw410/` remains the regression reference while this layout is introduced. Generic pieces should be moved into `common/` only when a second device needs them and the move can be validated without changing FW410 behavior.
+The released FW410 implementation under `devices/fw410/` remains the regression reference in the multi-device layout. Generic pieces should be moved into `common/` only when a second device needs them and the move can be validated without changing FW410 behavior.
 
 This avoids a large path-only refactor before FW1814 bring-up and gives each extraction a concrete cross-device requirement.

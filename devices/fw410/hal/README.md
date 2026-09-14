@@ -17,7 +17,7 @@ Apple documents AudioServerPlugIns as `.driver` bundles loaded by CoreAudio from
 ## Build
 
 ```bash
-cd fw410/hal
+cd devices/fw410/hal
 make clean
 make
 ```

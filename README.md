@@ -136,7 +136,7 @@ A crucial hardware quirk is documented and implemented: isolated mixer writes ag
 
 Because macfw's AMDTP slot ordering differs from the original logical software-return ordering, the control-panel GUI remaps the raw FW410 return identities so the user sees the same channel numbering as CoreAudio/Logic.
 
-Detailed evidence is in [`fw410/analysis/original-control-panel-mixer-model.md`](fw410/analysis/original-control-panel-mixer-model.md) and [`fw410/analysis/control-state-persistence.md`](fw410/analysis/control-state-persistence.md).
+Detailed evidence is in [`devices/fw410/analysis/original-control-panel-mixer-model.md`](devices/fw410/analysis/original-control-panel-mixer-model.md) and [`devices/fw410/analysis/control-state-persistence.md`](devices/fw410/analysis/control-state-persistence.md).
 
 ## Project goals
 
@@ -163,28 +163,22 @@ macfw/
 ├── devices/
 │   ├── README.md
 │   ├── fw410/
+│   │   ├── hal/
+│   │   ├── control-panel/
+│   │   ├── lib/
+│   │   ├── service/
+│   │   ├── tools/
+│   │   └── analysis/
 │   └── fw1814/
-├── package/
-│   ├── build-pkg.sh
-│   └── scripts/
-└── fw410/
-    ├── README.md
-    ├── Makefile
-    ├── hal/
-    ├── control-panel/
-    ├── lib/
-    ├── service/
-    ├── tools/
-    ├── analysis/
-    ├── hardware/
-    ├── protocol/
-    ├── reference/
-    ├── captures/
-    ├── experiments/
-    └── tests/
+│       ├── hal/
+│       ├── service/
+│       ├── tools/
+│       ├── transport/
+│       └── analysis/
+└── package/
+    ├── build-pkg.sh
+    └── scripts/
 ```
-
-As reusable components mature, common functionality can be promoted into shared project-level modules.
 
 ## Development principles
 
@@ -245,7 +239,7 @@ The FW1814 has separately reached hardware-validated analog CoreAudio playback/c
 - [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) — unsupported/open behavior.
 - [`RELEASE-NOTES.md`](RELEASE-NOTES.md) — current alpha release notes.
 - [`RELEASES.md`](RELEASES.md) — versioning, tagging and release contract.
-- [`fw410/README.md`](fw410/README.md) — detailed FW410 engineering status.
+- [`devices/fw410/README.md`](devices/fw410/README.md) — detailed FW410 engineering status.
 - [`devices/fw1814/README.md`](devices/fw1814/README.md) — experimental FW1814 status and development scope.
 
 ## Contributing and testing

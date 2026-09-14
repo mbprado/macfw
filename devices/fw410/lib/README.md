@@ -90,7 +90,7 @@ mechanism is macOS-specific and uses the behavior validated with IOFireWireLib.
 Run:
 
 ```bash
-cd fw410/lib
+cd devices/fw410/lib
 make check
 ```
 

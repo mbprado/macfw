@@ -96,7 +96,7 @@ For GUI-only development:
 
 ```bash
 make gui
-open "fw410/control-panel/build/macfw-fw410-control.app"
+open "devices/fw410/control-panel/build/macfw-fw410-control.app"
 ```
 
 The internal build bundle deliberately uses a space-free name for reliable GNU make behavior. Installation/package staging renames it to the user-facing application name:
@@ -109,7 +109,7 @@ For transport-only development without replacing the HAL or GUI:
 
 ```bash
 make runtime
-sudo bash fw410/service/install-service.sh
+sudo bash devices/fw410/service/install-service.sh
 ```
 
 ## Experimental FW1814 source installation
@@ -229,20 +229,20 @@ Successful user-facing writable control changes are recorded by `fw410state`. On
 
 The control panel's **Reset Defaults** action applies and records the documented macfw baseline. These are macfw defaults, not a claim about undocumented M-Audio factory state.
 
-See [`fw410/analysis/control-state-persistence.md`](fw410/analysis/control-state-persistence.md) for the detailed restore lifecycle and persisted control set.
+See [`devices/fw410/analysis/control-state-persistence.md`](devices/fw410/analysis/control-state-persistence.md) for the detailed restore lifecycle and persisted control set.
 
 ## Checking status
 
 For a source checkout:
 
 ```bash
-fw410/tools/transport/transportstatus/transportstatus
+devices/fw410/tools/transport/transportstatus/transportstatus
 ```
 
 Watch transitions continuously with:
 
 ```bash
-fw410/tools/transport/transportstatus/transportstatus --watch
+devices/fw410/tools/transport/transportstatus/transportstatus --watch
 ```
 
 Normal operation reports `ONLINE`. During a physical disconnect or transport recovery it may temporarily report `OFFLINE` or `RECOVERING`.
@@ -293,7 +293,7 @@ The FW410 main-mixer ASIC is not treated like an ordinary read/write register ma
 
 The GUI presents software-return rows in CoreAudio/Logic order even though the FW410's raw AV/C software-return identities are rotated relative to macfw's AMDTP ordering.
 
-See [`fw410/analysis/original-control-panel-mixer-model.md`](fw410/analysis/original-control-panel-mixer-model.md) for the validated model.
+See [`devices/fw410/analysis/original-control-panel-mixer-model.md`](devices/fw410/analysis/original-control-panel-mixer-model.md) for the validated model.
 
 ## Uninstalling a source installation
 
@@ -332,7 +332,7 @@ tail -n 200 /var/log/install.log
 Check:
 
 ```bash
-fw410/tools/transport/transportstatus/transportstatus
+devices/fw410/tools/transport/transportstatus/transportstatus
 
 tail -n 100 /Library/Logs/macfw-fw410-transport.log
 ```

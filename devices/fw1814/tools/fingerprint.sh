@@ -2,7 +2,7 @@
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)"
-PROBE="$ROOT/fw410/tools/device/fwprobe/fwprobe"
+PROBE="$ROOT/devices/fw410/tools/device/fwprobe/fwprobe"
 
 echo "macfw FW1814 read-only fingerprint"
 echo

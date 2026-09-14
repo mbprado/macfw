@@ -67,9 +67,9 @@ Final observed result:
 
 The earlier degraded-capture observation was not reproduced in the repeated tests and is no longer considered an active Sonoma compatibility limitation.
 
-Test screenshot: [`fw410/pictures/Screenshot3.jpg`](fw410/pictures/Screenshot3.jpg)
+Test screenshot: [`devices/fw410/pictures/Screenshot3.jpg`](devices/fw410/pictures/Screenshot3.jpg)
 
-![Sonoma 14.8.9 FW410 validation screenshot](fw410/pictures/Screenshot3.jpg)
+![Sonoma 14.8.9 FW410 validation screenshot](devices/fw410/pictures/Screenshot3.jpg)
 
 ### Sleep/wake observation
 

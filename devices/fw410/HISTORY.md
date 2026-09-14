@@ -1,6 +1,6 @@
 # FW410 project history
 
-This file records visible project milestones rather than every diagnostic experiment. Detailed protocol and transport findings remain under `fw410/analysis/`.
+This file records visible project milestones rather than every diagnostic experiment. Detailed protocol and transport findings remain under `devices/fw410/analysis/`.
 
 ## 2026-08-31 — Native control panel, persistent controls and installable package validated
 

@@ -49,4 +49,4 @@ The first build is considered successful when the installed system extension sho
 4. Feed 44.1 kHz stereo CoreAudio output directly to the native `AmdtpPcmStream44100` path.
 5. Add 48 kHz, then capture, then expose all FW410 channels.
 
-This directory intentionally does not modify anything under `fw410/lib` or the existing transport probes yet.
+This directory intentionally does not modify anything under `devices/fw410/lib` or the existing transport probes yet.

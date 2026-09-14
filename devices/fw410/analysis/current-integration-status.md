@@ -253,7 +253,7 @@ Main strip level/pan/mute/AUX-send semantics remain unresolved and are deliberat
 
 ## Native control panel
 
-`fw410/control-panel` is a native AppKit/Objective-C++ application built directly with the standard macOS Command Line Tools.
+`devices/fw410/control-panel` is a native AppKit/Objective-C++ application built directly with the standard macOS Command Line Tools.
 
 Current tabs:
 

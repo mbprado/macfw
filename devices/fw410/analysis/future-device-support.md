@@ -141,7 +141,7 @@ macfw/
   control-panel/
 ```
 
-This is a direction, not an immediate refactor plan. The working FW410 code should not be reorganized speculatively. A second physical device should first demonstrate which components are genuinely generic; common code can then be extracted with two validated implementations as evidence.
+The FW1814 has now provided that second hardware implementation. The repository therefore colocates the complete FW410 and FW1814 implementations under `devices/`, while common code continues to be extracted only when both validated paths demonstrate a shared abstraction.
 
 ## Recommended next target
 

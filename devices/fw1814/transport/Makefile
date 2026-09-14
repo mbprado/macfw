@@ -2,8 +2,8 @@ CXX := clang++
 CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic
 FRAMEWORKS := -framework IOKit -framework CoreFoundation
 
-LIBMACFW := ../../../fw410/lib/libmacfw.a
-LIBMACFW_INCLUDE := ../../../fw410/lib/include
+LIBMACFW := ../../fw410/lib/libmacfw.a
+LIBMACFW_INCLUDE := ../../fw410/lib/include
 DEVICE_INCLUDE := ..
 HAL_INCLUDE := ../hal/include
 
@@ -21,7 +21,7 @@ all: $(ANALOG48) $(ANALOG44) $(SHM_TEST) $(SUPERVISOR) $(DUPLEX44_PROBE) $(TONE4
 runtime: $(ANALOG48) $(ANALOG44) $(SHM_TEST) $(SUPERVISOR)
 
 $(LIBMACFW):
-	$(MAKE) -C ../../../fw410/lib libmacfw.a
+	$(MAKE) -C ../../fw410/lib libmacfw.a
 
 $(ANALOG48): analog48_main.cpp blocking_pcm_tx.h pcm_stream48.h capture_pump.h \
 	duplex_lifecycle.h engine_ready.h fw1814_control_server.h playback_pump.h realtime_service.h shared_io.h \

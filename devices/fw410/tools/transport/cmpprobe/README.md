@@ -18,7 +18,7 @@ Direction labels are device-relative:
 
 ## Build and run
 
-From `fw410/tools`:
+From `devices/fw410/tools`:
 
 ```bash
 make cmpprobe

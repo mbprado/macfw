@@ -128,7 +128,7 @@ Release package names, embedded version metadata, release notes, and checksums m
 
 The build records the Git commit SHA in its logs and embedded metadata. The runtime and HAL build metadata provide the basis for this provenance.
 
-The tag version must equal `MACFW_VERSION` in `fw410/version.h`; the release workflow enforces this before building.
+The tag version must equal `MACFW_VERSION` in `devices/fw410/version.h`; the release workflow enforces this before building.
 
 ## Release documentation
 

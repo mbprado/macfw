@@ -4,7 +4,7 @@ Active since 2026-08-17.
 
 DriverKit/AudioDriverKit remains a future backend, but local development is blocked by DriverKit entitlement/provisioning requirements with a Personal Team on both current and legacy Xcode projects.
 
-The active CoreAudio-facing path is therefore `fw410/hal`, a dependency-free AudioServerPlugIn.
+The active CoreAudio-facing path is therefore `devices/fw410/hal`, a dependency-free AudioServerPlugIn.
 
 ## Milestone reached: CoreAudio enumeration
 
@@ -12,7 +12,7 @@ The synthetic `M-Audio FireWire 410` enumerates successfully in macOS as a real 
 
 The breakthrough required correcting the HAL factory registration so the symbol exported by the bundle matched `CFPlugInFactories`; after that Monterey created the remote Core Audio Driver Service and activated the device UID `com.mbprado.macfw.fw410.device`.
 
-The visible milestone is recorded in `fw410/HISTORY.md` with `fw410/pictures/screenshot1.png`.
+The visible milestone is recorded in `devices/fw410/HISTORY.md` with `devices/fw410/pictures/screenshot1.png`.
 
 A remaining non-blocking HAL query for selector `srnd` on output scope is visible in logs and should be cleaned up, but it does not prevent enumeration or I/O thread startup.
 
@@ -117,7 +117,7 @@ Boot handling must therefore be part of eventual automatic transport/device life
 
 ## Diagnostic tooling
 
-`fw410/tools/transport/shmprobe` is the shared-memory/HAL diagnostic tool. It reports PCM ring state plus StartIO/StopIO and AudioServerPlugIn I/O-operation counters. It established that `WriteMix` is the actual Monterey playback operation and that valid non-null buffers reach the HAL bridge.
+`devices/fw410/tools/transport/shmprobe` is the shared-memory/HAL diagnostic tool. It reports PCM ring state plus StartIO/StopIO and AudioServerPlugIn I/O-operation counters. It established that `WriteMix` is the actual Monterey playback operation and that valid non-null buffers reach the HAL bridge.
 
 ## Rate-control note
 

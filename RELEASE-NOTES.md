@@ -169,7 +169,7 @@ Package postinstall log:
 Source-checkout transport status:
 
 ```bash
-fw410/tools/transport/transportstatus/transportstatus
+devices/fw410/tools/transport/transportstatus/transportstatus
 ```
 
 Please also identify the Mac model, macOS version, FireWire connection/adapters, requested sample rate, and the event that preceded the failure.

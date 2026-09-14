@@ -2,11 +2,11 @@ CXX := clang++
 CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic
 FRAMEWORKS := -framework IOKit -framework CoreFoundation
 
-PROBE_DIR := ../../../fw410/tools/device/fwprobe
+PROBE_DIR := ../../fw410/tools/device/fwprobe
 BEBOB_PROBE_DIR := ../../../common/tools/bebobprobe
 BUS_RESET_DIR := ../../../common/tools/firewirebusreset
-LIBMACFW := ../../../fw410/lib/libmacfw.a
-LIBMACFW_INCLUDE := ../../../fw410/lib/include
+LIBMACFW := ../../fw410/lib/libmacfw.a
+LIBMACFW_INCLUDE := ../../fw410/lib/include
 BOOT_TOOL := fwboot1814
 INIT_TOOL := fw1814init
 CAPTURE48_TOOL := fw1814capture48
@@ -90,7 +90,7 @@ init-44: init-tool
 	./$(INIT_TOOL) 44100 --execute
 
 $(LIBMACFW):
-	$(MAKE) -C ../../../fw410/lib libmacfw.a
+	$(MAKE) -C ../../fw410/lib libmacfw.a
 
 capture48-tool: $(CAPTURE48_TOOL)
 

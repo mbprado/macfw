@@ -29,9 +29,9 @@ jobs:
             exit 1
           fi
 
-          VERSION="$(sed -n 's/^#define MACFW_VERSION "\([^"]*\)"/\1/p' fw410/version.h | head -1)"
+          VERSION="$(sed -n 's/^#define MACFW_VERSION "\([^"]*\)"/\1/p' devices/fw410/version.h | head -1)"
           if [[ -z "$VERSION" ]]; then
-            echo "error: unable to read MACFW_VERSION from fw410/version.h" >&2
+            echo "error: unable to read MACFW_VERSION from devices/fw410/version.h" >&2
             exit 1
           fi
 

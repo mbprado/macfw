@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-FW410_DIR="$REPO_DIR/fw410"
+FW410_DIR="$REPO_DIR/devices/fw410"
 VERSION_HEADER="$FW410_DIR/version.h"
 WORK="$SCRIPT_DIR/build"
 ROOT="$WORK/root"

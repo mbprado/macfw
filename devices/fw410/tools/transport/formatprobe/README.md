@@ -55,7 +55,7 @@ make clean
 make
 ```
 
-Or build every FW410 tool from `fw410/tools`:
+Or build every FW410 tool from `devices/fw410/tools`:
 
 ```bash
 make

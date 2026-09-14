@@ -1,20 +1,17 @@
 # macfw devices
 
-`devices/` contains model-specific macfw profiles and implementations.
-
-The long-term layout is:
+`devices/` contains each interface's complete model-specific implementation.
 
 ```text
 devices/
-├── fw410/
-│   ├── profile.h
-│   └── ... device-specific transport/control/HAL/GUI code as it is migrated
-└── fw1814/
-    ├── profile.h
-    ├── analysis/
-    └── ... FW1814-specific transport/control/HAL/GUI code
+├── fw410/    released regression baseline
+└── fw1814/   experimental multi-rate/control development
 ```
 
-The existing released FW410 implementation remains under `fw410/` during the transition. It is the known-good regression baseline and will be migrated incrementally rather than moved wholesale.
+Each device directory owns its profile, protocol behavior, HAL, transport,
+service, controls, diagnostics and device-specific documentation. Reusable
+FireWire, AMDTP and CoreAudio components move to `common/` only after both
+hardware implementations demonstrate that the abstraction is genuinely shared.
 
-A device profile records macfw-visible identity and the initial supported sample-rate scope. A profile being present does not automatically make the device installer-supported; experimental profiles must remain outside production matching until their real hardware identity and runtime path are validated.
+The root Makefile provides namespaced targets for both devices while preserving
+FW410 as the default released build, install and package target.

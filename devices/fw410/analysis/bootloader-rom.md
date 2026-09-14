@@ -2,7 +2,7 @@
 
 **Status:** Confirmed on hardware
 
-This document records the FireWire configuration ROM exposed by an M-Audio FireWire 410 while it is in its bootloader personality. The data was collected on an Intel Mac running macOS Monterey using `fw410/tools/fwprobe --rom` and Apple's user-space `IOFireWireLib` interfaces. No vendor kext, FireWire writes, bus resets, or firmware commands were used.
+This document records the FireWire configuration ROM exposed by an M-Audio FireWire 410 while it is in its bootloader personality. The data was collected on an Intel Mac running macOS Monterey using `devices/fw410/tools/fwprobe --rom` and Apple's user-space `IOFireWireLib` interfaces. No vendor kext, FireWire writes, bus resets, or firmware commands were used.
 
 ## Observed device identity
 
