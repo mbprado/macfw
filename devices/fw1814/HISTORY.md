@@ -99,8 +99,10 @@ field was enabled as a nonpersistent diagnostic. Each physical headphone
 connector followed the isolated AUX signal independently, producing
 `0x00010004` for Headphone 1 and `0x00040001` for Headphone 2; both together
 produced `0x00040004`. AUX now joins Mixer 1/2 and Mixer 3/4 as a persistent
-headphone source with readiness-gated replay. Reset Defaults keeps Mixer 1/2
-selected for both connectors.
+headphone source with readiness-gated replay. A saved AUX selection on both
+headphone connectors survived a launchd transport restart and the first
+successful post-readiness query returned `0x00040004`. Reset Defaults keeps
+Mixer 1/2 selected for both connectors.
 
 The documented `GAIN_ANA_12_IN` stereo word was then tested at its two safest
 endpoints. `0x80008000` completely muted the Analog Inputs 1/2 contribution to

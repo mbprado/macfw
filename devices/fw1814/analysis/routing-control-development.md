@@ -969,4 +969,10 @@ alone produced `0x00040001`, and selecting AUX for both produced
 `0x00040004`. Only the selected connector reproduced the isolated AUX signal
 in each individual test, and both did so together. AUX now participates in the
 same typed persistence and readiness-gated replay as the two mixer sources.
-Reset Defaults continues to select Mixer 1/2 for both headphones.
+A saved AUX selection on both connectors survived a launchd transport restart;
+after the readiness gate, the first successful state query returned
+`SRC_HP_OUT=0x00040004`. Reset Defaults continues to select Mixer 1/2 for
+both headphones.
+
+Digital S/PDIF/ADAT routing and MIDI remain explicitly deferred until macfw can
+be compared with both original M-Audio control panels running simultaneously.

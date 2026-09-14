@@ -32,9 +32,10 @@ The experimental FW1814 profile currently provides:
   and reconnect; all four analog input-pair monitor levels also survive a
   transport restart through the same state path.
 
-S/PDIF, ADAT, 88.2/96/176.4/192 kHz, digital-input routing and level controls,
-and the native control panel remain under development. MIDI is intentionally
-deferred until the audio/control surface is complete.
+Higher sample rates and the native control panel remain under development.
+S/PDIF, ADAT and MIDI are intentionally deferred until macfw can be compared
+directly with the original FW410 and FW1814 control panels running
+simultaneously.
 
 ## Architecture
 
