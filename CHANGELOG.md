@@ -6,7 +6,21 @@ The project uses the `x.yy.zzz` version format described in [`RELEASES.md`](RELE
 
 ## [Unreleased]
 
-No user-visible changes have been recorded after the `0.03.000` release candidate yet.
+### Changed
+
+- Moved the complete FW410 source implementation from `fw410/` to
+  `devices/fw410/`, colocating both supported interface implementations under
+  the multi-device layout.
+- Added explicit namespaced FW410 root targets and `make all-interfaces` while
+  preserving FW410 as the default for `make`, `make install` and
+  `make package`.
+
+### Validation
+
+- Source installation was hardware-validated for both FW410 and FW1814 after
+  the directory migration.
+- FW410 installer-package creation completed successfully from the reorganized
+  source tree.
 
 ## [0.03.000] — third alpha — 2026-09-06
 
