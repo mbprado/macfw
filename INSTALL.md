@@ -1,6 +1,6 @@
 # Installing macfw
 
-This guide covers the M-Audio FireWire 410 and FireWire 1814 alpha drivers, control panels, source installation and device-specific installer packages for Intel macOS.
+This guide covers the M-Audio FireWire 410 and FireWire 1814 alpha drivers, control panels, unified source/package installation and device-specific installer packages for Intel macOS.
 
 > **Alpha software:** this driver is hardware-tested but is not yet a signed/notarized public production release. Back up important work before testing it on another system.
 
@@ -11,24 +11,23 @@ This guide covers the M-Audio FireWire 410 and FireWire 1814 alpha drivers, cont
 - A supported M-Audio FireWire 410 or FireWire 1814 connected through a working FireWire path.
 - Administrator access.
 
-Each device package deliberately requires its matching interface to be physically present. The hardware gates accept the operational personality and the known M-Audio bootloader identity; the runtime retains its stronger model-specific guarded boot procedure.
+The combined package requires at least one supported interface to be physically present and installs both device stacks. Each optional device-specific package requires its matching interface. The hardware gates accept the operational personality and known M-Audio bootloader identities; each runtime retains its stronger model-specific guarded boot procedure.
 
 Apple Silicon is not currently supported.
 
 ## Recommended installation: `.pkg`
 
-1. Connect and power on the target M-Audio interface.
-2. Obtain the matching `.pkg` and install it normally, or from Terminal:
+1. Connect and power on either supported M-Audio interface.
+2. Obtain the unified `.pkg` and install it normally, or from Terminal:
 
    ```bash
-   sudo installer -pkg macfw-fw410-0.03.000-<build>.pkg -target /
-   sudo installer -pkg macfw-fw1814-0.01.000-<build>.pkg -target /
+   sudo installer -pkg macfw-0.4.000-<build>.pkg -target /
    ```
 
-3. The installer validates the connected interface and installs its CoreAudio
-   HAL plug-in, transport/control runtime, persistent state helper, build
-   metadata, launchd service and native control-panel application.
-4. The installer starts the device-specific service and restarts
+3. The installer validates that an FW410 or FW1814 is connected and installs
+   both CoreAudio HAL plug-ins, transport/control runtimes, persistent state
+   helpers, build metadata, launchd services and native control panels.
+4. The installer starts both device-specific services and restarts
    `coreaudiod`. A reboot is normally **not required**.
 5. Select the interface in Audio MIDI Setup and open the corresponding app:
 
@@ -63,27 +62,37 @@ sudo make install
 
 Do not run compilation itself with `sudo`. The install targets intentionally verify that the artifacts already exist instead of compiling them as root.
 
-The source installer uses the same supported-device gate as the package installation.
+Source installation does not require hardware to be connected. Each service remains ready for its matching interface to appear.
 
 ## Build targets
 
 From the repository root:
 
 ```bash
-make             # HAL + release runtime + GUI
-make hal         # HAL only
-make runtime     # installed runtime/control binaries only
-make gui         # native control-panel application only
-make all-tools   # all development/reverse-engineering tools
-make package     # fresh release build + complete .pkg installer
+make             # both devices: HAL + release runtime + GUI
+make hal         # both HAL plug-ins
+make runtime     # both installed runtime/control sets
+make gui         # both native control-panel applications
+make all-tools   # both development/reverse-engineering tool sets
+make package     # fresh build + unified two-device .pkg installer
 make clean
 ```
 
 The `runtime` target is intentionally narrow. It builds only the binaries used by the installed service/control path instead of compiling all historical probes and experiments.
 
-The experimental FW1814 target has separate namespaced commands so the default FW410 release build and installer remain unchanged:
+Namespaced targets remain available for focused device development:
 
 ```bash
+make fw410             # FW410 HAL + runtime + native control panel
+make fw410-hal
+make fw410-runtime
+make fw410-gui
+make fw410-tools
+make fw410-package
+sudo make fw410-install
+sudo make fw410-uninstall
+make fw410-clean
+
 make fw1814             # FW1814 HAL + runtime + native control panel
 make fw1814-hal         # FW1814 HAL only
 make fw1814-runtime     # FW1814 installed service/control binaries
@@ -98,7 +107,7 @@ make fw1814-clean
 For GUI-only development:
 
 ```bash
-make gui
+make fw410-gui
 open "devices/fw410/control-panel/build/macfw-fw410-control.app"
 
 make fw1814-gui
@@ -118,9 +127,9 @@ make runtime
 sudo bash devices/fw410/service/install-service.sh
 ```
 
-## FW1814 source installation
+## Device-specific source installation
 
-The FW1814 has its own package and remains separate from the FW410 payload. To install it from source, build as a normal user:
+The default source path builds and installs both interfaces. To work on only one, use its namespaced targets. For example:
 
 ```bash
 make fw1814
@@ -149,16 +158,16 @@ Do not run standalone FireWire probes while the supervised engine is active; the
 From the repository root:
 
 ```bash
-make package          # backward-compatible FW410 package
-make fw410-package    # explicit FW410 package
-make fw1814-package   # FW1814 package
-make package-all      # build both device packages
+make package          # unified two-device package
+make package-all      # alias for the unified two-device package
+make fw410-package    # optional FW410-only package
+make fw1814-package   # optional FW1814-only package
 ```
 
-Each package target performs a clean rebuild of that device's release artifacts
-before packaging, so the embedded build identities match the package commit.
-The shared builder also accepts `bash package/build-pkg.sh fw410|fw1814` or the
-`MACFW_DEVICE` environment variable.
+Each package target performs a clean rebuild before packaging, so embedded
+build identities match the package commit. The individual-package builder also
+accepts `bash package/build-pkg.sh fw410|fw1814` or the `MACFW_DEVICE`
+environment variable.
 
 The generated installer is placed under:
 
@@ -169,11 +178,12 @@ package/dist/
 For example:
 
 ```text
-package/dist/macfw-fw410-0.03.000-<git-sha>.pkg
-package/dist/macfw-fw1814-0.01.000-<git-sha>.pkg
+package/dist/macfw-0.4.000-<git-sha>.pkg
+package/dist/macfw-fw410-0.4.000-<git-sha>.pkg
+package/dist/macfw-fw1814-0.4.000-<git-sha>.pkg
 ```
 
-The package disables bundle relocation so the control application is installed at its authoritative `/Applications/macfw FW410 Control.app` path even when another development copy exists elsewhere on the Mac.
+Packages disable bundle relocation so both control applications are installed at their authoritative `/Applications` paths even when development copies exist elsewhere on the Mac.
 
 ## Installed components
 
@@ -193,10 +203,11 @@ The current installation includes:
 /Library/Logs/macfw_install.log
 ```
 
-The launchd service is:
+The launchd services are:
 
 ```text
 com.mbprado.macfw.fw410.transport
+com.mbprado.macfw.fw1814.transport
 ```
 
 The installed control tools include:
@@ -204,12 +215,15 @@ The installed control tools include:
 ```text
 /Library/Application Support/macfw/fw410/tools/control/fw410ctl/fw410ctl
 /Library/Application Support/macfw/fw410/tools/control/fw410state/fw410state
+/Library/Application Support/macfw/fw1814/bin/fw1814ctl
+/Library/Application Support/macfw/fw1814/bin/fw1814state
 ```
 
 Persistent control state is stored in:
 
 ```text
 /Library/Application Support/macfw/fw410/control-state.conf
+/Library/Application Support/macfw/fw1814/control-state.conf
 ```
 
 ## Control panel

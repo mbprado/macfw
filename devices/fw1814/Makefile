@@ -1,6 +1,6 @@
 PREFIX ?= /Library/Application Support/macfw/fw1814
 
-.PHONY: all clean install uninstall hal runtime all-tools tools gui
+.PHONY: all clean install-check install uninstall hal runtime all-tools tools gui
 
 all: hal runtime gui
 
@@ -17,11 +17,7 @@ gui:
 all-tools tools:
 	$(MAKE) -C tools all
 
-install:
-	@if [ "$$(id -u)" -ne 0 ]; then \
-		echo "error: FW1814 install must be run as root (use sudo make fw1814-install)" >&2; \
-		exit 1; \
-	fi
+install-check:
 	@if [ ! -x hal/build/macfw-fw1814.driver/Contents/MacOS/macfw-fw1814 ] || \
 	    [ ! -x transport/fw1814supervisor ] || \
 	    [ ! -x transport/fw1814analog48 ] || \
@@ -34,6 +30,12 @@ install:
 	    [ ! -x tools/control/fw1814state/fw1814state ] || \
 	    [ ! -x control-panel/build/macfw-fw1814-control.app/Contents/MacOS/macfw-fw1814-control ]; then \
 		echo "error: installable FW1814 artifacts are not built; run 'make fw1814' as a normal user first" >&2; \
+		exit 1; \
+	fi
+
+install: install-check
+	@if [ "$$(id -u)" -ne 0 ]; then \
+		echo "error: FW1814 install must be run as root (use sudo make fw1814-install)" >&2; \
 		exit 1; \
 	fi
 	$(MAKE) -C hal install

@@ -15,7 +15,7 @@
   <key>CFBundlePackageType</key>
   <string>BNDL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.01.000</string>
+  <string>0.4.000</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>CFPlugInDynamicRegistration</key>

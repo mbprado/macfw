@@ -1,0 +1,11 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+MACFW_SKIP_COREAUDIO_RESTART=1 bash "$SCRIPT_DIR/fw410-postinstall"
+MACFW_SKIP_COREAUDIO_RESTART=1 bash "$SCRIPT_DIR/fw1814-postinstall"
+killall coreaudiod >/dev/null 2>&1 || true
+rm -rf /tmp/macfw-all-package
+
+exit 0

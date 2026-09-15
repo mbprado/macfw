@@ -2,9 +2,13 @@
 
 All notable user-visible changes to macfw releases are recorded here.
 
-The project uses the `x.yy.zzz` version format described in [`RELEASES.md`](RELEASES.md).
+The project uses the `x.y.zzz` version format described in [`RELEASES.md`](RELEASES.md).
 
 ## [Unreleased]
+
+No user-visible changes have been recorded after the `0.4.000` release candidate yet.
+
+## [0.4.000] — fourth alpha — 2026-09-15
 
 ### Added
 
@@ -13,14 +17,23 @@ The project uses the `x.yy.zzz` version format described in [`RELEASES.md`](RELE
 - Device-specific `fw1814-package` target and generalized package builder for
   independent FW410/FW1814 installers.
 - FW1814 installer hardware gate and runtime build metadata.
+- Unified `macfw-0.4.000-<build>.pkg` installer containing both supported
+  interface drivers, runtimes and control panels.
+- Combined installer hardware gate that accepts either a connected FW410 or
+  FW1814 while retaining stricter model-specific gates for individual packages.
 
 ### Changed
-
 
 - Moved the complete FW410 source implementation from `fw410/` to
   `devices/fw410/`, colocating both supported interface implementations under
   the multi-device layout.
-- Added explicit namespaced FW410 and FW1814 root targets plus `make all-interfaces` and `make package-all`, while preserving FW410 as the default for `make`, `make install` and `make package`.
+- Unified FW410 and FW1814 component versions at `0.4.000`.
+- Root `make`, component builds, `sudo make install`, uninstall and package
+  targets now operate on both supported interfaces by default.
+- Added explicit namespaced FW410 and FW1814 targets for focused builds,
+  installs, uninstalls and individual packages.
+- Aggregate source installation validates every required FW410 and FW1814
+  artifact before installing either device.
 - FW1814 source installation and uninstallation now include its native control panel.
 
 ### Validation
@@ -29,6 +42,8 @@ The project uses the `x.yy.zzz` version format described in [`RELEASES.md`](RELE
   the directory migration.
 - FW410 installer-package creation completed successfully from the reorganized
   source tree.
+- Individual FW410 and FW1814 installer-package creation completed successfully
+  before the unified-package staging change.
 
 ## [0.03.000] — third alpha — 2026-09-06
 

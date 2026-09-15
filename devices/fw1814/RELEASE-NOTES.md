@@ -1,6 +1,6 @@
-# macfw FW1814 0.01.000 — Alpha
+# macfw FW1814 0.4.000 — Alpha
 
-`0.01.000` is the first installable macfw development release for the
+`0.4.000` is the first installable macfw development release for the
 **M-Audio FireWire 1814**.
 
 ## Highlights
@@ -29,10 +29,16 @@ comparison with the original M-Audio control panels.
 
 ## Installation
 
-Connect and power on the FW1814, then install the device-specific package:
+The primary `0.4.000` distribution installs both supported interfaces:
 
 ```bash
-sudo installer -pkg macfw-fw1814-0.01.000-<build>.pkg -target /
+sudo installer -pkg macfw-0.4.000-<build>.pkg -target /
+```
+
+To install only the FW1814, use the device-specific package:
+
+```bash
+sudo installer -pkg macfw-fw1814-0.4.000-<build>.pkg -target /
 ```
 
 The package installs:

@@ -3,9 +3,9 @@ name: Release
 on:
   push:
     tags:
-      - '[0-9]*.[0-9][0-9].[0-9][0-9][0-9]'
-      - 'fw410-[0-9]*.[0-9][0-9].[0-9][0-9][0-9]'
-      - 'fw1814-[0-9]*.[0-9][0-9].[0-9][0-9][0-9]'
+      - '[0-9]*.[0-9]*.[0-9][0-9][0-9]'
+      - 'fw410-[0-9]*.[0-9]*.[0-9][0-9][0-9]'
+      - 'fw1814-[0-9]*.[0-9]*.[0-9][0-9][0-9]'
 
 permissions:
   contents: write
@@ -31,37 +31,50 @@ jobs:
               VERSION="${TAG#fw410-}"
               DISPLAY_NAME="M-Audio FireWire 410"
               NOTES_FILE="RELEASE-NOTES.md"
+              PACKAGE_STEM="macfw-fw410"
               ;;
             fw1814-*)
               DEVICE=fw1814
               VERSION="${TAG#fw1814-}"
               DISPLAY_NAME="M-Audio FireWire 1814"
               NOTES_FILE="devices/fw1814/RELEASE-NOTES.md"
+              PACKAGE_STEM="macfw-fw1814"
               ;;
             *)
-              # Preserve the original numeric-tag FW410 release contract.
-              DEVICE=fw410
+              DEVICE=all
               VERSION="$TAG"
-              DISPLAY_NAME="M-Audio FireWire 410"
+              DISPLAY_NAME="M-Audio FireWire 410 + FireWire 1814"
               NOTES_FILE="RELEASE-NOTES.md"
+              PACKAGE_STEM="macfw"
               ;;
           esac
 
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]{2}\.[0-9]{3}$ ]]; then
-            echo "error: release version '$VERSION' does not match x.yy.zzz" >&2
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]{3}$ ]]; then
+            echo "error: release version '$VERSION' does not match x.y.zzz" >&2
             exit 1
           fi
-          HEADER="devices/${DEVICE}/version.h"
-          SOURCE_VERSION="$(sed -n 's/^#define MACFW_VERSION "\([^"]*\)"/\1/p' "$HEADER" | head -1)"
-          if [[ -z "$SOURCE_VERSION" || "$VERSION" != "$SOURCE_VERSION" ]]; then
-            echo "error: tag version '$VERSION' does not match $HEADER version '$SOURCE_VERSION'" >&2
-            exit 1
+          if [[ "$DEVICE" == all ]]; then
+            for HEADER in devices/fw410/version.h devices/fw1814/version.h; do
+              SOURCE_VERSION="$(sed -n 's/^#define MACFW_VERSION "\([^"]*\)"/\1/p' "$HEADER" | head -1)"
+              if [[ -z "$SOURCE_VERSION" || "$VERSION" != "$SOURCE_VERSION" ]]; then
+                echo "error: tag version '$VERSION' does not match $HEADER version '$SOURCE_VERSION'" >&2
+                exit 1
+              fi
+            done
+          else
+            HEADER="devices/${DEVICE}/version.h"
+            SOURCE_VERSION="$(sed -n 's/^#define MACFW_VERSION "\([^"]*\)"/\1/p' "$HEADER" | head -1)"
+            if [[ -z "$SOURCE_VERSION" || "$VERSION" != "$SOURCE_VERSION" ]]; then
+              echo "error: tag version '$VERSION' does not match $HEADER version '$SOURCE_VERSION'" >&2
+              exit 1
+            fi
           fi
 
           echo "RELEASE_DEVICE=$DEVICE" >> "$GITHUB_ENV"
           echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "RELEASE_DISPLAY_NAME=$DISPLAY_NAME" >> "$GITHUB_ENV"
           echo "RELEASE_NOTES_FILE=$NOTES_FILE" >> "$GITHUB_ENV"
+          echo "RELEASE_PACKAGE_STEM=$PACKAGE_STEM" >> "$GITHUB_ENV"
           echo "release device: $DEVICE"
           echo "release version: $VERSION"
           echo "commit: $(git rev-parse HEAD)"
@@ -70,17 +83,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          make clean
-          make "${RELEASE_DEVICE}-package"
+          if [[ "$RELEASE_DEVICE" == all ]]; then
+            make package
+          else
+            make clean
+            make "${RELEASE_DEVICE}-package"
+          fi
 
       - name: Validate package artifact
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
-          pkgs=(package/dist/macfw-${RELEASE_DEVICE}-${RELEASE_VERSION}-*.pkg)
+          pkgs=(package/dist/${RELEASE_PACKAGE_STEM}-${RELEASE_VERSION}-*.pkg)
           if [[ ${#pkgs[@]} -ne 1 ]]; then
-            echo "error: expected exactly one ${RELEASE_DEVICE} package, found ${#pkgs[@]}" >&2
+            echo "error: expected exactly one ${RELEASE_PACKAGE_STEM} package, found ${#pkgs[@]}" >&2
             printf '  %s\n' "${pkgs[@]:-}"
             exit 1
           fi

@@ -4,11 +4,11 @@ Modern FireWire audio support for macOS.
 
 `macfw` is an open-source reverse-engineering and compatibility project focused on bringing legacy IEEE 1394 / FireWire audio interfaces back to life on modern macOS systems.
 
-The released target is the **M-Audio FireWire 410**. The **M-Audio FireWire 1814** is the second, currently experimental target, and the repository separates reusable FireWire/audio components from device-specific implementations.
+The supported targets are the **M-Audio FireWire 410** and **M-Audio FireWire 1814**. The repository separates reusable FireWire/audio components from device-specific implementations.
 
 ## Current status
 
-The FW410 implementation is now on its **third installable alpha release line (`0.03.000`)** for Intel macOS. Native audio, recovery, low-latency scheduling, runtime rate switching and the current control-panel release scope are hardware-validated on real FW410 hardware.
+The project is now on the unified **`0.4.000` alpha release line** for Intel macOS. Root builds and installation cover both supported interfaces, and the primary package contains both independently namespaced device stacks. Native audio, recovery, rate switching and the current control-panel scopes are hardware-validated on real FW410 and FW1814 hardware.
 
 Hardware-validated functionality includes:
 
@@ -51,7 +51,7 @@ Current cumulative macOS hardware-test status:
 
 Apple Silicon is not currently supported. See [`COMPATIBILITY.md`](COMPATIBILITY.md) and [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) for the evidence-based compatibility status.
 
-The FW1814 implementation now has hardware-validated analog full-duplex CoreAudio operation, 44.1/48 kHz switching, reconnect recovery, persistent analog mixer/routing controls and a native AppKit control panel. Separate source-install and `.pkg` targets keep it isolated from the FW410 runtime while allowing both interfaces and control panels to coexist. See [`devices/fw1814/README.md`](devices/fw1814/README.md) for its current scope.
+The FW1814 implementation now has hardware-validated analog full-duplex CoreAudio operation, 44.1/48 kHz switching, reconnect recovery, persistent analog mixer/routing controls and a native AppKit control panel. Its runtime remains isolated from the FW410 while the unified source-install and `.pkg` paths install both interfaces. See [`devices/fw1814/README.md`](devices/fw1814/README.md) for its current scope.
 
 macOS Tahoe 26 is not currently supported because Apple removed the built-in FireWire stack on which macfw depends. Future Tahoe support may become possible through integration with an alternative stack such as [`ASFireWire`](https://github.com/mrmidi/ASFireWire), but that path is experimental and has not been integrated or validated with macfw.
 

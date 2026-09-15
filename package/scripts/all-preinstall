@@ -1,0 +1,31 @@
+#!/bin/bash
+set -euo pipefail
+
+GATE_ROOT="${MACFW_GATE_ROOT:-/tmp/macfw-all-package}"
+FW410_PROBE="$GATE_ROOT/deviceprobe"
+FW1814_PROBE="$GATE_ROOT/fw1814deviceprobe"
+
+if [[ ! -x "$FW410_PROBE" || ! -x "$FW1814_PROBE" ]]; then
+    echo "macfw installer: one or more hardware-gate helpers are missing" >&2
+    exit 1
+fi
+
+set +e
+"$FW410_PROBE" --require-supported
+fw410_status=$?
+"$FW1814_PROBE" --require-supported
+fw1814_status=$?
+set -e
+
+if [[ $fw410_status -eq 0 || $fw1814_status -eq 0 ]]; then
+    exit 0
+fi
+
+if [[ $fw410_status -eq 3 && $fw1814_status -eq 3 ]]; then
+    echo "macfw installer: no supported FireWire interface is connected." >&2
+    echo "Connect an M-Audio FireWire 410 or FireWire 1814 and run the installer again." >&2
+else
+    echo "macfw installer: device detection failed (FW410=$fw410_status, FW1814=$fw1814_status)." >&2
+fi
+
+exit 3
