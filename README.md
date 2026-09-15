@@ -8,7 +8,7 @@ The supported targets are the **M-Audio FireWire 410** and **M-Audio FireWire 18
 
 ## Current status
 
-The project is now on the unified **`0.4.000` alpha release line** for Intel macOS. Root builds cover both supported interfaces, the default source install selects connected hardware, and the primary package contains both independently namespaced device stacks. Native audio, recovery, rate switching and the current control-panel scopes are hardware-validated on real FW410 and FW1814 hardware.
+The project is now on the unified **`0.4.000` alpha release line** for Intel macOS. Root builds cover both supported interfaces, the default source install selects connected hardware, and the combined package contains both independently namespaced payloads while installing only connected hardware. Focused FW410-only and FW1814-only packages are also available. Native audio, recovery, rate switching and the current control-panel scopes are hardware-validated on real FW410 and FW1814 hardware.
 
 Hardware-validated functionality includes:
 

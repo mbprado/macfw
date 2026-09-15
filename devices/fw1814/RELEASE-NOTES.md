@@ -15,6 +15,9 @@
 - Device-specific source install/uninstall and macOS installer package.
 - Independent FW1814 paths allow the FW410 and FW1814 drivers and control
   panels to coexist.
+- Hardware detection distinguishes the FW1814 operational identity (`FW 1814`)
+  and bootloader identity (`FW 1814 Bootloader`) from the FW410 generic
+  `FW Bootloader` identity.
 
 ## Current scope
 
@@ -29,13 +32,16 @@ comparison with the original M-Audio control panels.
 
 ## Installation
 
-The primary `0.4.000` distribution installs both supported interfaces:
+The primary `0.4.000` distribution contains both device payloads and installs
+only the connected interface stack(s):
 
 ```bash
 sudo installer -pkg macfw-0.4.000-<build>.pkg -target /
 ```
 
-To install only the FW1814, use the device-specific package:
+If both interfaces are connected, both stacks are installed. To install only
+the FW1814 package regardless of FW410 presence, use the device-specific
+package:
 
 ```bash
 sudo installer -pkg macfw-fw1814-0.4.000-<build>.pkg -target /

@@ -79,12 +79,14 @@ jobs:
           echo "release version: $VERSION"
           echo "commit: $(git rev-parse HEAD)"
 
-      - name: Build release package
+      - name: Build release packages
         shell: bash
         run: |
           set -euo pipefail
           if [[ "$RELEASE_DEVICE" == all ]]; then
             make package
+            make fw410-package
+            make fw1814-package
           else
             make clean
             make "${RELEASE_DEVICE}-package"
@@ -95,21 +97,39 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          pkgs=(package/dist/${RELEASE_PACKAGE_STEM}-${RELEASE_VERSION}-*.pkg)
-          if [[ ${#pkgs[@]} -ne 1 ]]; then
-            echo "error: expected exactly one ${RELEASE_PACKAGE_STEM} package, found ${#pkgs[@]}" >&2
-            printf '  %s\n' "${pkgs[@]:-}"
-            exit 1
+          if [[ "$RELEASE_DEVICE" == all ]]; then
+            stems=(macfw macfw-fw410 macfw-fw1814)
+          else
+            stems=("$RELEASE_PACKAGE_STEM")
           fi
-          echo "PKG_PATH=${pkgs[0]}" >> "$GITHUB_ENV"
-          echo "PKG_NAME=$(basename "${pkgs[0]}")" >> "$GITHUB_ENV"
+          package_names=()
+          for stem in "${stems[@]}"; do
+            matches=(package/dist/${stem}-${RELEASE_VERSION}-*.pkg)
+            if [[ ${#matches[@]} -ne 1 ]]; then
+              echo "error: expected exactly one ${stem} package, found ${#matches[@]}" >&2
+              printf '  %s\n' "${matches[@]:-}"
+              exit 1
+            fi
+            package_names+=("$(basename "${matches[0]}")")
+          done
+          {
+            echo "RELEASE_PACKAGE_NAMES<<EOF"
+            printf '%s\n' "${package_names[@]}"
+            echo EOF
+          } >> "$GITHUB_ENV"
+          printf 'validated package: %s\n' "${package_names[@]}"
 
       - name: Generate SHA-256 checksums
         shell: bash
         run: |
           set -euo pipefail
           cd package/dist
-          shasum -a 256 "$PKG_NAME" > SHA256SUMS
+          mapfile -t package_names <<< "$RELEASE_PACKAGE_NAMES"
+          : > SHA256SUMS
+          for package_name in "${package_names[@]}"; do
+            [[ -n "$package_name" ]] || continue
+            shasum -a 256 "$package_name" >> SHA256SUMS
+          done
           cat SHA256SUMS
 
       - name: Create GitHub Release
@@ -118,8 +138,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mapfile -t package_names <<< "$RELEASE_PACKAGE_NAMES"
+          package_paths=()
+          for package_name in "${package_names[@]}"; do
+            [[ -n "$package_name" ]] || continue
+            package_paths+=("package/dist/$package_name")
+          done
           gh release create "$GITHUB_REF_NAME" \
-            "$PKG_PATH" \
+            "${package_paths[@]}" \
             package/dist/SHA256SUMS \
             --title "macfw ${RELEASE_DISPLAY_NAME} ${RELEASE_VERSION} Alpha" \
             --notes-file "$RELEASE_NOTES_FILE" \

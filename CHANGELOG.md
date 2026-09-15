@@ -11,6 +11,13 @@ The project uses the `x.y.zzz` version format described in [`RELEASES.md`](RELEA
 - Root `sudo make install` now detects the connected supported interface and
   installs only its matching device stack instead of aborting on the other
   model's hardware gate.
+- The combined installer no longer cross-detects an FW410 in its generic
+  `FW Bootloader` personality as an FW1814. FW1814 bootloader detection now
+  requires the model-specific `FW 1814 Bootloader` identity.
+- Combined package installation now installs only the connected interface
+  stack(s), while retaining both payloads in the distributable package.
+- Device-specific package failures now identify the required M-Audio model
+  and the supported operational/bootloader modes.
 
 ### Added
 
@@ -40,6 +47,8 @@ The project uses the `x.y.zzz` version format described in [`RELEASES.md`](RELEA
 - Root `make`, component builds, uninstall and package targets now operate on
   both supported interfaces by default; `sudo make install` selects the
   connected interface while `sudo make install-force` installs both.
+- Numeric release builds produce the combined, FW410-only and FW1814-only
+  installer packages with one shared version and build identity.
 - Added explicit namespaced FW410 and FW1814 targets for focused builds,
   installs, uninstalls and individual packages.
 - Forced source installation validates every required FW410 and FW1814
@@ -52,8 +61,10 @@ The project uses the `x.y.zzz` version format described in [`RELEASES.md`](RELEA
   the directory migration.
 - FW410 installer-package creation completed successfully from the reorganized
   source tree.
-- Individual FW410 and FW1814 installer-package creation completed successfully
-  before the unified-package staging change.
+- Individual FW410 and FW1814 installer-package creation and installation were
+  validated in their matching operational and bootloader modes.
+- The combined package was validated to refuse installation with no supported
+  interface and to select the connected FW410/FW1814 stack(s).
 
 ## [0.03.000] — third alpha — 2026-09-06
 

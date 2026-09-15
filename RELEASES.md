@@ -58,11 +58,12 @@ The intended release flow is:
 2. Update the changelog, release notes, limitations, compatibility and install documentation.
 3. Merge the validated release-candidate work into `main`.
 4. Confirm both embedded component versions match the intended release.
-5. Build/check the combined package from `main`.
+5. Build/check the combined, FW410-only and FW1814-only packages from `main`.
 6. Create and push the numeric version tag on the release commit.
 7. GitHub Actions validates the tag and both component versions.
-8. The workflow builds the combined installer and SHA-256 checksum.
-9. It creates the prerelease and attaches the package/checksum artifacts.
+8. The workflow builds the combined, FW410-only and FW1814-only installers and
+   one SHA-256 checksum file covering all three packages.
+9. It creates the prerelease and attaches all package/checksum artifacts.
 
 Release tags must identify the intended `main` release commit, not an
 experiment or development branch.
@@ -75,10 +76,11 @@ The primary binary distribution is the combined native macOS installer:
 macfw-x.y.zzz-<build>.pkg
 ```
 
-It contains the FW410 and FW1814 CoreAudio HAL plug-ins, namespaced
+It contains FW410 and FW1814 payloads: CoreAudio HAL plug-ins, namespaced
 transport/control runtimes, persistent-state helpers, build metadata, launchd
 definitions and native control panels. Its hardware gate accepts either
-supported interface; installing the bundle installs support for both.
+supported interface, and the postinstall selector installs only the connected
+interface stack(s). If both are connected, both are installed.
 
 Device-specific packages remain available:
 
@@ -130,7 +132,8 @@ part of a normal end-user installation.
 ## Checksums
 
 Release automation publishes SHA-256 checksums for distributable binary
-artifacts in `SHA256SUMS`. At minimum it must cover the published `.pkg`.
+artifacts in `SHA256SUMS`. A unified release must cover the combined, FW410-only
+and FW1814-only `.pkg` artifacts.
 
 ## Signing and notarization
 
@@ -170,10 +173,15 @@ Before tagging `0.4.000`, verify at minimum:
 - detected FW1814 source installation with `sudo make install`;
 - forced two-device source installation with `sudo make install-force`;
 - both interface control panels, HAL plug-ins and namespaced services are installed;
-- `make package` produces exactly one combined installer;
-- `make fw410-package` and `make fw1814-package` still produce individual installers;
-- combined installation succeeds with an FW410 connected;
-- combined installation succeeds with an FW1814 connected;
+- `make package` produces the combined installer plus the FW410-only and
+  FW1814-only installers;
+- each individual package installs only its named interface;
+- combined installation succeeds with an FW410 operational or bootloader unit
+  connected and installs FW410 only;
+- combined installation succeeds with an FW1814 operational or bootloader unit
+  connected and installs FW1814 only;
+- combined installation installs both stacks when both interfaces are connected;
+- combined installation refuses when no supported interface is connected;
 - each transport reaches `ONLINE` when its matching hardware is connected;
 - FW410 44.1/48 kHz audio, controls, persistence and recovery remain regression-free;
 - FW1814 44.1/48 kHz analog audio, controls, persistence and recovery remain regression-free;

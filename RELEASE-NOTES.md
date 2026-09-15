@@ -9,13 +9,20 @@ control-panel applications.
 
 ## Highlights
 
-- One `macfw-0.4.000-<build>.pkg` installs support for both interfaces.
+- One `macfw-0.4.000-<build>.pkg` contains both payloads and installs only the
+  connected interface stack(s); if both interfaces are connected, both are
+  installed.
+- `macfw-fw410-0.4.000-<build>.pkg` and
+  `macfw-fw1814-0.4.000-<build>.pkg` are available as focused installers.
 - Root `make` builds the FW410 and FW1814 HAL, release runtime and control panel.
-- `sudo make install` detects the connected supported interface and installs its matching stack.
+- `sudo make install` detects the connected supported interface(s) and installs
+  only the matching stack(s).
 - `sudo make install-force` preflights every required artifact, then installs both interfaces without hardware detection.
 - Device-specific build, install and package targets remain available.
 - FW1814 reaches its first installable control-panel release scope.
 - FW410 retains the hardware-validated `0.03.000` audio/control baseline.
+- Package hardware detection distinguishes the FW410 generic `FW Bootloader`
+  identity from the model-specific `FW 1814 Bootloader` identity.
 
 ## FW1814 release scope
 
@@ -81,12 +88,18 @@ The output is:
 
 ```text
 package/dist/macfw-0.4.000-<build>.pkg
+package/dist/macfw-fw410-0.4.000-<build>.pkg
+package/dist/macfw-fw1814-0.4.000-<build>.pkg
 ```
 
-The combined hardware gate accepts either a connected FW410 or FW1814 and then
-installs both namespaced device stacks. Focused installers remain available via
-`make fw410-package` and `make fw1814-package`; their gates still require the
-matching interface.
+The combined hardware gate accepts either a connected FW410 or FW1814. Its
+postinstall probe then installs only the matching namespaced device stack(s).
+Focused installers remain available via `make fw410-package` and
+`make fw1814-package`; their gates still require the matching interface.
+
+For a clean package test, remove any previous installation first. An individual
+package contains only its named device; an already-installed other device is not
+removed automatically.
 
 Installed user-facing applications are:
 
