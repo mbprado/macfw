@@ -51,6 +51,11 @@ else
     fi
 fi
 
+if [[ "${1:-}" == "--check-only" ]]; then
+    echo "hardware and runtime preflight passed"
+    exit 0
+fi
+
 launchctl bootout system/$LABEL >/dev/null 2>&1 || true
 
 install -d -o root -g wheel -m 0755 "$BIN_DIR"

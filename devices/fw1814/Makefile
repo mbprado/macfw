@@ -38,6 +38,7 @@ install: install-check
 		echo "error: FW1814 install must be run as root (use sudo make fw1814-install)" >&2; \
 		exit 1; \
 	fi
+	bash service/install-service.sh --check-only
 	$(MAKE) -C hal install
 	bash service/install-service.sh
 	$(MAKE) -C control-panel install

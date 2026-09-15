@@ -29,9 +29,12 @@ std::optional<std::uint64_t> numberProperty(io_registry_entry_t s,const char *ke
 bool supported(const Unit& u,std::string& personality){
     if(!u.vendor||!u.specifier||!u.software||*u.vendor!=kVendor||*u.specifier!=kSpecifier||*u.software!=kSpecialFirmware)return false;
     if(u.product=="FW 1814"){personality="operational";return true;}
-    // The generic M-Audio bootloader identity is accepted here. fwboot1814
-    // performs the model-specific guarded preflight before sending a boot cue.
-    if(u.product=="FW Bootloader"){personality="bootloader (guarded by fwboot1814)";return true;}
+    // Both the generic and model-specific M-Audio bootloader identities are
+    // accepted here. fwboot1814 performs the model-specific guarded preflight
+    // before sending a boot cue.
+    if(u.product=="FW Bootloader"||u.product=="FW 1814 Bootloader"){
+        personality="bootloader (guarded by fwboot1814)";return true;
+    }
     return false;
 }
 void printNumber(const char *label,const std::optional<std::uint64_t>& v){
