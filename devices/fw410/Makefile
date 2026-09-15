@@ -1,6 +1,6 @@
 PREFIX ?= /Library/Application Support/macfw/fw410
 
-.PHONY: all clean install uninstall hal runtime all-tools gui
+.PHONY: all clean install-check install uninstall hal runtime all-tools gui
 
 all: hal runtime gui
 
@@ -16,11 +16,7 @@ gui:
 all-tools:
 	$(MAKE) -C tools all
 
-install:
-	@if [ "$$(id -u)" -ne 0 ]; then \
-		echo "error: make install must be run as root (use sudo make install)" >&2; \
-		exit 1; \
-	fi
+install-check:
 	@if [ ! -x hal/build/macfw-fw410.driver/Contents/MacOS/macfw-fw410 ] || \
 	    [ ! -x tools/transport/haltransport/haltransport ] || \
 	    [ ! -x tools/transport/halbridge44100/halbridge44100 ] || \
@@ -32,9 +28,16 @@ install:
 	    [ ! -x tools/device/fwboot/fwboot ] || \
 	    [ ! -x tools/device/deviceprobe/deviceprobe ] || \
 	    [ ! -x "control-panel/build/macfw-fw410-control.app/Contents/MacOS/macfw-fw410-control" ]; then \
-		echo "error: installable artifacts are not built; run 'make' as a normal user first" >&2; \
+		echo "error: installable FW410 artifacts are not built; run 'make fw410' as a normal user first" >&2; \
 		exit 1; \
 	fi
+
+install: install-check
+	@if [ "$$(id -u)" -ne 0 ]; then \
+		echo "error: make install must be run as root (use sudo make install)" >&2; \
+		exit 1; \
+	fi
+	bash service/install-service.sh --check-only
 	$(MAKE) -C hal install
 	bash service/install-service.sh
 	$(MAKE) -C control-panel install

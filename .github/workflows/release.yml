@@ -3,7 +3,9 @@ name: Release
 on:
   push:
     tags:
-      - '[0-9]*.[0-9][0-9].[0-9][0-9][0-9]'
+      - '[0-9]*.[0-9]*.[0-9][0-9][0-9]'
+      - 'fw410-[0-9]*.[0-9]*.[0-9][0-9][0-9]'
+      - 'fw1814-[0-9]*.[0-9]*.[0-9][0-9][0-9]'
 
 permissions:
   contents: write
@@ -18,58 +20,116 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate tag and source version
+      - name: Resolve device and validate version
         shell: bash
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
+          case "$TAG" in
+            fw410-*)
+              DEVICE=fw410
+              VERSION="${TAG#fw410-}"
+              DISPLAY_NAME="M-Audio FireWire 410"
+              NOTES_FILE="RELEASE-NOTES.md"
+              PACKAGE_STEM="macfw-fw410"
+              ;;
+            fw1814-*)
+              DEVICE=fw1814
+              VERSION="${TAG#fw1814-}"
+              DISPLAY_NAME="M-Audio FireWire 1814"
+              NOTES_FILE="devices/fw1814/RELEASE-NOTES.md"
+              PACKAGE_STEM="macfw-fw1814"
+              ;;
+            *)
+              DEVICE=all
+              VERSION="$TAG"
+              DISPLAY_NAME="M-Audio FireWire 410 + FireWire 1814"
+              NOTES_FILE="RELEASE-NOTES.md"
+              PACKAGE_STEM="macfw"
+              ;;
+          esac
 
-          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]{2}\.[0-9]{3}$ ]]; then
-            echo "error: release tag '$TAG' does not match x.yy.zzz" >&2
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]{3}$ ]]; then
+            echo "error: release version '$VERSION' does not match x.y.zzz" >&2
             exit 1
           fi
-
-          VERSION="$(sed -n 's/^#define MACFW_VERSION "\([^"]*\)"/\1/p' devices/fw410/version.h | head -1)"
-          if [[ -z "$VERSION" ]]; then
-            echo "error: unable to read MACFW_VERSION from devices/fw410/version.h" >&2
-            exit 1
+          if [[ "$DEVICE" == all ]]; then
+            for HEADER in devices/fw410/version.h devices/fw1814/version.h; do
+              SOURCE_VERSION="$(sed -n 's/^#define MACFW_VERSION "\([^"]*\)"/\1/p' "$HEADER" | head -1)"
+              if [[ -z "$SOURCE_VERSION" || "$VERSION" != "$SOURCE_VERSION" ]]; then
+                echo "error: tag version '$VERSION' does not match $HEADER version '$SOURCE_VERSION'" >&2
+                exit 1
+              fi
+            done
+          else
+            HEADER="devices/${DEVICE}/version.h"
+            SOURCE_VERSION="$(sed -n 's/^#define MACFW_VERSION "\([^"]*\)"/\1/p' "$HEADER" | head -1)"
+            if [[ -z "$SOURCE_VERSION" || "$VERSION" != "$SOURCE_VERSION" ]]; then
+              echo "error: tag version '$VERSION' does not match $HEADER version '$SOURCE_VERSION'" >&2
+              exit 1
+            fi
           fi
 
-          if [[ "$TAG" != "$VERSION" ]]; then
-            echo "error: tag '$TAG' does not match source version '$VERSION'" >&2
-            exit 1
-          fi
-
+          echo "RELEASE_DEVICE=$DEVICE" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_DISPLAY_NAME=$DISPLAY_NAME" >> "$GITHUB_ENV"
+          echo "RELEASE_NOTES_FILE=$NOTES_FILE" >> "$GITHUB_ENV"
+          echo "RELEASE_PACKAGE_STEM=$PACKAGE_STEM" >> "$GITHUB_ENV"
+          echo "release device: $DEVICE"
           echo "release version: $VERSION"
           echo "commit: $(git rev-parse HEAD)"
 
-      - name: Build release package
+      - name: Build release packages
         shell: bash
         run: |
           set -euo pipefail
-          make clean
-          make package
+          if [[ "$RELEASE_DEVICE" == all ]]; then
+            make package
+            make fw410-package
+            make fw1814-package
+          else
+            make clean
+            make "${RELEASE_DEVICE}-package"
+          fi
 
       - name: Validate package artifact
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
-          pkgs=(package/dist/macfw-fw410-${GITHUB_REF_NAME}-*.pkg)
-          if [[ ${#pkgs[@]} -ne 1 ]]; then
-            echo "error: expected exactly one package for ${GITHUB_REF_NAME}, found ${#pkgs[@]}" >&2
-            printf '  %s\n' "${pkgs[@]:-}"
-            exit 1
+          if [[ "$RELEASE_DEVICE" == all ]]; then
+            stems=(macfw macfw-fw410 macfw-fw1814)
+          else
+            stems=("$RELEASE_PACKAGE_STEM")
           fi
-          echo "PKG_PATH=${pkgs[0]}" >> "$GITHUB_ENV"
-          echo "PKG_NAME=$(basename "${pkgs[0]}")" >> "$GITHUB_ENV"
+          package_names=()
+          for stem in "${stems[@]}"; do
+            matches=(package/dist/${stem}-${RELEASE_VERSION}-*.pkg)
+            if [[ ${#matches[@]} -ne 1 ]]; then
+              echo "error: expected exactly one ${stem} package, found ${#matches[@]}" >&2
+              printf '  %s\n' "${matches[@]:-}"
+              exit 1
+            fi
+            package_names+=("$(basename "${matches[0]}")")
+          done
+          {
+            echo "RELEASE_PACKAGE_NAMES<<EOF"
+            printf '%s\n' "${package_names[@]}"
+            echo EOF
+          } >> "$GITHUB_ENV"
+          printf 'validated package: %s\n' "${package_names[@]}"
 
       - name: Generate SHA-256 checksums
         shell: bash
         run: |
           set -euo pipefail
           cd package/dist
-          shasum -a 256 "$PKG_NAME" > SHA256SUMS
+          mapfile -t package_names <<< "$RELEASE_PACKAGE_NAMES"
+          : > SHA256SUMS
+          for package_name in "${package_names[@]}"; do
+            [[ -n "$package_name" ]] || continue
+            shasum -a 256 "$package_name" >> SHA256SUMS
+          done
           cat SHA256SUMS
 
       - name: Create GitHub Release
@@ -78,9 +138,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mapfile -t package_names <<< "$RELEASE_PACKAGE_NAMES"
+          package_paths=()
+          for package_name in "${package_names[@]}"; do
+            [[ -n "$package_name" ]] || continue
+            package_paths+=("package/dist/$package_name")
+          done
           gh release create "$GITHUB_REF_NAME" \
-            "$PKG_PATH" \
+            "${package_paths[@]}" \
             package/dist/SHA256SUMS \
-            --title "macfw ${GITHUB_REF_NAME} Alpha" \
-            --notes-file RELEASE-NOTES.md \
+            --title "macfw ${RELEASE_DISPLAY_NAME} ${RELEASE_VERSION} Alpha" \
+            --notes-file "$RELEASE_NOTES_FILE" \
             --prerelease

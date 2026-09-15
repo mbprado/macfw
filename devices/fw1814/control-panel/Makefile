@@ -2,13 +2,13 @@ CXX ?= c++
 GIT_SHA := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 VERSION := $(shell sed -n 's/^\#define MACFW_VERSION "\([^"]*\)"/\1/p' ../version.h | head -1)
 CPPFLAGS += -I.. -DMACFW_GIT_SHA=\"$(GIT_SHA)\"
-APP := build/macfw-fw410-control.app
-INSTALL_APP := /Applications/macfw FW410 Control.app
+APP := build/macfw-fw1814-control.app
+INSTALL_APP := /Applications/macfw FW1814 Control.app
 CONTENTS := $(APP)/Contents
 MACOS := $(CONTENTS)/MacOS
 RESOURCES := $(CONTENTS)/Resources
-BINARY := $(MACOS)/macfw-fw410-control
-SOURCES := Sources/main.mm Sources/outputs_extension.mm Sources/mixer_extension.mm Sources/slider_async_extension.mm Sources/headphone_mixer_async_extension.mm Sources/meter_extension.mm Sources/device_extension.mm Sources/diagnostics_extension.mm Sources/device_latency_display_extension.mm
+BINARY := $(MACOS)/macfw-fw1814-control
+SOURCES := Sources/main.mm
 ICON := icon.png
 ICONSET := build/icon.iconset
 ICNS := $(RESOURCES)/icon.icns
@@ -32,7 +32,7 @@ $(ICNS): $(ICON)
 	iconutil -c icns "$(ICONSET)" -o "$(ICNS)"
 	cp "$(ICON)" "$(RESOURCES)/icon.png"
 
-$(BINARY): $(SOURCES) Sources/stereo_link.h Sources/slider_commit.h Info.plist $(ICNS) ../version.h
+$(BINARY): $(SOURCES) Sources/slider_commit.h Info.plist $(ICNS) ../version.h
 	mkdir -p "$(MACOS)" "$(RESOURCES)"
 	cp Info.plist "$(CONTENTS)/Info.plist"
 	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(VERSION)" "$(CONTENTS)/Info.plist"
@@ -48,12 +48,10 @@ run: all
 
 install:
 	@if [ "$$(id -u)" -ne 0 ]; then \
-		echo "error: control-panel install must be run as root" >&2; \
-		exit 1; \
+		echo "error: control-panel install must be run as root" >&2; exit 1; \
 	fi
 	@if [ ! -x "$(BINARY)" ]; then \
-		echo "error: control panel is not built; run 'make gui' as a normal user first" >&2; \
-		exit 1; \
+		echo "error: control panel is not built; run 'make fw1814-gui' as a normal user first" >&2; exit 1; \
 	fi
 	rm -rf "$(INSTALL_APP)"
 	cp -R "$(APP)" "$(INSTALL_APP)"
@@ -61,8 +59,7 @@ install:
 
 uninstall:
 	@if [ "$$(id -u)" -ne 0 ]; then \
-		echo "error: control-panel uninstall must be run as root" >&2; \
-		exit 1; \
+		echo "error: control-panel uninstall must be run as root" >&2; exit 1; \
 	fi
 	rm -rf "$(INSTALL_APP)"
 

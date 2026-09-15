@@ -1,0 +1,19 @@
+#!/bin/bash
+set -euo pipefail
+PROBE="/tmp/macfw-fw1814-package/fw1814deviceprobe"
+if [[ ! -x "$PROBE" ]]; then
+    echo "macfw FW1814 installer: hardware-gate helper is missing" >&2
+    exit 1
+fi
+set +e
+"$PROBE" --require-supported
+status=$?
+set -e
+if [[ $status -eq 0 ]]; then exit 0; fi
+if [[ $status -eq 3 ]]; then
+    echo "macfw FW1814 installer: no supported M-Audio FireWire 1814 was detected." >&2
+    echo "Connect a FireWire 1814 in operational or bootloader mode and run this package again." >&2
+else
+    echo "macfw FW1814 installer: device detection failed with status $status." >&2
+fi
+exit "$status"

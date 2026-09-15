@@ -313,7 +313,7 @@ sudo make install
 
 ## Release policy
 
-The project release contract is documented in [`../../RELEASES.md`](../../RELEASES.md). The agreed version format is `x.yy.zzz`.
+The project release contract is documented in [`../../RELEASES.md`](../../RELEASES.md). New unified releases use the `x.y.zzz` format; historical zero-padded middle fields remain valid.
 
 ## Disclaimer
 

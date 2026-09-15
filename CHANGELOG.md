@@ -2,18 +2,58 @@
 
 All notable user-visible changes to macfw releases are recorded here.
 
-The project uses the `x.yy.zzz` version format described in [`RELEASES.md`](RELEASES.md).
+The project uses the `x.y.zzz` version format described in [`RELEASES.md`](RELEASES.md).
 
 ## [Unreleased]
+
+### Fixed
+
+- Root `sudo make install` now detects the connected supported interface and
+  installs only its matching device stack instead of aborting on the other
+  model's hardware gate.
+- The combined installer no longer cross-detects an FW410 in its generic
+  `FW Bootloader` personality as an FW1814. FW1814 bootloader detection now
+  requires the model-specific `FW 1814 Bootloader` identity.
+- Combined package installation now installs only the connected interface
+  stack(s), while retaining both payloads in the distributable package.
+- Device-specific package failures now identify the required M-Audio model
+  and the supported operational/bootloader modes.
+
+### Added
+
+- `sudo make install-force` validates both build trees and installs both
+  namespaced stacks without requiring either interface to be connected.
+
+## [0.4.000] — fourth alpha — 2026-09-15
+
+### Added
+
+- Native AppKit FW1814 control panel covering the hardware-validated analog
+  mixer, input monitor level/pan, analog output, headphone and AUX controls.
+- Device-specific `fw1814-package` target and generalized package builder for
+  independent FW410/FW1814 installers.
+- FW1814 installer hardware gate and runtime build metadata.
+- Unified `macfw-0.4.000-<build>.pkg` installer containing both supported
+  interface drivers, runtimes and control panels.
+- Combined installer hardware gate that accepts either a connected FW410 or
+  FW1814 while retaining stricter model-specific gates for individual packages.
 
 ### Changed
 
 - Moved the complete FW410 source implementation from `fw410/` to
   `devices/fw410/`, colocating both supported interface implementations under
   the multi-device layout.
-- Added explicit namespaced FW410 root targets and `make all-interfaces` while
-  preserving FW410 as the default for `make`, `make install` and
-  `make package`.
+- Unified FW410 and FW1814 component versions at `0.4.000`.
+- Root `make`, component builds, uninstall and package targets now operate on
+  both supported interfaces by default; `sudo make install` selects the
+  connected interface while `sudo make install-force` installs both.
+- Numeric release builds produce the combined, FW410-only and FW1814-only
+  installer packages with one shared version and build identity.
+- Added explicit namespaced FW410 and FW1814 targets for focused builds,
+  installs, uninstalls and individual packages.
+- Forced source installation validates every required FW410 and FW1814
+  artifact before installing either device.
+- FW1814 source installation and uninstallation now include its native control panel.
 
 ### Validation
 
@@ -21,6 +61,10 @@ The project uses the `x.yy.zzz` version format described in [`RELEASES.md`](RELE
   the directory migration.
 - FW410 installer-package creation completed successfully from the reorganized
   source tree.
+- Individual FW410 and FW1814 installer-package creation and installation were
+  validated in their matching operational and bootloader modes.
+- The combined package was validated to refuse installation with no supported
+  interface and to select the connected FW410/FW1814 stack(s).
 
 ## [0.03.000] — third alpha — 2026-09-06
 

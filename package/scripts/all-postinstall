@@ -1,0 +1,81 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+GATE_ROOT="${MACFW_GATE_ROOT:-/tmp/macfw-all-package}"
+PAYLOAD_ROOT="$GATE_ROOT/payload"
+FW410_PROBE="$GATE_ROOT/deviceprobe"
+FW1814_PROBE="$GATE_ROOT/fw1814deviceprobe"
+trap 'rm -rf "$GATE_ROOT"' EXIT
+
+if [[ ! -x "$FW410_PROBE" || ! -x "$FW1814_PROBE" ]]; then
+    echo "macfw installer: one or more hardware-detection helpers are missing" >&2
+    exit 1
+fi
+
+set +e
+"$FW410_PROBE" --require-supported >/dev/null 2>&1
+fw410_status=$?
+"$FW1814_PROBE" --require-supported >/dev/null 2>&1
+fw1814_status=$?
+set -e
+
+if [[ $fw410_status -ne 0 && $fw1814_status -ne 0 ]]; then
+    echo "macfw installer: supported hardware was disconnected during installation" >&2
+    exit 3
+fi
+
+install_payload() {
+    local slug="$1"
+    local source="$PAYLOAD_ROOT/$slug"
+    local app_name hal_name runtime_name plist_name label
+
+    if [[ "$slug" == fw410 ]]; then
+        app_name="macfw FW410 Control.app"
+        hal_name="macfw-fw410.driver"
+        runtime_name="fw410"
+        plist_name="com.mbprado.macfw.fw410.transport.plist"
+        label="com.mbprado.macfw.fw410.transport"
+    else
+        app_name="macfw FW1814 Control.app"
+        hal_name="macfw-fw1814.driver"
+        runtime_name="fw1814"
+        plist_name="com.mbprado.macfw.fw1814.transport.plist"
+        label="com.mbprado.macfw.fw1814.transport"
+    fi
+
+    launchctl bootout "system/$label" >/dev/null 2>&1 || true
+    rm -rf \
+        "/Applications/$app_name" \
+        "/Library/Audio/Plug-Ins/HAL/$hal_name" \
+        "/Library/Application Support/macfw/$runtime_name" \
+        "/Library/LaunchDaemons/$plist_name"
+    ditto "$source/Applications/$app_name" "/Applications/$app_name"
+    ditto "$source/Library/Audio/Plug-Ins/HAL/$hal_name" \
+        "/Library/Audio/Plug-Ins/HAL/$hal_name"
+    ditto "$source/Library/Application Support/macfw/$runtime_name" \
+        "/Library/Application Support/macfw/$runtime_name"
+    ditto "$source/Library/LaunchDaemons/$plist_name" \
+        "/Library/LaunchDaemons/$plist_name"
+}
+
+if [[ $fw410_status -eq 0 ]]; then
+    echo "macfw installer: detected FW410; installing FW410 support"
+    install_payload fw410
+    MACFW_SKIP_COREAUDIO_RESTART=1 bash "$SCRIPT_DIR/fw410-postinstall"
+elif [[ $fw410_status -ne 3 ]]; then
+    echo "macfw installer: FW410 detection failed with status $fw410_status" >&2
+fi
+
+if [[ $fw1814_status -eq 0 ]]; then
+    echo "macfw installer: detected FW1814; installing FW1814 support"
+    install_payload fw1814
+    MACFW_SKIP_COREAUDIO_RESTART=1 bash "$SCRIPT_DIR/fw1814-postinstall"
+elif [[ $fw1814_status -ne 3 ]]; then
+    echo "macfw installer: FW1814 detection failed with status $fw1814_status" >&2
+fi
+
+killall coreaudiod >/dev/null 2>&1 || true
+
+exit 0

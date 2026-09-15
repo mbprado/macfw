@@ -1,178 +1,152 @@
-# macfw 0.03.000 — Alpha
+# macfw 0.4.000 — Alpha
 
-`0.03.000` is the third installable macfw development release for the **M-Audio FireWire 410**.
+`0.4.000` is the first unified macfw development release for the **M-Audio
+FireWire 410** and **M-Audio FireWire 1814**.
 
-This release focuses on real-time audio quality, lower software-monitoring latency, completion of the current control-panel release scope, and a more reliable 44.1/48 kHz runtime lifecycle.
+Both interfaces now share one project version and one primary installer while
+retaining independent drivers, transport services, control state and native
+control-panel applications.
 
 ## Highlights
 
-- Hardware-validated low-latency full-duplex operation at **44.1 kHz and 48 kHz**.
-- Dedicated Mach-paced real-time audio service thread at both supported rates.
-- `THREAD_TIME_CONSTRAINT_POLICY` scheduling for the audio service path.
-- Capture prefill reduced from the earlier 4,096-frame development baseline to **256 frames**.
-- Excellent subjective round-trip software-monitoring latency in the validated physical-loopback/Logic test path.
-- New **Inputs** tab with live Analog In 1/2 and S/PDIF L/R meters.
-- New **Device** tab with active/requested sample rate, transport state, engine PID and CoreAudio buffer diagnostics.
-- 44.1/48 kHz selection directly from the control panel through the normal CoreAudio/HAL device-configuration lifecycle.
-- Expanded **Info** tab with exact GUI/HAL/runtime build identity, transport diagnostics, **Copy Diagnostics** and **Open Transport Log**.
-- Runtime build metadata persisted by both source installation and packaged installation.
-- Control-panel build cleaned up so the app is linked once without the previous Makefile target-splitting warnings.
-- `make`, `sudo make install`, and `make package` release paths corrected and revalidated.
+- One `macfw-0.4.000-<build>.pkg` contains both payloads and installs only the
+  connected interface stack(s); if both interfaces are connected, both are
+  installed.
+- `macfw-fw410-0.4.000-<build>.pkg` and
+  `macfw-fw1814-0.4.000-<build>.pkg` are available as focused installers.
+- Root `make` builds the FW410 and FW1814 HAL, release runtime and control panel.
+- `sudo make install` detects the connected supported interface(s) and installs
+  only the matching stack(s).
+- `sudo make install-force` preflights every required artifact, then installs both interfaces without hardware detection.
+- Device-specific build, install and package targets remain available.
+- FW1814 reaches its first installable control-panel release scope.
+- FW410 retains the hardware-validated `0.03.000` audio/control baseline.
+- Package hardware detection distinguishes the FW410 generic `FW Bootloader`
+  identity from the model-specific `FW 1814 Bootloader` identity.
 
-## Audio/runtime improvements
+## FW1814 release scope
 
-The native 44.1 kHz and 48 kHz engines now use the same release scheduling model:
+The FW1814 implementation provides hardware-validated analog full-duplex
+CoreAudio operation at 44.1 and 48 kHz, exposing Analog Outputs 1–4 and Analog
+Inputs 1–8. The current native AppKit control panel covers:
 
-```text
-normal/control thread
-    -> FireWire callbacks / FCP / local control IPC
+- software-return mixer levels;
+- analog-input monitor level and pan;
+- analog-output source and volume;
+- both digital-volume headphone outputs;
+- AUX sends and AUX master volume;
+- continuous linked or independent stereo-slider updates;
+- persistent control restoration across restart, rate switch and reconnect.
 
-dedicated isoch callback thread
-    -> CFRunLoop
-    -> USER_INTERACTIVE QoS
+The runtime also provides automatic bootloader recovery, launchd supervision,
+sample-rate switching through CoreAudio and physical disconnect/reconnect
+recovery. S/PDIF, ADAT, higher sample rates and MIDI remain deferred.
 
-dedicated audio service thread
-    -> playback + capture + TX servicing + meter accumulation
-    -> USER_INTERACTIVE QoS
-    -> 250 us Mach pacing
-    -> THREAD_TIME_CONSTRAINT_POLICY
-```
+## FW410 retained baseline
 
-Hardware testing showed a major reduction in cutoffs at 44.1 kHz while preserving very low perceived round-trip latency. The same architecture was then validated at 48 kHz, where perceived latency was slightly lower again.
+The existing FW410 release functionality remains included:
 
-Capture now uses a **256-frame prefill**:
+- native 44.1/48 kHz full-duplex CoreAudio audio;
+- 10 playback and 4 capture channels;
+- dedicated Mach-paced real-time audio servicing and 256-frame capture prefill;
+- control-panel and Audio MIDI Setup rate switching;
+- bootloader, reboot, delayed-attachment and disconnect/reconnect recovery;
+- main mixer, physical output, headphone and AUX controls;
+- live input meters, Device diagnostics and Info/Diagnostics;
+- persistent control state and Reset Defaults.
 
-```text
-44.1 kHz: ~5.8 ms
-48 kHz:   ~5.3 ms
-```
+The FW410 still requires extra startup work at 44.1 kHz, so 48 -> 44.1 kHz
+switching is slower than the reverse direction.
 
-This value is one internal buffering component; it is not presented as complete CoreAudio or end-to-end latency.
+## Build and installation
 
-## Sample-rate switching
-
-Runtime switching remains available through both Audio MIDI Setup and the macfw Device tab.
-
-The FW410 still requires extra device-specific work when starting 44.1 kHz, so **48 -> 44.1 kHz remains noticeably slower than 44.1 -> 48 kHz**. The slower direction is now hardware-validated as reliable and completes consistently.
-
-A release-candidate regression was traced to Unix-socket clients disappearing during the longer 44.1 startup window. A late meter/control reply could raise `SIGPIPE` and terminate the native engine, sending the supervisor into its recovery loop. `0.03.000` hardens the transport against `SIGPIPE` and delays the 44.1 meter listener until the engine has completed its startup/reassert sequence.
-
-## Control panel
-
-The native AppKit control panel now includes:
-
-- **Mixer** — validated 7-source x 5-bus routing matrix;
-- **Outputs** — Mixer/AUX source, independent L/R levels and stereo link for five output pairs;
-- **Headphones** — source, independent L/R volume, five mixer-output pair enables and stereo link;
-- **AUX** — software-return 1/2 and AUX output stereo levels;
-- **Inputs** — live Analog Input 1/2 and S/PDIF L/R capture meters;
-- **Device** — connection/transport state, sample-rate selection and CoreAudio buffer diagnostics;
-- **Info** — component/runtime identity and support diagnostics.
-
-The Device rate selector writes the standard CoreAudio nominal sample-rate property. The GUI does not open FireWire or bypass the HAL/transport lifecycle.
-
-The Info page now provides an exact installed runtime version/build where available and can copy a support snapshot containing transport status and recent runtime log output.
-
-Latency/safety-offset fields are shown as **Not reported by HAL** instead of displaying misleading zero-valued placeholders. Calibrated CoreAudio latency reporting remains future work.
-
-## Existing validated controls
-
-The `0.02.000` control architecture remains intact:
-
-- physical output Mixer/AUX source selection and L/R levels;
-- headphone source, L/R level and five-pair mixer routing;
-- AUX stream/output levels;
-- complete 7-source x 5-bus main-mixer assignment routing;
-- multiple simultaneous mixer-bus assignments;
-- CoreAudio/Logic-aligned software-return labels;
-- persistent writable control state across restart/reboot/reconnect;
-- Reset Defaults to the documented macfw baseline.
-
-The main mixer still requires a complete coherent 35-cell initialization before differential route writes. Mixer STATUS polling remains deliberately avoided.
-
-## Installation
-
-See [`INSTALL.md`](INSTALL.md).
-
-The normal binary installation is the macOS `.pkg`. With the FW410 connected and powered on, installation is hardware-gated to a supported device personality and installs:
-
-```text
-/Applications/macfw FW410 Control.app
-/Library/Audio/Plug-Ins/HAL/macfw-fw410.driver
-/Library/Application Support/macfw/fw410/
-/Library/LaunchDaemons/com.mbprado.macfw.fw410.transport.plist
-```
-
-A source build/install path remains available:
+Build both interfaces, then install the connected model from source:
 
 ```bash
 make
 sudo make install
 ```
 
-Local package creation is:
+If both models are connected, the default install installs both. To install both
+stacks regardless of hardware presence, use:
+
+```bash
+sudo make install-force
+```
+
+Compilation runs as the normal user. Each detected-device install validates its
+matching artifacts; forced installation validates both build trees before
+installing either one.
+
+Build the package set from the repository root:
 
 ```bash
 make package
+make fw410-package
+make fw1814-package
 ```
 
-The package target rebuilds the release artifacts before staging them so embedded build identities remain aligned with the package commit.
+The output is:
+
+```text
+package/dist/macfw-0.4.000-<build>.pkg
+package/dist/macfw-fw410-0.4.000-<build>.pkg
+package/dist/macfw-fw1814-0.4.000-<build>.pkg
+```
+
+The combined hardware gate accepts either a connected FW410 or FW1814. Its
+postinstall probe then installs only the matching namespaced device stack(s).
+Focused installers remain available via `make fw410-package` and
+`make fw1814-package`; their gates still require the matching interface.
+
+For a clean package test, remove any previous installation first. An individual
+package contains only its named device; an already-installed other device is not
+removed automatically.
+
+Installed user-facing applications are:
+
+```text
+/Applications/macfw FW410 Control.app
+/Applications/macfw FW1814 Control.app
+```
+
+See [`INSTALL.md`](INSTALL.md) for complete build, installation, status,
+troubleshooting and uninstall instructions.
 
 ## Compatibility
 
-Hardware validation currently includes Intel Macs running:
+The current architecture targets Intel Macs using Apple's legacy FireWire
+stack. Cumulative hardware validation includes Monterey 12.7.6, Ventura
+13.7.8, Sonoma 14.8.9 and Sequoia 15.x.
 
-- Monterey 12.7.6;
-- Ventura 13.7.8;
-- Sonoma 14.8.9;
-- Sequoia 15.x.
+Apple Silicon is not currently supported. macOS Tahoe 26 is unsupported because
+Apple removed the built-in FireWire stack used by macfw. See
+[`COMPATIBILITY.md`](COMPATIBILITY.md) and
+[`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md).
 
-Supported device/rates:
+## Signing and notarization
 
-- M-Audio FireWire 410;
-- native 44.1 kHz and 48 kHz audio.
-
-Apple Silicon is not currently supported.
-
-See [`COMPATIBILITY.md`](COMPATIBILITY.md) for the detailed cumulative test matrix.
-
-## Known limitations
-
-- 48 -> 44.1 kHz switching is slower than the reverse direction because of the FW410-specific 44.1 startup sequence.
-- CoreAudio latency/safety-offset properties are not yet calibrated/reported.
-- Main-mixer strip level, pan/balance, mute/solo and AUX-send semantics remain intentionally parked until their signal path is hardware-confirmed.
-- MIDI is not yet a validated user-facing feature.
-- S/PDIF-specific physical validation is less extensive than the analog-output testing.
-
-Read [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) for the complete list.
-
-## Signing/notarization
-
-`0.03.000` remains an alpha release. Unless explicitly stated otherwise on the GitHub Release, the package should be treated as **unsigned and unnotarized**. Functional package validation does not imply Apple signing/notarization.
+`0.4.000` remains an alpha release. Unless explicitly stated otherwise on the
+GitHub Release, the package is **unsigned and unnotarized**.
 
 ## Diagnostics for testers
 
-The control panel's **Copy Diagnostics** action is the preferred first support snapshot.
-
-Transport log:
+Use **Copy Diagnostics** in the appropriate control panel first. Transport logs
+are stored at:
 
 ```text
 /Library/Logs/macfw-fw410-transport.log
+/Library/Logs/macfw-fw1814-transport.log
 ```
 
-Package postinstall log:
+Package postinstall activity is recorded in:
 
 ```text
 /Library/Logs/macfw_install.log
 ```
 
-Source-checkout transport status:
-
-```bash
-devices/fw410/tools/transport/transportstatus/transportstatus
-```
-
-Please also identify the Mac model, macOS version, FireWire connection/adapters, requested sample rate, and the event that preceded the failure.
+When reporting a problem, include the interface model, Mac model, macOS
+version, FireWire adapters, sample rate and the event that preceded the failure.
 
 ## Detailed changes
 

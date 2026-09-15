@@ -22,9 +22,10 @@ BOOT="$FW1814_DIR/tools/fwboot1814"
 BUS_RESET="$FW1814_DIR/../../common/tools/firewirebusreset/firewirebusreset"
 CONTROL="$FW1814_DIR/tools/control/fw1814ctl/fw1814ctl"
 STATE_CONTROL="$FW1814_DIR/tools/control/fw1814state/fw1814state"
+DEVICE_PROBE="$FW1814_DIR/tools/fw1814deviceprobe"
 STATE_FILE="$INSTALL_ROOT/control-state.conf"
 
-for file in "$SUPERVISOR" "$ENGINE48" "$ENGINE44" "$INIT" "$BOOT" "$BUS_RESET" "$CONTROL" "$STATE_CONTROL"; do
+for file in "$SUPERVISOR" "$ENGINE48" "$ENGINE44" "$INIT" "$BOOT" "$BUS_RESET" "$CONTROL" "$STATE_CONTROL" "$DEVICE_PROBE"; do
     if [[ ! -x "$file" ]]; then
         echo "error: required FW1814 runtime binary is missing or not executable: $file" >&2
         echo "build with:" >&2
@@ -32,6 +33,28 @@ for file in "$SUPERVISOR" "$ENGINE48" "$ENGINE44" "$INIT" "$BOOT" "$BUS_RESET" "
         exit 1
     fi
 done
+
+if [[ "${MACFW_SKIP_HARDWARE_GATE:-0}" == 1 ]]; then
+    echo "forced install: skipping the FW1814-only hardware gate"
+else
+    set +e
+    "$DEVICE_PROBE" --require-supported
+    probe_status=$?
+    set -e
+    if [[ $probe_status -ne 0 ]]; then
+        if [[ $probe_status -eq 3 ]]; then
+            echo "error: no supported M-Audio FireWire 1814 is connected" >&2
+        else
+            echo "error: FW1814 device detection failed with status $probe_status" >&2
+        fi
+        exit "$probe_status"
+    fi
+fi
+
+if [[ "${1:-}" == "--check-only" ]]; then
+    echo "hardware and runtime preflight passed"
+    exit 0
+fi
 
 launchctl bootout system/$LABEL >/dev/null 2>&1 || true
 
@@ -44,6 +67,15 @@ install -o root -g wheel -m 0755 "$BOOT" "$BIN_DIR/fwboot1814"
 install -o root -g wheel -m 0755 "$BUS_RESET" "$BIN_DIR/firewirebusreset"
 install -o root -g wheel -m 0755 "$CONTROL" "$BIN_DIR/fw1814ctl"
 install -o root -g wheel -m 0755 "$STATE_CONTROL" "$BIN_DIR/fw1814state"
+install -o root -g wheel -m 0755 "$DEVICE_PROBE" "$BIN_DIR/fw1814deviceprobe"
+
+runtime_version="$(sed -n 's/^#define MACFW_VERSION "\([^"]*\)"/\1/p' "$FW1814_DIR/version.h" | head -n 1)"
+runtime_build="$(git -C "$FW1814_DIR" rev-parse --short=12 HEAD 2>/dev/null || true)"
+[[ -n "$runtime_version" ]] || runtime_version="unknown"
+[[ -n "$runtime_build" ]] || runtime_build="unknown"
+printf 'version=%s\nbuild=%s\n' "$runtime_version" "$runtime_build" > "$INSTALL_ROOT/runtime-build.conf"
+chown root:wheel "$INSTALL_ROOT/runtime-build.conf"
+chmod 0644 "$INSTALL_ROOT/runtime-build.conf"
 
 if [[ ! -e "$STATE_FILE" ]]; then
     : > "$STATE_FILE"
@@ -63,6 +95,7 @@ launchctl enable system/$LABEL
 launchctl kickstart -k system/$LABEL
 
 echo "installed macfw FW1814 transport runtime: $INSTALL_ROOT"
+echo "runtime build: $runtime_version build $runtime_build"
 echo "loaded launchd service: $LABEL"
 echo "automatic reconnect + guarded bootloader recovery: enabled"
 echo "automatic 44.1/48 kHz transport selection: enabled"

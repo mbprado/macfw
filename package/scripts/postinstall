@@ -49,8 +49,10 @@ launchctl enable "system/$LABEL"
 launchctl kickstart -k "system/$LABEL"
 echo "postinstall: transport service started"
 
-killall coreaudiod >/dev/null 2>&1 || true
-echo "postinstall: CoreAudio restart requested"
+if [[ "${MACFW_SKIP_COREAUDIO_RESTART:-0}" != 1 ]]; then
+    killall coreaudiod >/dev/null 2>&1 || true
+    echo "postinstall: CoreAudio restart requested"
+fi
 rm -rf /tmp/macfw-fw410-package
 
 echo "postinstall: completed successfully"

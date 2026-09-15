@@ -32,18 +32,27 @@ for file in "$HALTRANSPORT" "$BRIDGE44100" "$BRIDGE48000" "$RATEPROBE" "$FW410CT
     fi
 done
 
-set +e
-"$DEVICEPROBE" --require-supported
-probe_status=$?
-set -e
-if [[ $probe_status -ne 0 ]]; then
-    if [[ $probe_status -eq 3 ]]; then
-        echo "error: no supported macfw FireWire interface is connected" >&2
-        echo "connect a supported interface in operational or bootloader mode and retry" >&2
-    else
-        echo "error: macfw device detection failed with status $probe_status" >&2
+if [[ "${MACFW_SKIP_HARDWARE_GATE:-0}" == 1 ]]; then
+    echo "forced install: skipping the FW410-only hardware gate"
+else
+    set +e
+    "$DEVICEPROBE" --require-supported
+    probe_status=$?
+    set -e
+    if [[ $probe_status -ne 0 ]]; then
+        if [[ $probe_status -eq 3 ]]; then
+            echo "error: no supported M-Audio FireWire 410 is connected" >&2
+            echo "connect an FW410 in operational or bootloader mode and retry" >&2
+        else
+            echo "error: FW410 device detection failed with status $probe_status" >&2
+        fi
+        exit "$probe_status"
     fi
-    exit "$probe_status"
+fi
+
+if [[ "${1:-}" == "--check-only" ]]; then
+    echo "hardware and runtime preflight passed"
+    exit 0
 fi
 
 launchctl bootout system/$LABEL >/dev/null 2>&1 || true

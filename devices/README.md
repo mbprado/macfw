@@ -5,13 +5,17 @@
 ```text
 devices/
 ├── fw410/    released regression baseline
-└── fw1814/   experimental multi-rate/control development
+└── fw1814/   initial 44.1/48 kHz analog release surface
 ```
 
 Each device directory owns its profile, protocol behavior, HAL, transport,
-service, controls, diagnostics and device-specific documentation. Reusable
+service, control panel, diagnostics and device-specific documentation. Reusable
 FireWire, AMDTP and CoreAudio components move to `common/` only after both
 hardware implementations demonstrate that the abstraction is genuinely shared.
 
-The root Makefile provides namespaced targets for both devices while preserving
-FW410 as the default released build, install and package target.
+The root build, uninstall and package targets operate on both devices. Root
+`sudo make install` detects and installs the connected model(s), while
+`sudo make install-force` installs both stacks without hardware detection.
+Namespaced targets remain available for focused development and individual
+installers. Use `make fw410-package` or `make fw1814-package` for a
+device-specific installer; `make package` builds the unified installer.

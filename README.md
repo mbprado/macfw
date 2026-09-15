@@ -4,11 +4,11 @@ Modern FireWire audio support for macOS.
 
 `macfw` is an open-source reverse-engineering and compatibility project focused on bringing legacy IEEE 1394 / FireWire audio interfaces back to life on modern macOS systems.
 
-The released target is the **M-Audio FireWire 410**. The **M-Audio FireWire 1814** is the second, currently experimental target, and the repository separates reusable FireWire/audio components from device-specific implementations.
+The supported targets are the **M-Audio FireWire 410** and **M-Audio FireWire 1814**. The repository separates reusable FireWire/audio components from device-specific implementations.
 
 ## Current status
 
-The FW410 implementation is now on its **third installable alpha release line (`0.03.000`)** for Intel macOS. Native audio, recovery, low-latency scheduling, runtime rate switching and the current control-panel release scope are hardware-validated on real FW410 hardware.
+The project is now on the unified **`0.4.000` alpha release line** for Intel macOS. Root builds cover both supported interfaces, the default source install selects connected hardware, and the combined package contains both independently namespaced payloads while installing only connected hardware. Focused FW410-only and FW1814-only packages are also available. Native audio, recovery, rate switching and the current control-panel scopes are hardware-validated on real FW410 and FW1814 hardware.
 
 Hardware-validated functionality includes:
 
@@ -51,7 +51,7 @@ Current cumulative macOS hardware-test status:
 
 Apple Silicon is not currently supported. See [`COMPATIBILITY.md`](COMPATIBILITY.md) and [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) for the evidence-based compatibility status.
 
-The experimental FW1814 implementation now has hardware-validated analog full-duplex CoreAudio operation, 44.1/48 kHz switching and reconnect recovery. Its routing-control API is being developed as the backend for a future control panel. See [`devices/fw1814/README.md`](devices/fw1814/README.md) for its current scope.
+The FW1814 implementation now has hardware-validated analog full-duplex CoreAudio operation, 44.1/48 kHz switching, reconnect recovery, persistent analog mixer/routing controls and a native AppKit control panel. Its runtime remains isolated from the FW410. The default source installer selects the connected interface, `install-force` installs both stacks, and the unified `.pkg` contains both payloads but installs only the connected interface(s). See [`devices/fw1814/README.md`](devices/fw1814/README.md) for its current scope.
 
 macOS Tahoe 26 is not currently supported because Apple removed the built-in FireWire stack on which macfw depends. Future Tahoe support may become possible through integration with an alternative stack such as [`ASFireWire`](https://github.com/mrmidi/ASFireWire), but that path is experimental and has not been integrated or validated with macfw.
 
@@ -123,6 +123,11 @@ The current AppKit control panel includes:
 
 The Device sample-rate selector uses the normal CoreAudio nominal-sample-rate property and HAL configuration-change lifecycle. It does not bypass CoreAudio or call FireWire rate-control probes directly.
 
+The FW1814 control panel follows the same transport-owned architecture and
+covers its validated analog surface: two software returns, four analog input
+pairs, two analog output pairs, two digital-volume headphone outputs, AUX
+sends/master, persistent state, diagnostics and 44.1/48 kHz selection.
+
 ## Main mixer discovery
 
 The original M-Audio panel and the Linux `snd-firewire-ctl-services` implementation established that the FW410 main mixer is a **7-source x 5-destination assignment matrix**:
@@ -171,6 +176,7 @@ macfw/
 │   │   └── analysis/
 │   └── fw1814/
 │       ├── hal/
+│       ├── control-panel/
 │       ├── service/
 │       ├── tools/
 │       ├── transport/
@@ -229,7 +235,7 @@ Major completed FW410 areas now include:
 
 Deferred work includes unresolved mixer strip level/pan/mute/AUX-send semantics, calibrated CoreAudio latency reporting, MIDI, named presets, optional menu-bar controls, broader hardware coverage, and signing/notarization.
 
-The FW1814 has separately reached hardware-validated analog CoreAudio playback/capture, 44.1/48 kHz switching and reconnect recovery. Its current sequence is routing controls, remaining sample rates, then the native control panel; MIDI remains last.
+The FW1814 has separately reached hardware-validated analog CoreAudio playback/capture, 44.1/48 kHz switching, reconnect recovery, persistent analog routing/mixer controls and its first native control panel. The next major sequence is higher sample rates, then digital I/O and MIDI when direct comparison with both original M-Audio panels is available.
 
 ## Release documentation
 
