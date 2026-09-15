@@ -124,12 +124,11 @@ jobs:
         run: |
           set -euo pipefail
           cd package/dist
-          mapfile -t package_names <<< "$RELEASE_PACKAGE_NAMES"
           : > SHA256SUMS
-          for package_name in "${package_names[@]}"; do
+          while IFS= read -r package_name; do
             [[ -n "$package_name" ]] || continue
             shasum -a 256 "$package_name" >> SHA256SUMS
-          done
+          done <<< "$RELEASE_PACKAGE_NAMES"
           cat SHA256SUMS
 
       - name: Create GitHub Release
@@ -138,12 +137,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t package_names <<< "$RELEASE_PACKAGE_NAMES"
           package_paths=()
-          for package_name in "${package_names[@]}"; do
+          while IFS= read -r package_name; do
             [[ -n "$package_name" ]] || continue
             package_paths+=("package/dist/$package_name")
-          done
+          done <<< "$RELEASE_PACKAGE_NAMES"
           gh release create "$GITHUB_REF_NAME" \
             "${package_paths[@]}" \
             package/dist/SHA256SUMS \
