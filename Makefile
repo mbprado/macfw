@@ -56,8 +56,8 @@ install:
 		exit 1; \
 	fi
 	$(MAKE) install-check
-	$(MAKE) fw410-install
-	$(MAKE) fw1814-install
+	MACFW_SKIP_HARDWARE_GATE=1 $(MAKE) fw410-install
+	MACFW_SKIP_HARDWARE_GATE=1 $(MAKE) fw1814-install
 uninstall:
 	$(MAKE) fw410-uninstall
 	$(MAKE) fw1814-uninstall

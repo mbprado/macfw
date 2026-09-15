@@ -34,17 +34,21 @@ for file in "$SUPERVISOR" "$ENGINE48" "$ENGINE44" "$INIT" "$BOOT" "$BUS_RESET" "
     fi
 done
 
-set +e
-"$DEVICE_PROBE" --require-supported
-probe_status=$?
-set -e
-if [[ $probe_status -ne 0 ]]; then
-    if [[ $probe_status -eq 3 ]]; then
-        echo "error: no supported M-Audio FireWire 1814 is connected" >&2
-    else
-        echo "error: FW1814 device detection failed with status $probe_status" >&2
+if [[ "${MACFW_SKIP_HARDWARE_GATE:-0}" == 1 ]]; then
+    echo "aggregate install: skipping the FW1814-only hardware gate"
+else
+    set +e
+    "$DEVICE_PROBE" --require-supported
+    probe_status=$?
+    set -e
+    if [[ $probe_status -ne 0 ]]; then
+        if [[ $probe_status -eq 3 ]]; then
+            echo "error: no supported M-Audio FireWire 1814 is connected" >&2
+        else
+            echo "error: FW1814 device detection failed with status $probe_status" >&2
+        fi
+        exit "$probe_status"
     fi
-    exit "$probe_status"
 fi
 
 launchctl bootout system/$LABEL >/dev/null 2>&1 || true

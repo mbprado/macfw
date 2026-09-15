@@ -6,7 +6,11 @@ The project uses the `x.y.zzz` version format described in [`RELEASES.md`](RELEA
 
 ## [Unreleased]
 
-No user-visible changes have been recorded after the `0.4.000` release candidate yet.
+### Fixed
+
+- Aggregate `sudo make install` now bypasses each model-specific source-install
+  hardware gate after validating both build trees, allowing both namespaced
+  stacks to be installed when only an FW410 or only an FW1814 is connected.
 
 ## [0.4.000] — fourth alpha — 2026-09-15
 

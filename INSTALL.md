@@ -62,7 +62,11 @@ sudo make install
 
 Do not run compilation itself with `sudo`. The install targets intentionally verify that the artifacts already exist instead of compiling them as root.
 
-Source installation does not require hardware to be connected. Each service remains ready for its matching interface to appear.
+Source installation does not require both devices—or any hardware—to be
+connected. Aggregate `sudo make install` validates both build trees, bypasses
+the individual model-presence gates and installs both stacks. Each service then
+remains ready for its matching interface to appear. The namespaced
+`fw410-install` and `fw1814-install` targets retain their matching-device gates.
 
 ## Build targets
 
