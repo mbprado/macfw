@@ -1,6 +1,7 @@
 #import <AppKit/AppKit.h>
 #import <CoreAudio/CoreAudio.h>
 #import <Foundation/Foundation.h>
+#include "slider_commit.h"
 #include <cmath>
 #include <cstdint>
 
@@ -114,10 +115,10 @@ static AudioObjectID FindDevice(void){
                   action:(SEL)a mute:(SEL)ma store:(NSMutableArray*)store{
     [v addSubview:Hdr(title,NSMakeRect(18,y+35,140,22))];
     [v addSubview:Lbl(@"L",NSMakeRect(165,y+39,15,18))];
-    NSSlider *l=[NSSlider sliderWithValue:0 minValue:-127 maxValue:0 target:self action:a];l.frame=NSMakeRect(184,y+32,220,28);l.continuous=NO;l.tag=i*2;[v addSubview:l];
+    NSSlider *l=[NSSlider sliderWithValue:0 minValue:-127 maxValue:0 target:self action:a];l.frame=NSMakeRect(184,y+32,220,28);l.continuous=YES;l.tag=i*2;[v addSubview:l];
     NSTextField *lv=Lbl(@"0 dB",NSMakeRect(408,y+38,70,18));lv.font=[NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightRegular];[v addSubview:lv];
     [v addSubview:Lbl(@"R",NSMakeRect(480,y+39,15,18))];
-    NSSlider *r=[NSSlider sliderWithValue:0 minValue:-127 maxValue:0 target:self action:a];r.frame=NSMakeRect(500,y+32,220,28);r.continuous=NO;r.tag=i*2+1;[v addSubview:r];
+    NSSlider *r=[NSSlider sliderWithValue:0 minValue:-127 maxValue:0 target:self action:a];r.frame=NSMakeRect(500,y+32,220,28);r.continuous=YES;r.tag=i*2+1;[v addSubview:r];
     NSTextField *rv=Lbl(@"0 dB",NSMakeRect(724,y+38,70,18));rv.font=[NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightRegular];[v addSubview:rv];
     NSButton *link=[NSButton checkboxWithTitle:@"Link" target:nil action:nil];link.frame=NSMakeRect(795,y+34,58,24);link.state=NSControlStateValueOn;[v addSubview:link];
     NSButton *mute=[NSButton checkboxWithTitle:@"Mute" target:self action:ma];mute.frame=NSMakeRect(858,y+34,65,24);mute.tag=i;[v addSubview:mute];
@@ -129,9 +130,9 @@ static AudioObjectID FindDevice(void){
 }
 - (void)panRow:(NSView*)v y:(CGFloat)y index:(NSInteger)i{
     [v addSubview:Lbl(@"Monitor pan",NSMakeRect(184,y+4,90,18))];
-    NSSlider *l=[NSSlider sliderWithValue:-100 minValue:-100 maxValue:100 target:self action:@selector(panChanged:)];l.frame=NSMakeRect(275,y-2,185,26);l.continuous=NO;l.tag=i*2;[v addSubview:l];
+    NSSlider *l=[NSSlider sliderWithValue:-100 minValue:-100 maxValue:100 target:self action:@selector(panChanged:)];l.frame=NSMakeRect(275,y-2,185,26);l.continuous=YES;l.tag=i*2;[v addSubview:l];
     NSTextField *lv=Lbl(@"L 100",NSMakeRect(462,y+4,55,18));lv.font=[NSFont monospacedDigitSystemFontOfSize:10 weight:NSFontWeightRegular];[v addSubview:lv];
-    NSSlider *r=[NSSlider sliderWithValue:100 minValue:-100 maxValue:100 target:self action:@selector(panChanged:)];r.frame=NSMakeRect(520,y-2,185,26);r.continuous=NO;r.tag=i*2+1;[v addSubview:r];
+    NSSlider *r=[NSSlider sliderWithValue:100 minValue:-100 maxValue:100 target:self action:@selector(panChanged:)];r.frame=NSMakeRect(520,y-2,185,26);r.continuous=YES;r.tag=i*2+1;[v addSubview:r];
     NSTextField *rv=Lbl(@"R 100",NSMakeRect(708,y+4,55,18));rv.font=[NSFont monospacedDigitSystemFontOfSize:10 weight:NSFontWeightRegular];[v addSubview:rv];
     [self.panRows addObject:@{@"left":l,@"right":r,@"leftValue":lv,@"rightValue":rv}];
 }
@@ -233,9 +234,17 @@ static AudioObjectID FindDevice(void){
 - (NSString*)db:(NSInteger)v{return [NSString stringWithFormat:@"%ld",(long)v];}
 - (void)commitLevel:(NSControl*)c rows:(NSMutableArray*)rows command:(NSString*)cmd args:(NSArray*)args{
     NSInteger i=c.tag/2,ch=c.tag%2;if(i>=(NSInteger)rows.count)return;NSDictionary *row=rows[i];NSSlider *l=row[@"left"],*r=row[@"right"];
-    if([row[@"link"] state]==NSControlStateValueOn){if(ch==0)r.integerValue=l.integerValue;else l.integerValue=r.integerValue;}[row[@"mute"] setState:NSControlStateValueOff];
-    NSMutableArray *a=[NSMutableArray arrayWithObjects:cmd,@"set",nil];if(i<(NSInteger)args.count)[a addObject:args[i]];[a addObject:[self db:l.integerValue]];[a addObject:[self db:r.integerValue]];
-    NSDictionary *res=[self ctl:a];[self report:res ok:@"Level updated and saved"];if(![res[@"status"] integerValue])[self updateLevel:row text:res[@"output"]];
+    if([row[@"link"] state]==NSControlStateValueOn){if(ch==0)r.integerValue=l.integerValue;else l.integerValue=r.integerValue;}
+    [row[@"mute"] setState:NSControlStateValueOff];
+    [row[@"leftValue"] setStringValue:[NSString stringWithFormat:@"%ld dB",(long)l.integerValue]];
+    [row[@"rightValue"] setStringValue:[NSString stringWithFormat:@"%ld dB",(long)r.integerValue]];
+    NSMutableArray *a=[NSMutableArray arrayWithObjects:cmd,@"set",nil];
+    NSString *key=cmd;
+    if(i<(NSInteger)args.count){[a addObject:args[i]];key=[NSString stringWithFormat:@"%@:%@",cmd,args[i]];}
+    else key=[NSString stringWithFormat:@"%@:master",cmd];
+    [a addObject:[self db:l.integerValue]];[a addObject:[self db:r.integerValue]];
+    MacfwQueueControlWrite(kCtl,key,a);
+    self.status.stringValue=@"Applying live level…";self.status.textColor=NSColor.labelColor;
 }
 - (void)commitMute:(NSButton*)c rows:(NSMutableArray*)rows command:(NSString*)cmd args:(NSArray*)args{
     NSInteger i=c.tag;if(i>=(NSInteger)rows.count)return;NSDictionary *row=rows[i];NSMutableArray *a=[NSMutableArray arrayWithObject:cmd];
@@ -256,8 +265,13 @@ static AudioObjectID FindDevice(void){
 - (void)auxMasterLevel:(NSControl*)s{[self commitLevel:s rows:self.auxMasterRows command:@"aux-output-volume" args:@[]];}
 - (void)auxMasterMute:(NSButton*)s{[self commitMute:s rows:self.auxMasterRows command:@"aux-output-volume" args:@[]];}
 - (void)panChanged:(NSSlider*)s{
-    NSInteger i=s.tag/2,ch=s.tag%2,v=s.integerValue;NSDictionary *r=[self ctl:@[@"input-monitor-pan",@"set-percent",ANA()[i],ch?@"right":@"left",[NSString stringWithFormat:@"%ld",(long)v]]];
-    [self report:r ok:@"Monitor pan updated and saved"];if(![r[@"status"] integerValue])[self panLabel:ch?self.panRows[i][@"rightValue"]:self.panRows[i][@"leftValue"] value:v];
+    NSInteger i=s.tag/2,ch=s.tag%2,v=s.integerValue;
+    NSArray *a=@[@"input-monitor-pan",@"set-percent",ANA()[i],ch?@"right":@"left",
+                 [NSString stringWithFormat:@"%ld",(long)v]];
+    NSString *key=[NSString stringWithFormat:@"input-monitor-pan:%@:%@",ANA()[i],ch?@"right":@"left"];
+    MacfwQueueControlWrite(kCtl,key,a);
+    [self panLabel:ch?self.panRows[i][@"rightValue"]:self.panRows[i][@"leftValue"] value:v];
+    self.status.stringValue=@"Applying live monitor pan…";self.status.textColor=NSColor.labelColor;
 }
 - (void)rateChanged:(NSSegmentedControl*)s{
     AudioObjectID d=FindDevice();if(d==kAudioObjectUnknown){NSBeep();[self refreshDevice];return;}Float64 rate=s.selectedSegment?48000:44100;

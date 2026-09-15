@@ -31,7 +31,7 @@ $(ICNS): $(ICON)
 	iconutil -c icns "$(ICONSET)" -o "$(ICNS)"
 	cp "$(ICON)" "$(RESOURCES)/icon.png"
 
-$(BINARY): $(SOURCES) Info.plist $(ICNS)
+$(BINARY): $(SOURCES) Sources/slider_commit.h Info.plist $(ICNS)
 	mkdir -p "$(MACOS)" "$(RESOURCES)"
 	cp Info.plist "$(CONTENTS)/Info.plist"
 	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(GIT_SHA)" "$(CONTENTS)/Info.plist"
