@@ -94,7 +94,7 @@ if [[ -z "$VERSION" ]]; then
 fi
 GIT_SHA="$(git -C "$REPO_DIR" rev-parse --short=12 HEAD)"
 
-WORK="$SCRIPT_DIR/build"
+WORK="$SCRIPT_DIR/build/$SLUG"
 ROOT="$WORK/root"
 SCRIPTS="$WORK/scripts"
 STAGE="$WORK/stage"

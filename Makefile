@@ -62,7 +62,9 @@ fw1814-package:
 	chmod +x package/build-pkg.sh package/scripts/fw1814-preinstall package/scripts/fw1814-postinstall
 	./package/build-pkg.sh fw1814
 
-package-all: fw410-package fw1814-package
+package-all:
+	$(MAKE) fw410-package
+	$(MAKE) fw1814-package
 
 clean: fw410-clean fw1814-clean
 	rm -rf package/build package/dist

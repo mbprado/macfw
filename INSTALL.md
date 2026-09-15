@@ -157,7 +157,7 @@ make package-all      # build both device packages
 
 Each package target performs a clean rebuild of that device's release artifacts
 before packaging, so the embedded build identities match the package commit.
-The shared builder also accepts `package/build-pkg.sh fw410|fw1814` or the
+The shared builder also accepts `bash package/build-pkg.sh fw410|fw1814` or the
 `MACFW_DEVICE` environment variable.
 
 The generated installer is placed under:
