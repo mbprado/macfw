@@ -18,8 +18,8 @@ if [[ $status -eq 0 ]]; then
 fi
 
 if [[ $status -eq 3 ]]; then
-    echo "macfw FW410 installer: no supported FireWire interface is connected." >&2
-    echo "Connect an M-Audio FireWire 410 in operational or bootloader mode and run the installer again." >&2
+    echo "macfw FW410 installer: no supported M-Audio FireWire 410 was detected." >&2
+    echo "Connect a FireWire 410 in operational or bootloader mode and run this package again." >&2
 else
     echo "macfw FW410 installer: device detection failed with status $status." >&2
 fi

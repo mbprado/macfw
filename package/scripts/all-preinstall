@@ -22,8 +22,8 @@ if [[ $fw410_status -eq 0 || $fw1814_status -eq 0 ]]; then
 fi
 
 if [[ $fw410_status -eq 3 && $fw1814_status -eq 3 ]]; then
-    echo "macfw installer: no supported FireWire interface is connected." >&2
-    echo "Connect an M-Audio FireWire 410 or FireWire 1814 and run the installer again." >&2
+    echo "macfw installer: no supported M-Audio FireWire interface was detected." >&2
+    echo "Connect a FireWire 410 or FireWire 1814 and run this package again." >&2
 else
     echo "macfw installer: device detection failed (FW410=$fw410_status, FW1814=$fw1814_status)." >&2
 fi

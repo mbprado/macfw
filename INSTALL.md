@@ -11,7 +11,7 @@ This guide covers the M-Audio FireWire 410 and FireWire 1814 alpha drivers, cont
 - A supported M-Audio FireWire 410 or FireWire 1814 connected through a working FireWire path.
 - Administrator access.
 
-The combined package requires at least one supported interface to be physically present and installs both device stacks. Each optional device-specific package requires its matching interface. The hardware gates accept the operational personality and known M-Audio bootloader identities; each runtime retains its stronger model-specific guarded boot procedure.
+The combined package requires at least one supported interface to be physically present and installs only the connected device stack(s). If both interfaces are connected, both stacks are installed. Each device-specific package requires its matching interface. The hardware gates accept the operational personality and known M-Audio bootloader identities; each runtime retains its stronger model-specific guarded boot procedure.
 
 Apple Silicon is not currently supported.
 
@@ -24,10 +24,10 @@ Apple Silicon is not currently supported.
    sudo installer -pkg macfw-0.4.000-<build>.pkg -target /
    ```
 
-3. The installer validates that an FW410 or FW1814 is connected and installs
-   both CoreAudio HAL plug-ins, transport/control runtimes, persistent state
-   helpers, build metadata, launchd services and native control panels.
-4. The installer starts both device-specific services and restarts
+3. The installer validates the connected interface(s) and installs only the
+   matching CoreAudio HAL plug-in(s), transport/control runtime(s), persistent
+   state helpers, build metadata, launchd service(s) and native control panel(s).
+4. The installer starts the matching device-specific service(s) and restarts
    `coreaudiod`. A reboot is normally **not required**.
 5. Select the interface in Audio MIDI Setup and open the corresponding app:
 

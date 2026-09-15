@@ -38,8 +38,11 @@ SCRIPTS="$WORK/scripts"
 STAGE="$WORK/stage"
 OUTPUT="$SCRIPT_DIR/dist"
 PKG="$OUTPUT/macfw-${VERSION}-${GIT_SHA}.pkg"
-FW410_RUNTIME_ROOT="$ROOT/Library/Application Support/macfw/fw410"
-FW1814_RUNTIME_ROOT="$ROOT/Library/Application Support/macfw/fw1814"
+PAYLOAD_ROOT="$ROOT/tmp/macfw-all-package/payload"
+FW410_PAYLOAD_ROOT="$PAYLOAD_ROOT/fw410"
+FW1814_PAYLOAD_ROOT="$PAYLOAD_ROOT/fw1814"
+FW410_RUNTIME_ROOT="$FW410_PAYLOAD_ROOT/Library/Application Support/macfw/fw410"
+FW1814_RUNTIME_ROOT="$FW1814_PAYLOAD_ROOT/Library/Application Support/macfw/fw1814"
 
 FW410_HAL="$FW410_DIR/hal/build/macfw-fw410.driver"
 FW410_APP="$FW410_DIR/control-panel/build/macfw-fw410-control.app"
@@ -100,14 +103,21 @@ for file in "${required[@]}"; do
 done
 
 rm -rf "$WORK"
-mkdir -p "$ROOT/Applications" "$ROOT/Library/Audio/Plug-Ins/HAL" \
-    "$FW410_RUNTIME_ROOT" "$FW1814_RUNTIME_ROOT" \
-    "$ROOT/Library/LaunchDaemons" "$SCRIPTS" "$STAGE" "$OUTPUT"
+mkdir -p \
+    "$FW410_PAYLOAD_ROOT/Applications" \
+    "$FW410_PAYLOAD_ROOT/Library/Audio/Plug-Ins/HAL" \
+    "$FW410_RUNTIME_ROOT" \
+    "$FW410_PAYLOAD_ROOT/Library/LaunchDaemons" \
+    "$FW1814_PAYLOAD_ROOT/Applications" \
+    "$FW1814_PAYLOAD_ROOT/Library/Audio/Plug-Ins/HAL" \
+    "$FW1814_RUNTIME_ROOT" \
+    "$FW1814_PAYLOAD_ROOT/Library/LaunchDaemons" \
+    "$SCRIPTS" "$STAGE" "$OUTPUT"
 
-cp -R "$FW410_HAL" "$ROOT/Library/Audio/Plug-Ins/HAL/"
-cp -R "$FW1814_HAL" "$ROOT/Library/Audio/Plug-Ins/HAL/"
-cp -R "$FW410_APP" "$ROOT/Applications/macfw FW410 Control.app"
-cp -R "$FW1814_APP" "$ROOT/Applications/macfw FW1814 Control.app"
+cp -R "$FW410_HAL" "$FW410_PAYLOAD_ROOT/Library/Audio/Plug-Ins/HAL/"
+cp -R "$FW1814_HAL" "$FW1814_PAYLOAD_ROOT/Library/Audio/Plug-Ins/HAL/"
+cp -R "$FW410_APP" "$FW410_PAYLOAD_ROOT/Applications/macfw FW410 Control.app"
+cp -R "$FW1814_APP" "$FW1814_PAYLOAD_ROOT/Applications/macfw FW1814 Control.app"
 printf 'version=%s\nbuild=%s\n' "$VERSION" "$GIT_SHA" > "$FW410_RUNTIME_ROOT/runtime-build.conf"
 printf 'version=%s\nbuild=%s\n' "$VERSION" "$GIT_SHA" > "$FW1814_RUNTIME_ROOT/runtime-build.conf"
 
@@ -124,7 +134,8 @@ stage_runtime() {
 stage_runtime "$FW410_RUNTIME_ROOT" "${FW410_RUNTIME[@]}"
 stage_runtime "$FW1814_RUNTIME_ROOT" "${FW1814_RUNTIME[@]}"
 
-cp "$FW410_PLIST" "$FW1814_PLIST" "$ROOT/Library/LaunchDaemons/"
+cp "$FW410_PLIST" "$FW410_PAYLOAD_ROOT/Library/LaunchDaemons/"
+cp "$FW1814_PLIST" "$FW1814_PAYLOAD_ROOT/Library/LaunchDaemons/"
 cp "$SCRIPT_DIR/scripts/all-postinstall" "$SCRIPTS/postinstall"
 cp "$SCRIPT_DIR/scripts/postinstall" "$SCRIPTS/fw410-postinstall"
 cp "$SCRIPT_DIR/scripts/fw1814-postinstall" "$SCRIPTS/fw1814-postinstall"
@@ -169,7 +180,7 @@ h2 { font-size: 15px; margin-top: 18px; } ul { margin-top: 6px; }
 <li>M-Audio FireWire 410</li>
 <li>M-Audio FireWire 1814</li>
 </ul>
-<p>The package installs both CoreAudio drivers, transport services and native control panels. The two device runtimes are namespaced and can coexist.</p>
+<p>The package detects connected supported hardware and installs only the matching CoreAudio driver, transport service and native control panel. If both interfaces are connected, both are installed.</p>
 <p>At least one supported interface must be connected during installation.</p>
 </body></html>
 EOF
