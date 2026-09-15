@@ -62,11 +62,17 @@ sudo make install
 
 Do not run compilation itself with `sudo`. The install targets intentionally verify that the artifacts already exist instead of compiling them as root.
 
-Source installation does not require both devices—or any hardware—to be
-connected. Aggregate `sudo make install` validates both build trees, bypasses
-the individual model-presence gates and installs both stacks. Each service then
-remains ready for its matching interface to appear. The namespaced
-`fw410-install` and `fw1814-install` targets retain their matching-device gates.
+`sudo make install` detects the connected supported interface and installs its
+matching stack. If both models are connected, it installs both. To install both
+stacks without requiring hardware detection, use:
+
+```bash
+sudo make install-force
+```
+
+The forced target validates both build trees before installing either stack.
+The namespaced `fw410-install` and `fw1814-install` targets retain their
+matching-device gates.
 
 ## Build targets
 
@@ -78,6 +84,8 @@ make hal         # both HAL plug-ins
 make runtime     # both installed runtime/control sets
 make gui         # both native control-panel applications
 make all-tools   # both development/reverse-engineering tool sets
+sudo make install       # install the detected interface(s)
+sudo make install-force # install both stacks without hardware detection
 make package     # fresh build + unified two-device .pkg installer
 make clean
 ```
@@ -133,7 +141,9 @@ sudo bash devices/fw410/service/install-service.sh
 
 ## Device-specific source installation
 
-The default source path builds and installs both interfaces. To work on only one, use its namespaced targets. For example:
+The default build covers both interfaces, while the default install selects the
+connected model. To work on only one explicitly, use its namespaced targets.
+For example:
 
 ```bash
 make fw1814

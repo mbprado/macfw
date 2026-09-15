@@ -107,10 +107,11 @@ make
 sudo make install
 ```
 
-Root `make` builds both supported interfaces. Aggregate installation validates
-all required FW410 and FW1814 artifacts before installing either interface.
-Compilation must run as the normal user; `sudo make install` only installs
-already-built artifacts.
+Root `make` builds both supported interfaces. Default installation detects the
+connected interface and validates and installs its matching stack; if both models are
+connected, it installs both. `sudo make install-force` validates both build
+trees and installs both stacks without hardware detection. Compilation must run
+as the normal user; install targets only install already-built artifacts.
 
 ## Source archive
 
@@ -165,7 +166,9 @@ Every release candidate should review/update:
 Before tagging `0.4.000`, verify at minimum:
 
 - clean combined source build with `make`;
-- aggregate source installation with `sudo make install`;
+- detected FW410 source installation with `sudo make install`;
+- detected FW1814 source installation with `sudo make install`;
+- forced two-device source installation with `sudo make install-force`;
 - both interface control panels, HAL plug-ins and namespaced services are installed;
 - `make package` produces exactly one combined installer;
 - `make fw410-package` and `make fw1814-package` still produce individual installers;

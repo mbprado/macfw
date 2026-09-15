@@ -33,7 +33,7 @@ for file in "$HALTRANSPORT" "$BRIDGE44100" "$BRIDGE48000" "$RATEPROBE" "$FW410CT
 done
 
 if [[ "${MACFW_SKIP_HARDWARE_GATE:-0}" == 1 ]]; then
-    echo "aggregate install: skipping the FW410-only hardware gate"
+    echo "forced install: skipping the FW410-only hardware gate"
 else
     set +e
     "$DEVICEPROBE" --require-supported

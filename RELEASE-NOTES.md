@@ -11,7 +11,8 @@ control-panel applications.
 
 - One `macfw-0.4.000-<build>.pkg` installs support for both interfaces.
 - Root `make` builds the FW410 and FW1814 HAL, release runtime and control panel.
-- `sudo make install` preflights every required artifact, then installs both interfaces.
+- `sudo make install` detects the connected supported interface and installs its matching stack.
+- `sudo make install-force` preflights every required artifact, then installs both interfaces without hardware detection.
 - Device-specific build, install and package targets remain available.
 - FW1814 reaches its first installable control-panel release scope.
 - FW410 retains the hardware-validated `0.03.000` audio/control baseline.
@@ -52,15 +53,23 @@ switching is slower than the reverse direction.
 
 ## Build and installation
 
-Build and install both interfaces from source:
+Build both interfaces, then install the connected model from source:
 
 ```bash
 make
 sudo make install
 ```
 
-Compilation runs as the normal user. Aggregate installation checks that both
-device builds are complete before installing either one.
+If both models are connected, the default install installs both. To install both
+stacks regardless of hardware presence, use:
+
+```bash
+sudo make install-force
+```
+
+Compilation runs as the normal user. Each detected-device install validates its
+matching artifacts; forced installation validates both build trees before
+installing either one.
 
 Build the unified installer:
 

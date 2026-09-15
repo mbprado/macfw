@@ -8,7 +8,7 @@ The supported targets are the **M-Audio FireWire 410** and **M-Audio FireWire 18
 
 ## Current status
 
-The project is now on the unified **`0.4.000` alpha release line** for Intel macOS. Root builds and installation cover both supported interfaces, and the primary package contains both independently namespaced device stacks. Native audio, recovery, rate switching and the current control-panel scopes are hardware-validated on real FW410 and FW1814 hardware.
+The project is now on the unified **`0.4.000` alpha release line** for Intel macOS. Root builds cover both supported interfaces, the default source install selects connected hardware, and the primary package contains both independently namespaced device stacks. Native audio, recovery, rate switching and the current control-panel scopes are hardware-validated on real FW410 and FW1814 hardware.
 
 Hardware-validated functionality includes:
 
@@ -51,7 +51,7 @@ Current cumulative macOS hardware-test status:
 
 Apple Silicon is not currently supported. See [`COMPATIBILITY.md`](COMPATIBILITY.md) and [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) for the evidence-based compatibility status.
 
-The FW1814 implementation now has hardware-validated analog full-duplex CoreAudio operation, 44.1/48 kHz switching, reconnect recovery, persistent analog mixer/routing controls and a native AppKit control panel. Its runtime remains isolated from the FW410 while the unified source-install and `.pkg` paths install both interfaces. See [`devices/fw1814/README.md`](devices/fw1814/README.md) for its current scope.
+The FW1814 implementation now has hardware-validated analog full-duplex CoreAudio operation, 44.1/48 kHz switching, reconnect recovery, persistent analog mixer/routing controls and a native AppKit control panel. Its runtime remains isolated from the FW410. The default source installer selects the connected interface, `install-force` installs both stacks, and the unified `.pkg` contains both. See [`devices/fw1814/README.md`](devices/fw1814/README.md) for its current scope.
 
 macOS Tahoe 26 is not currently supported because Apple removed the built-in FireWire stack on which macfw depends. Future Tahoe support may become possible through integration with an alternative stack such as [`ASFireWire`](https://github.com/mrmidi/ASFireWire), but that path is experimental and has not been integrated or validated with macfw.
 

@@ -35,7 +35,7 @@ for file in "$SUPERVISOR" "$ENGINE48" "$ENGINE44" "$INIT" "$BOOT" "$BUS_RESET" "
 done
 
 if [[ "${MACFW_SKIP_HARDWARE_GATE:-0}" == 1 ]]; then
-    echo "aggregate install: skipping the FW1814-only hardware gate"
+    echo "forced install: skipping the FW1814-only hardware gate"
 else
     set +e
     "$DEVICE_PROBE" --require-supported

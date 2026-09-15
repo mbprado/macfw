@@ -8,9 +8,14 @@ The project uses the `x.y.zzz` version format described in [`RELEASES.md`](RELEA
 
 ### Fixed
 
-- Aggregate `sudo make install` now bypasses each model-specific source-install
-  hardware gate after validating both build trees, allowing both namespaced
-  stacks to be installed when only an FW410 or only an FW1814 is connected.
+- Root `sudo make install` now detects the connected supported interface and
+  installs only its matching device stack instead of aborting on the other
+  model's hardware gate.
+
+### Added
+
+- `sudo make install-force` validates both build trees and installs both
+  namespaced stacks without requiring either interface to be connected.
 
 ## [0.4.000] — fourth alpha — 2026-09-15
 
@@ -32,11 +37,12 @@ The project uses the `x.y.zzz` version format described in [`RELEASES.md`](RELEA
   `devices/fw410/`, colocating both supported interface implementations under
   the multi-device layout.
 - Unified FW410 and FW1814 component versions at `0.4.000`.
-- Root `make`, component builds, `sudo make install`, uninstall and package
-  targets now operate on both supported interfaces by default.
+- Root `make`, component builds, uninstall and package targets now operate on
+  both supported interfaces by default; `sudo make install` selects the
+  connected interface while `sudo make install-force` installs both.
 - Added explicit namespaced FW410 and FW1814 targets for focused builds,
   installs, uninstalls and individual packages.
-- Aggregate source installation validates every required FW410 and FW1814
+- Forced source installation validates every required FW410 and FW1814
   artifact before installing either device.
 - FW1814 source installation and uninstallation now include its native control panel.
 

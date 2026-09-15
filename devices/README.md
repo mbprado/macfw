@@ -13,7 +13,9 @@ service, control panel, diagnostics and device-specific documentation. Reusable
 FireWire, AMDTP and CoreAudio components move to `common/` only after both
 hardware implementations demonstrate that the abstraction is genuinely shared.
 
-The root `make`, `sudo make install`, uninstall and package targets operate on
-both devices. Namespaced targets remain available for focused development and
-individual installers. Use `make fw410-package` or `make fw1814-package` for a
+The root build, uninstall and package targets operate on both devices. Root
+`sudo make install` detects and installs the connected model(s), while
+`sudo make install-force` installs both stacks without hardware detection.
+Namespaced targets remain available for focused development and individual
+installers. Use `make fw410-package` or `make fw1814-package` for a
 device-specific installer; `make package` builds the unified installer.
