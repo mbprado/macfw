@@ -78,10 +78,12 @@ Compilation runs as the normal user. Each detected-device install validates its
 matching artifacts; forced installation validates both build trees before
 installing either one.
 
-Build the unified installer:
+Build the package set from the repository root:
 
 ```bash
 make package
+make fw410-package
+make fw1814-package
 ```
 
 The output is:

@@ -174,8 +174,8 @@ Before tagging `0.4.000`, verify at minimum:
 - detected FW1814 source installation with `sudo make install`;
 - forced two-device source installation with `sudo make install-force`;
 - both interface control panels, HAL plug-ins and namespaced services are installed;
-- `make package` produces the combined installer plus the FW410-only and
-  FW1814-only installers;
+- `make package` produces the combined installer, while `make fw410-package`
+  and `make fw1814-package` produce the focused installers;
 - each individual package installs only its named interface;
 - combined installation succeeds with an FW410 operational or bootloader unit
   connected and installs FW410 only;
