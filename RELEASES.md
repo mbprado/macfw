@@ -28,17 +28,53 @@ Examples:
 
 The numeric fields are zero-padded as shown. `yy` is two digits and `zzz` is three digits.
 
-Release tags use the exact version string, with no `v` prefix:
+Device releases use a device-prefixed version tag:
+
+```text
+fw410-0.03.000
+fw1814-0.01.000
+```
+
+The original numeric-only FW410 tags remain supported for compatibility:
 
 ```text
 0.03.000
 ```
 
-A release workflow should reject tags that do not match:
+The release workflow resolves the target device from the prefix, validates the
+version against `devices/<device>/version.h`, and builds only that device's
+package. Versions must match `^[0-9]+\.[0-9]{2}\.[0-9]{3}# macfw release and versioning policy
 
-```regex
-^[0-9]+\.[0-9]{2}\.[0-9]{3}$
+This document defines the release contract for macfw.
+
+## Version format
+
+Public releases use:
+
+```text
+x.yy.zzz
 ```
+
+where:
+
+- `x` — major architectural generation / compatibility break;
+- `yy` — larger feature/update release;
+- `zzz` — patch, packaging, maintenance, or small-fix release.
+
+Examples:
+
+```text
+0.01.000   first development release
+0.01.001   patch/fix to 0.01.000
+0.02.000   larger update or feature addition
+0.03.000   next larger update
+1.00.000   first major/stable generation
+```
+
+The numeric fields are zero-padded as shown. `yy` is two digits and `zzz` is three digits.
+
+ after removing
+the optional device prefix.
 
 Pre-release status such as **alpha** or **beta** is represented by the GitHub Release state/title rather than changing the numeric version embedded in the binaries.
 
@@ -51,7 +87,7 @@ The intended release flow is:
 3. Merge the validated release-candidate work into `main`.
 4. Confirm the version embedded by the build on `main` matches the intended release.
 5. Build/check the package from `main`.
-6. Create and push the exact `x.yy.zzz` tag on the release commit.
+6. Create and push the device tag (`fw410-x.yy.zzz` or `fw1814-x.yy.zzz`) on the release commit; legacy numeric-only tags remain FW410 aliases.
 7. GitHub Actions validates the tag and builds on the supported macOS runner.
 8. The workflow runs the release build and package path.
 9. It calculates SHA-256 checksums.
@@ -59,29 +95,34 @@ The intended release flow is:
 
 The tag identifies the exact source revision used for the published package. Release tags must be created from the intended `main` release commit, not from an experiment/development branch.
 
-## Primary release artifact
+## Primary release artifacts
 
-The primary macfw binary distribution is the native macOS installer package:
+The primary macfw binary distributions are device-specific native macOS
+installer packages:
 
 ```text
 macfw-fw410-x.yy.zzz-<build>.pkg
+macfw-fw1814-x.yy.zzz-<build>.pkg
 ```
 
-The build identifier is the Git commit identifier embedded by the existing build system. The package is produced from the repository root with:
+The build identifier is the Git commit embedded by the build system. Packages
+are produced from the repository root with:
 
 ```bash
-make package
+make package          # FW410 compatibility alias
+make fw410-package
+make fw1814-package
+make package-all
 ```
 
-and appears under:
+Artifacts appear under `package/dist/`. Each package contains only its
+device's CoreAudio HAL plug-in, self-contained transport/control runtime,
+persistent state helper, runtime build metadata, launchd definition, native
+control panel and installation scripts. Device-specific hardware gates require
+the matching supported interface to be connected.
 
-```text
-package/dist/
-```
-
-The package contains the FW410 CoreAudio HAL plug-in, self-contained transport/control runtime, persistent control-state helper, exact runtime build metadata, launchd service definition, native control-panel application, and installation scripts. Installation is gated by `deviceprobe --require-supported`, so a known supported interface must be connected in either operational or bootloader personality.
-
-`make package` performs a fresh release-artifact rebuild before staging the package so embedded build identities correspond to the source commit being packaged.
+Every package target performs a fresh build of that device before staging, so
+embedded build identities correspond to the package commit.
 
 ## Source installation
 

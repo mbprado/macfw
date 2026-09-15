@@ -1,6 +1,7 @@
 CXX ?= c++
 GIT_SHA := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
-CPPFLAGS += -DMACFW_GIT_SHA=\"$(GIT_SHA)\"
+VERSION := $(shell sed -n 's/^\#define MACFW_VERSION "\([^"]*\)"/\1/p' ../version.h | head -1)
+CPPFLAGS += -I.. -DMACFW_GIT_SHA=\"$(GIT_SHA)\"
 APP := build/macfw-fw1814-control.app
 INSTALL_APP := /Applications/macfw FW1814 Control.app
 CONTENTS := $(APP)/Contents
@@ -31,9 +32,10 @@ $(ICNS): $(ICON)
 	iconutil -c icns "$(ICONSET)" -o "$(ICNS)"
 	cp "$(ICON)" "$(RESOURCES)/icon.png"
 
-$(BINARY): $(SOURCES) Sources/slider_commit.h Info.plist $(ICNS)
+$(BINARY): $(SOURCES) Sources/slider_commit.h Info.plist $(ICNS) ../version.h
 	mkdir -p "$(MACOS)" "$(RESOURCES)"
 	cp Info.plist "$(CONTENTS)/Info.plist"
+	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(VERSION)" "$(CONTENTS)/Info.plist"
 	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(GIT_SHA)" "$(CONTENTS)/Info.plist"
 	/usr/libexec/PlistBuddy -c "Delete :MacFWGitCommit" "$(CONTENTS)/Info.plist" >/dev/null 2>&1 || true
 	/usr/libexec/PlistBuddy -c "Add :MacFWGitCommit string $(GIT_SHA)" "$(CONTENTS)/Info.plist"

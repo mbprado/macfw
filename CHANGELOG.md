@@ -6,14 +6,22 @@ The project uses the `x.yy.zzz` version format described in [`RELEASES.md`](RELE
 
 ## [Unreleased]
 
+### Added
+
+- Native AppKit FW1814 control panel covering the hardware-validated analog
+  mixer, input monitor level/pan, analog output, headphone and AUX controls.
+- Device-specific `fw1814-package` target and generalized package builder for
+  independent FW410/FW1814 installers.
+- FW1814 installer hardware gate and runtime build metadata.
+
 ### Changed
+
 
 - Moved the complete FW410 source implementation from `fw410/` to
   `devices/fw410/`, colocating both supported interface implementations under
   the multi-device layout.
-- Added explicit namespaced FW410 root targets and `make all-interfaces` while
-  preserving FW410 as the default for `make`, `make install` and
-  `make package`.
+- Added explicit namespaced FW410 and FW1814 root targets plus `make all-interfaces` and `make package-all`, while preserving FW410 as the default for `make`, `make install` and `make package`.
+- FW1814 source installation and uninstallation now include its native control panel.
 
 ### Validation
 

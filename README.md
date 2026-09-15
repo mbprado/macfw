@@ -51,7 +51,7 @@ Current cumulative macOS hardware-test status:
 
 Apple Silicon is not currently supported. See [`COMPATIBILITY.md`](COMPATIBILITY.md) and [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) for the evidence-based compatibility status.
 
-The experimental FW1814 implementation now has hardware-validated analog full-duplex CoreAudio operation, 44.1/48 kHz switching and reconnect recovery. Its routing-control API is being developed as the backend for a future control panel. See [`devices/fw1814/README.md`](devices/fw1814/README.md) for its current scope.
+The FW1814 implementation now has hardware-validated analog full-duplex CoreAudio operation, 44.1/48 kHz switching, reconnect recovery, persistent analog mixer/routing controls and a native AppKit control panel. Separate source-install and `.pkg` targets keep it isolated from the FW410 runtime while allowing both interfaces and control panels to coexist. See [`devices/fw1814/README.md`](devices/fw1814/README.md) for its current scope.
 
 macOS Tahoe 26 is not currently supported because Apple removed the built-in FireWire stack on which macfw depends. Future Tahoe support may become possible through integration with an alternative stack such as [`ASFireWire`](https://github.com/mrmidi/ASFireWire), but that path is experimental and has not been integrated or validated with macfw.
 
@@ -123,6 +123,11 @@ The current AppKit control panel includes:
 
 The Device sample-rate selector uses the normal CoreAudio nominal-sample-rate property and HAL configuration-change lifecycle. It does not bypass CoreAudio or call FireWire rate-control probes directly.
 
+The FW1814 control panel follows the same transport-owned architecture and
+covers its validated analog surface: two software returns, four analog input
+pairs, two analog output pairs, two digital-volume headphone outputs, AUX
+sends/master, persistent state, diagnostics and 44.1/48 kHz selection.
+
 ## Main mixer discovery
 
 The original M-Audio panel and the Linux `snd-firewire-ctl-services` implementation established that the FW410 main mixer is a **7-source x 5-destination assignment matrix**:
@@ -171,6 +176,7 @@ macfw/
 │   │   └── analysis/
 │   └── fw1814/
 │       ├── hal/
+│       ├── control-panel/
 │       ├── service/
 │       ├── tools/
 │       ├── transport/
@@ -229,7 +235,7 @@ Major completed FW410 areas now include:
 
 Deferred work includes unresolved mixer strip level/pan/mute/AUX-send semantics, calibrated CoreAudio latency reporting, MIDI, named presets, optional menu-bar controls, broader hardware coverage, and signing/notarization.
 
-The FW1814 has separately reached hardware-validated analog CoreAudio playback/capture, 44.1/48 kHz switching and reconnect recovery. Its current sequence is routing controls, remaining sample rates, then the native control panel; MIDI remains last.
+The FW1814 has separately reached hardware-validated analog CoreAudio playback/capture, 44.1/48 kHz switching, reconnect recovery, persistent analog routing/mixer controls and its first native control panel. The next major sequence is higher sample rates, then digital I/O and MIDI when direct comparison with both original M-Audio panels is available.
 
 ## Release documentation
 

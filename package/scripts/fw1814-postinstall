@@ -1,0 +1,37 @@
+#!/bin/bash
+set -euo pipefail
+LABEL="com.mbprado.macfw.fw1814.transport"
+PLIST="/Library/LaunchDaemons/${LABEL}.plist"
+LOG="/Library/Logs/macfw-fw1814-transport.log"
+INSTALL_LOG="/Library/Logs/macfw_install.log"
+INSTALL_ROOT="/Library/Application Support/macfw/fw1814"
+STATE_FILE="$INSTALL_ROOT/control-state.conf"
+HAL="/Library/Audio/Plug-Ins/HAL/macfw-fw1814.driver"
+APP="/Applications/macfw FW1814 Control.app"
+touch "$INSTALL_LOG"
+chown root:wheel "$INSTALL_LOG"
+chmod 0644 "$INSTALL_LOG"
+exec >>"$INSTALL_LOG" 2>&1
+echo ""
+echo "===== macfw FW1814 package install $(date '+%Y-%m-%d %H:%M:%S %z') ====="
+echo "postinstall: starting"
+trap 'status=$?; echo "postinstall: FAILED status=$status line=$LINENO command=$BASH_COMMAND"; exit $status' ERR
+chown -R root:wheel "$INSTALL_ROOT";chmod -R go-w "$INSTALL_ROOT"
+chown -R root:wheel "$HAL";chmod -R go-w "$HAL"
+chown -R root:wheel "$APP";chmod -R go-w "$APP"
+chown root:wheel "$PLIST";chmod 0644 "$PLIST"
+if [[ ! -e "$STATE_FILE" ]]; then : > "$STATE_FILE"; fi
+chown root:wheel "$STATE_FILE";chmod 0666 "$STATE_FILE"
+if [[ ! -e "$LOG" ]]; then : > "$LOG"; fi
+chown root:wheel "$LOG";chmod 0644 "$LOG"
+echo "postinstall: payload permissions configured"
+launchctl bootout "system/$LABEL" >/dev/null 2>&1 || true
+launchctl bootstrap system "$PLIST"
+launchctl enable "system/$LABEL"
+launchctl kickstart -k "system/$LABEL"
+echo "postinstall: transport service started"
+killall coreaudiod >/dev/null 2>&1 || true
+echo "postinstall: CoreAudio restart requested"
+rm -rf /tmp/macfw-fw1814-package
+echo "postinstall: completed successfully"
+exit 0

@@ -21,6 +21,7 @@ PLAYBACK_MAP_TOOL := fw1814playback_map
 ROUTE_ANALOG_TOOL := fw1814route_stream_to_analog
 CONTROL_DIR := control/fw1814ctl
 STATE_CONTROL_DIR := control/fw1814state
+DEVICE_PROBE_TOOL := fw1814deviceprobe
 
 .PHONY: all runtime fingerprint probe boot-tool boot-check boot \
 	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe \
@@ -34,14 +35,14 @@ STATE_CONTROL_DIR := control/fw1814state
 	client-close-watch-tool client-close-watch-check client-close-watch \
 	stream-client-close-watch-tool stream-client-close-watch-check stream-client-close-watch \
 	playback-map-tool playback-map-check playback-map \
-	route-analog-tool route-analog-check route-analog control-tool control-state-tool clean
+	route-analog-tool route-analog-check route-analog control-tool control-state-tool device-probe-tool clean
 
 all: probe bebob-probe bus-reset-tool boot-tool init-tool capture48-tool dualcmp-tool dualcmp-wait-tool \
 	duplex-blocking-tool output-watch-tool teardown-watch-tool \
 	client-close-watch-tool stream-client-close-watch-tool playback-map-tool \
 	route-analog-tool control-tool control-state-tool
 
-runtime: boot-tool init-tool bus-reset-tool control-tool control-state-tool
+runtime: boot-tool init-tool bus-reset-tool control-tool control-state-tool device-probe-tool
 
 probe:
 	$(MAKE) -C $(PROBE_DIR)
@@ -256,10 +257,15 @@ control-tool:
 control-state-tool:
 	$(MAKE) -C $(STATE_CONTROL_DIR)
 
+device-probe-tool: $(DEVICE_PROBE_TOOL)
+
+$(DEVICE_PROBE_TOOL): fw1814deviceprobe.cpp
+	$(CXX) $(CXXFLAGS) $< $(FRAMEWORKS) -o $@
+
 clean:
 	$(MAKE) -C $(PROBE_DIR) clean
 	$(MAKE) -C $(BEBOB_PROBE_DIR) clean
 	$(MAKE) -C $(BUS_RESET_DIR) clean
 	$(MAKE) -C $(CONTROL_DIR) clean
 	$(MAKE) -C $(STATE_CONTROL_DIR) clean
-	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) $(PLAYBACK_MAP_TOOL) $(ROUTE_ANALOG_TOOL) fw1814capture48_duplex_nodata
+	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(DEVICE_PROBE_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) $(PLAYBACK_MAP_TOOL) $(ROUTE_ANALOG_TOOL) fw1814capture48_duplex_nodata

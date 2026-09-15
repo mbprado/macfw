@@ -2,6 +2,7 @@
 #import <CoreAudio/CoreAudio.h>
 #import <Foundation/Foundation.h>
 #include "slider_commit.h"
+#include "../../version.h"
 #include <cmath>
 #include <cstdint>
 
@@ -212,7 +213,7 @@ static AudioObjectID FindDevice(void){
     self.rate.selectedSegment=std::fabs(rate-44100.0)<1?0:(std::fabs(rate-48000.0)<1?1:-1);
 }
 - (void)refreshDiagnostics{
-    NSMutableString *s=[NSMutableString stringWithFormat:@"macfw FW1814 Control\n%@\n\n",[NSDate date]];
+    NSMutableString *s=[NSMutableString stringWithFormat:@"macfw FW1814 Control %s build %s\n%@\n\n",macfw::fw1814::build::kVersion,macfw::fw1814::build::kGitSha,[NSDate date]];
     for(NSArray *a in @[@[@"engine",@"get"],@[@"routing",@"get"],@[@"capabilities",@"get"]]){NSDictionary *r=[self ctl:a];[s appendFormat:@"$ fw1814ctl %@\n%@\n",[a componentsJoinedByString:@" "],r[@"output"]];}self.diagnostics.string=s;
 }
 - (void)refresh:(id)sender{

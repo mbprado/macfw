@@ -15,8 +15,8 @@ The experimental FW1814 profile currently provides:
 - rate switching from Audio MIDI Setup;
 - automatic boot, transport restart and disconnect/reconnect recovery;
 - restoration of the previously selected rate after reconnect;
-- a transport-owned routing-control API and authoritative write-only register
-  cache for the future GUI;
+- a transport-owned routing-control API, authoritative write-only register
+  cache and native AppKit control panel;
 - experimental runtime assignment of software returns 1/2 and 3/4 to Mixer
   buses 1/2 and 3/4;
 - experimental Mixer/AUX source selection for Analog Outputs 1/2 and 3/4;
@@ -24,16 +24,16 @@ The experimental FW1814 profile currently provides:
   for both physical headphone outputs;
 - hardware-validated, persistent routing of the four analog input pairs to
   Mixer 1/2 or Mixer 3/4;
-- hardware-validated stereo mute/unity control for all four analog input-pair
-  monitor-mixer levels, with a known unity startup baseline and persistent
-  typed state;
+- hardware-validated continuous stereo level and pan control for all four
+  analog input-pair monitor paths;
+- hardware-validated continuous software-return, analog-output, headphone,
+  AUX-send and AUX-master levels with persistent typed state;
 - hardware-validated persistent restoration of software-return, analog-input,
   analog-output and headphone selections after transport restart, rate changes
   and reconnect; all four analog input-pair monitor levels also survive a
   transport restart through the same state path.
 
-Higher sample rates and the native control panel remain under development.
-S/PDIF, ADAT and MIDI are intentionally deferred until macfw can be compared
+Higher sample rates remain under development. S/PDIF, ADAT and MIDI are intentionally deferred until macfw can be compared
 directly with the original FW410 and FW1814 control panels running
 simultaneously.
 
@@ -66,9 +66,12 @@ From the repository root:
 ```bash
 make fw1814
 sudo make fw1814-install
+
+# Device-specific installer package:
+make fw1814-package
 ```
 
-Build every FW1814 reverse-engineering/diagnostic tool with `make fw1814-tools`. Full requirements, target descriptions, installation and uninstall instructions are centralized in [`../../INSTALL.md`](../../INSTALL.md).
+Build only the control panel with `make fw1814-gui`, or every FW1814 reverse-engineering/diagnostic tool with `make fw1814-tools`. Full requirements, target descriptions, installation and uninstall instructions are centralized in [`../../INSTALL.md`](../../INSTALL.md).
 
 ## Routing control API
 
