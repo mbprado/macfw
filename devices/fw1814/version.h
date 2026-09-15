@@ -1,6 +1,6 @@
 #pragma once
 #ifndef MACFW_VERSION
-#define MACFW_VERSION "0.4.000"
+#define MACFW_VERSION "0.04.000"
 #endif
 #ifndef MACFW_GIT_SHA
 #define MACFW_GIT_SHA "unknown"
