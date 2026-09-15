@@ -44,7 +44,8 @@ The normal release tag is the unified numeric version:
 0.4.000
 ```
 
-It builds the combined package containing both supported interfaces.
+It builds the combined package containing both supported interfaces and the
+FW410-only and FW1814-only packages.
 Device-prefixed tags remain available when a device-specific package is needed:
 
 ```text
