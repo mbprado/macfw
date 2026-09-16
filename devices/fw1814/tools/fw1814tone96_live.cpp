@@ -280,9 +280,11 @@ bool dumpReceive(const macfw::AmdtpReceiveRing& ring, bool raw) {
     std::size_t matchingData = 0;
     std::size_t noData = 0;
     std::size_t other = 0;
+    std::size_t oversized = 0;
     for (std::size_t i = 0; i < ring.packetCount(); ++i) {
         const auto& slot = ring.slot(i);
         if (!slot.touched()) continue;
+        if (slot.packetLength() > slot.capacity) ++oversized;
         const auto packet = slot.packet();
         if (!packet.hasCip()) { ++other; continue; }
         const auto h = packet.cip();
@@ -296,7 +298,22 @@ bool dumpReceive(const macfw::AmdtpReceiveRing& ring, bool raw) {
               << " / " << ring.packetCount() << '\n'
               << "    96 kHz 16-event packets: " << matchingData << '\n'
               << "    NODATA packets: " << noData << '\n'
-              << "    other packets: " << other << '\n';
+              << "    other packets: " << other << '\n'
+              << "    oversized receive headers: " << oversized << '\n';
+
+    // Print every bad slot, including those beyond the first 16 shown below.
+    for (std::size_t i = 0; i < ring.packetCount(); ++i) {
+        const auto& slot = ring.slot(i);
+        if (!slot.touched() || slot.packetLength() <= slot.capacity) continue;
+        std::cout << "    oversized slot " << i << ": len=" << slot.packetLength()
+                  << " capacity=" << slot.capacity
+                  << " isoHeader=0x" << std::hex << slot.isoHeader
+                  << " status=0x" << slot.status
+                  << " timestamp=0x" << slot.timestamp << std::dec << '\n'
+                  << "        payload prefix: ";
+        printBytes(slot.payload, std::min<std::size_t>(slot.capacity, 16));
+        std::cout << '\n';
+    }
 
     std::size_t shown = 0;
     for (std::size_t i = 0; i < ring.packetCount() && shown < 16; ++i) {

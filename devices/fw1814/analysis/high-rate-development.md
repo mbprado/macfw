@@ -314,3 +314,14 @@ the snapshot and counts any oversized slot as malformed. Repeat this input
 test and check the packet summary and decoder counts before treating the
 snapshot as fully clean. Sustained capture and the remaining physical inputs
 are still separate checks.
+
+Stopping the capture channel before the snapshot did not eliminate the bad
+headers. A repeat with the same 440 Hz input showed Analog1 at -27.56 dBFS,
+736 decoded frames, 46 valid data packets, 16 NODATA packets, and two
+adjacent slots reporting 41025 bytes (two malformed slots and DBC gaps).
+The receive slot capacity is 712 bytes, so these values cannot represent
+ordinary audio packets. The cause remains unknown; the diagnostic now logs
+the full receive header, status, timestamp, and first 16 payload bytes for
+every oversized slot to distinguish a damaged metadata word from a wider
+receive/DMA problem. Do not mark the capture path clean until this is
+understood and a repeated input test has no unexplained gaps.
