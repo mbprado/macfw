@@ -1,6 +1,6 @@
 # Compatibility matrix
 
-This file records hardware-tested macOS compatibility for the macfw M-Audio FireWire 410 driver.
+This file records hardware-tested macOS compatibility for the macfw M-Audio FireWire 410 and Firewire 1814 drivers.
 
 Only configurations that have actually been tested on real hardware are marked validated. Versions that appear likely to work based on neighboring macOS releases are still listed as untested until verified.
 
@@ -10,7 +10,7 @@ The table is cumulative across development releases; not every operating-system 
 
 | macOS version | Intel Mac | Installer | Playback | Capture | 44.1/48 kHz switching | Disconnect/reconnect | Sleep/wake | Status | UEFI
 |---|---|---|---|---|---|---|---|---|---|
-| Monterey 12.7.6 | validated | validated | validated | validated | validated | validated | not separately recorded | **Validated** | Stock |
+| Monterey 12.7.6 | validated | validated | validated | validated | validated | validated | not separately recorded | **Validated** | Stock/OpenCore LP |
 | Ventura 13.7.8 | validated | validated | validated | validated | validated | validated | validated | **Validated** | Stock/OpenCore LP |
 | Sonoma 14.8.9 | validated | validated | validated | validated | validated | validated | validated | **Validated** | OpenCore LP |
 | Sequoia 15.x | validated | validated | validated | validated | validated | validated | validated | **Validated** | OpenCore LP |
@@ -81,7 +81,7 @@ This is a useful behavioral improvement of the current user-space transport/serv
 
 ## Sequoia 15.x
 
-The `0.02.000` release candidate was tested on macOS Sequoia on the Intel development Mac and behaved the same as on the previously validated releases.
+The `0.04.000` release candidate was tested on macOS Sequoia on the Intel development Mac and behaved the same as on the previously validated releases.
 
 Observed result:
 
@@ -95,7 +95,7 @@ Observed result:
 - configured input/output and mixer/control state was restored as expected after reconnect;
 - no macfw-specific functional regression was observed compared with Monterey, Ventura or Sonoma.
 
-Logic Pro on this Sequoia installation was noticeably more resource-demanding on the older test MacBook. This was observed as host/application resource pressure rather than a macfw transport or FW410 compatibility failure. Better-performing Intel hardware may provide a more comfortable DAW workload, but broader machine testing is still needed before making performance claims.
+Logic Pro on this Sequoia installation was noticeably more resource-demanding on the older test MacBook. This was observed as host/application resource pressure rather than a macfw transport or FW410 and FW1814 compatibility failure. Better-performing Intel hardware may provide a more comfortable DAW workload, but broader machine testing is still needed before making performance claims.
 
 With this test, macfw has real-hardware validation across Monterey, Ventura, Sonoma and Sequoia on Intel Macs.
 
