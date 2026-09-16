@@ -194,5 +194,25 @@ devices/fw1814/tools/fw1814tone96_live --position 2 --frequency 523.25 --execute
 ```
 
 The second execution should only follow a clean first run and successful
-restoration. This standalone PCM probe does not make 96 kHz available to
-CoreAudio, so AIFF command-line playback remains a later integration gate.
+restoration. Both 440 Hz and 523.25 Hz were reported clean on the test Mac.
+The 523.25 Hz run refilled 42 halves, read 322560 PCM frames with zero
+silence fill, captured 48 correctly formed data packets and 16 NODATA packets,
+reported no unexpected packet shapes, kept generation 81, restored both PCRs
+and read back 48 kHz after rate restoration.
+
+For a real-file test, the same standalone probe can read up to three seconds
+of a local mono/stereo AIFF through AudioToolbox. It converts the source to
+96 kHz float PCM, mixes stereo to one selected analog output with -12 dB
+gain, and pads the rest of its preloaded buffer with silence. Use an absolute
+path; for the stock macOS alert as a short first sample:
+
+```sh
+make -C devices/fw1814/tools tone96-live-tool
+devices/fw1814/tools/fw1814tone96_live --position 2 --file /System/Library/Sounds/Glass.aiff
+devices/fw1814/tools/fw1814tone96_live --position 2 --file /System/Library/Sounds/Glass.aiff --execute --experimental-high-rate
+```
+
+Then use a longer local AIFF to hear a sustained excerpt. Keep the FW1814
+transport stopped, check rate/PCR restoration after each run, and report
+whether the file sounds clean. This test exercises file decode and conversion
+within the diagnostic; it does not expose 96 kHz through CoreAudio's HAL.

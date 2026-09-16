@@ -211,8 +211,8 @@ tone96-raw: tone96-tool
 # FCP waits service the refill loop; this does not install a 96 kHz HAL.
 tone96-live-tool: $(TONE96_LIVE_TOOL)
 
-$(TONE96_LIVE_TOOL): fw1814tone96_live.cpp fw1814_pcm96_tx.h fw1814_pcm96_stream.h $(LIBMACFW)
-	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814tone96_live.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
+$(TONE96_LIVE_TOOL): fw1814tone96_live.cpp fw1814_pcm96_tx.h fw1814_pcm96_stream.h fw1814_file96.h $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814tone96_live.cpp $(LIBMACFW) $(FRAMEWORKS) -framework AudioToolbox -o $@
 
 tone96-live-check: tone96-live-tool
 	@if [ -z "$(POSITION)" ]; then echo "usage: make tone96-live-check POSITION=0..5 FREQUENCY=440"; exit 64; fi
