@@ -91,7 +91,6 @@ public:
 
             std::size_t offset = 8;
             for (std::size_t event = 0; event < kEventsPerDataPacket; ++event) {
-                bool nonzero = false;
                 for (std::size_t ch = 0; ch < kPcmChannels; ++ch) {
                     putBe32(payload + offset, 0x40000000u);
                     offset += 4;
@@ -175,6 +174,7 @@ public:
             result.framesSilenced += rr.framesSilenced;
 
             for (std::size_t event = 0; event < kEventsPerDataPacket; ++event) {
+                bool nonzero = false;
                 for (std::size_t ch = 0; ch < kPcmChannels; ++ch) {
                     const auto sample = std::max<std::int32_t>(
                         -8388608, std::min<std::int32_t>(
