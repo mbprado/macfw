@@ -332,8 +332,20 @@ other packets, and 768 decoded frames with zero malformed packets, invalid
 labels, or DBC gaps. Analog1 peaked at -25.39 dBFS; the other analog inputs
 were near the noise floor. The bus generation stayed unchanged and the
 original 48-kHz rate and both PCRs restored. This passes the bounded 96-kHz
-capture packet and Analog Input 1 mapping check. The earlier intermittent
-41025-byte headers have not been explained by the stop-before-snapshot change;
-retain the raw metadata diagnostics and watch for recurrence during a longer
-capture run. The next capture gate is continuous decoding with ring consumption
-and packet/error counters over the whole run, not just the final 64 slots.
+Analog Input 1 mapping check, but packet integrity across runs remains open.
+The earlier intermittent 41025-byte headers have not been explained by the
+stop-before-snapshot change; retain the raw metadata diagnostics. The next
+capture gate is to resolve those headers and then check continuous decoding
+with ring consumption and packet/error counters over the whole run.
+
+A later run reproduced two adjacent oversized slots (0 and 1), each with
+`isoHeader=0xa041c802` and `status=0x51840000`, followed by valid-looking
+packet metadata. Their payload prefixes began with plausible 96-kHz CIP
+headers and DBC values 0 and 16, but that does not prove the complete payload
+was received. The run decoded 736 frames and counted two malformed packets;
+its decoder DBC gap counter remained zero even though the skipped slots lost
+audio frames, so a zero DBC gap counter by itself is insufficient. The probe
+now also prints header, status and timestamp for the first four slots on every
+run, permitting direct comparison with neighboring valid slots. Do not
+reconstruct packet lengths from the CIP prefix or expose this as reliable
+capture until the receive metadata anomaly is understood.

@@ -331,6 +331,11 @@ bool dumpReceive(const macfw::AmdtpReceiveRing& ring, bool raw) {
                       << " fdf=0x" << static_cast<unsigned>(cip.fdf)
                       << " syt=0x" << cip.syt << std::dec << "}";
         }
+        if (i < 4) {
+            std::cout << " isoHeader=0x" << std::hex << slot.isoHeader
+                      << " status=0x" << slot.status
+                      << " timestamp=0x" << slot.timestamp << std::dec;
+        }
         std::cout << '\n';
 
         if (raw && slot.packetLength() && slot.packetLength() <= slot.capacity) {
