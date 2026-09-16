@@ -2,6 +2,23 @@
 
 This file records visible project milestones rather than every diagnostic experiment. Detailed protocol and transport findings remain under `devices/fw410/analysis/`.
 
+## 2026-09-16 — Unified release line and FW1814 coexistence
+
+The `0.04.000` release made FW410 and FW1814 independently installable under
+one version and a shared combined package. The FW410 implementation moved to
+`devices/fw410/`; its HAL, launchd transport, state and control panel retain
+their own namespaced paths. Root `make` builds both, source `sudo make install`
+selects the connected model(s), and the combined package stages both while
+installing only detected interface stacks. Individual FW410 and FW1814
+packages remain available. The source and package installation scenarios were
+hardware-tested in operational and bootloader modes before release.
+
+The subsequent `0.04.003` release updated FW1814 physical headphone control;
+the FW410 audio and control path remained the validated regression baseline.
+Current FW410 user-facing limitations and installation instructions are in
+[`../../KNOWN-LIMITATIONS.md`](../../KNOWN-LIMITATIONS.md) and
+[`../../INSTALL.md`](../../INSTALL.md).
+
 ## 2026-08-31 — Native control panel, persistent controls and installable package validated
 
 The FW410 project reached its first end-user-style control and installation milestone. The native AppKit **macfw FW410 Control** application now exposes the hardware-validated main mixer, physical outputs, headphone and AUX controls through the transport-owned control socket rather than opening FireWire independently.
@@ -194,10 +211,12 @@ A controlled 1 kHz, 1.0 V, 60% duty-cycle source was used for objective comparis
 
 ### Short audible comparison
 
-Short excerpts are intentionally referenced rather than committing the large original AIFF recordings. These links are placeholders for compact clips extracted from equivalent portions of the controlled test recordings:
+Short excerpts were planned instead of committing the large original AIFF
+recordings. The following clip paths are archival placeholders; the audio
+files have not been committed:
 
-- **Test 19 — before completed-group consumption:** [`pictures/audio/capture-test19-before.wav`](pictures/audio/capture-test19-before.wav)
-- **Test 20 — after completed-group consumption:** [`pictures/audio/capture-test20-after.wav`](pictures/audio/capture-test20-after.wav)
+- **Test 19 — before completed-group consumption:** planned clip `pictures/audio/capture-test19-before.wav` (not committed).
+- **Test 20 — after completed-group consumption:** planned clip `pictures/audio/capture-test20-after.wav` (not committed).
 
 The clips should use the same time window from each recording where practical so the remaining cracks in test 19 can be compared directly with the clean test 20 result. The source parameters were 1 kHz, 1.0 V, 60% duty cycle at a 48 kHz capture rate.
 

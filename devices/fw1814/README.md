@@ -7,7 +7,7 @@ milestones.
 
 ## Current scope
 
-The experimental FW1814 profile currently provides:
+The released FW1814 analog profile currently provides:
 
 - Intel macOS support through Apple's legacy FireWire stack;
 - hardware-validated analog full-duplex CoreAudio at 44.1 and 48 kHz;
@@ -17,9 +17,9 @@ The experimental FW1814 profile currently provides:
 - restoration of the previously selected rate after reconnect;
 - a transport-owned routing-control API, authoritative write-only register
   cache and native AppKit control panel;
-- experimental runtime assignment of software returns 1/2 and 3/4 to Mixer
+- hardware-validated runtime assignment of software returns 1/2 and 3/4 to Mixer
   buses 1/2 and 3/4;
-- experimental Mixer/AUX source selection for Analog Outputs 1/2 and 3/4;
+- hardware-validated Mixer/AUX source selection for Analog Outputs 1/2 and 3/4;
 - hardware-validated, persistent Mixer 1/2, Mixer 3/4 or AUX source selection
   for both physical headphone outputs;
 - hardware-validated, persistent routing of the four analog input pairs to
@@ -28,6 +28,8 @@ The experimental FW1814 profile currently provides:
   analog input-pair monitor paths;
 - hardware-validated continuous software-return, analog-output, headphone,
   AUX-send and AUX-master levels with persistent typed state;
+- physical headphone encoders that adjust and save the corresponding output
+  gain, with the open control panel following their changes;
 - hardware-validated persistent restoration of software-return, analog-input,
   analog-output and headphone selections after transport restart, rate changes
   and reconnect; all four analog input-pair monitor levels also survive a
@@ -45,7 +47,7 @@ FW1814 development is also the beginning of macfw's explicit multi-device layout
 - FW1814-specific stream geometry, clock/digital-mode handling, control protocol and GUI live under `devices/fw1814/`;
 - the released FW410 implementation remains the regression reference while this extraction happens.
 
-The experimental FW1814 profile now has hardware-validated analog full-duplex
+The released FW1814 analog profile has hardware-validated full-duplex
 transport and CoreAudio integration at both 44.1 and 48 kHz. Audio MIDI Setup
 can switch the nominal rate in either direction, the supervisor selects the
 matching transport engine, and disconnect/reconnect recovery restores the
@@ -156,7 +158,8 @@ only the eight proven analog routes for Inputs 1/2 through 7/8; digital-input
 bits remain zero and unavailable.
 
 The four analog input-pair monitor-level controls write their complete
-documented stereo words and permit only mute or unity. Hardware testing
-confirmed that they control each input pair's contribution to the hardware
-mixer. The engine establishes unity for all four pairs at startup and
-successful changes are saved by `fw1814state`.
+documented stereo words and permit continuous independent L/R attenuation,
+including mute and unity. Hardware testing confirmed that they control each
+input pair's contribution to the hardware mixer. The engine establishes unity
+for all four pairs at startup and successful changes are saved by
+`fw1814state`.

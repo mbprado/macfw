@@ -81,6 +81,8 @@ Current tabs:
 - **Outputs** — five physical stereo output pairs with Mixer/AUX source, independent L/R level and link behavior;
 - **Headphones** — mixer/AUX source, independent L/R level, five mixer-output pair enables and link behavior;
 - **AUX** — software return 1/2 -> AUX and AUX output stereo levels;
+- **Inputs** — live analog and S/PDIF capture meters;
+- **Device** — transport/CoreAudio status and 44.1/48 kHz selection;
 - **Info** — macfw/HAL build information, transport state/rate, macOS/Mac identity, FireWire controller information and FW410 identity.
 
 The GUI intentionally presents software returns in CoreAudio/Logic order. The FW410's raw AV/C software-return identities are rotated relative to macfw's AMDTP channel order, so the GUI translates them rather than exposing confusing raw names.

@@ -19,14 +19,16 @@ where:
 Examples:
 
 ```text
-0.4.000   fourth development release
-0.4.001   patch/fix to 0.4.000
+0.04.000   first unified FW410 + FW1814 release
+0.04.003   released FW1814 headphone encoder fix
 1.0.000   first major/stable generation
 ```
 
-Historical releases used a zero-padded middle field (`0.01.000` through
-`0.03.000`). Those existing tags remain valid; new unified releases use the
-non-padded form beginning with `0.4.000`.
+The published tags use a zero-padded middle field, from `0.01.000` through
+the unified `0.04.000` and current `0.04.003`. Keep the tag, both version
+headers, package names and release notes identical for each release. The
+workflow accepts the `x.y.zzz` shape but checks the actual tag against the
+version headers.
 
 FW410 and FW1814 use one project version. Both
 `devices/fw410/version.h` and `devices/fw1814/version.h` must match before a
@@ -41,7 +43,7 @@ binaries.
 The normal release tag is the unified numeric version:
 
 ```text
-0.4.000
+0.04.003
 ```
 
 It builds the combined package containing both supported interfaces and the
@@ -49,8 +51,8 @@ FW410-only and FW1814-only packages.
 Device-prefixed tags remain available when a device-specific package is needed:
 
 ```text
-fw410-0.4.000
-fw1814-0.4.000
+fw410-0.04.003
+fw1814-0.04.003
 ```
 
 The intended release flow is:
@@ -165,9 +167,9 @@ Every release candidate should review/update:
 - [`INSTALL.md`](INSTALL.md);
 - [`README.md`](README.md).
 
-## Current `0.4.000` release gate
+## Unified release validation checklist
 
-Before tagging `0.4.000`, verify at minimum:
+For each future unified tag, verify at minimum:
 
 - clean combined source build with `make`;
 - detected FW410 source installation with `sudo make install`;

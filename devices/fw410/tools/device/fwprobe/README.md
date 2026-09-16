@@ -115,7 +115,7 @@ model:            0x010058
 text descriptor:  FW Bootloader
 ```
 
-This matches the Linux `snd-bebob` FW410 bootloader identity. See [`../../analysis/bootloader-rom.md`](../../analysis/bootloader-rom.md).
+This matches the Linux `snd-bebob` FW410 bootloader identity. See [`../../../analysis/bootloader-rom.md`](../../../analysis/bootloader-rom.md).
 
 ## Help
 

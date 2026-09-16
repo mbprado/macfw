@@ -1,7 +1,7 @@
 # macfw 0.04.003 — Alpha
 
-`0.04.003` is the first unified macfw development release for the **M-Audio
-FireWire 410** and **M-Audio FireWire 1814**.
+`0.04.003` updates the unified macfw alpha release for the **M-Audio FireWire
+410** and **M-Audio FireWire 1814**. The first unified release was `0.04.000`.
 
 Both interfaces now share one project version and one primary installer while
 retaining independent drivers, transport services, control state and native
@@ -9,8 +9,9 @@ control-panel applications.
 
 ## Highlights
 
-- This minor update fixes the volume control knob action on FW1814.
-- Headphones volume sliders in control panel now reflect knobs movement. 
+- FW1814 physical headphone encoders now change the matching headphone volume
+  and save the level for transport restart.
+- The FW1814 control panel follows encoder changes while open.
 
 ## Build and installation
 
@@ -80,7 +81,7 @@ Apple removed the built-in FireWire stack used by macfw. See
 
 ## Signing and notarization
 
-`0.4.003` remains an alpha release. Unless explicitly stated otherwise on the
+`0.04.003` remains an alpha release. Unless explicitly stated otherwise on the
 GitHub Release, the package is **unsigned and unnotarized**.
 
 ## Diagnostics for testers

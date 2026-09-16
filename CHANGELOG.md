@@ -6,6 +6,15 @@ The project uses the `x.y.zzz` version format described in [`RELEASES.md`](RELEA
 
 ## [Unreleased]
 
+## [0.04.003] — FW1814 headphone encoder fix — 2026-09-16
+
+### Fixed
+
+- FW1814 physical headphone knobs now adjust the corresponding headphone
+  volume, persist the changed level and update the open control-panel sliders.
+
+## [0.04.000] — fourth alpha — 2026-09-15
+
 ### Fixed
 
 - Root `sudo make install` now detects the connected supported interface and
@@ -23,17 +32,12 @@ The project uses the `x.y.zzz` version format described in [`RELEASES.md`](RELEA
 
 - `sudo make install-force` validates both build trees and installs both
   namespaced stacks without requiring either interface to be connected.
-
-## [0.4.000] — fourth alpha — 2026-09-15
-
-### Added
-
 - Native AppKit FW1814 control panel covering the hardware-validated analog
   mixer, input monitor level/pan, analog output, headphone and AUX controls.
 - Device-specific `fw1814-package` target and generalized package builder for
   independent FW410/FW1814 installers.
 - FW1814 installer hardware gate and runtime build metadata.
-- Unified `macfw-0.4.000-<build>.pkg` installer containing both supported
+- Unified `macfw-0.04.000-<build>.pkg` installer containing both supported
   interface drivers, runtimes and control panels.
 - Combined installer hardware gate that accepts either a connected FW410 or
   FW1814 while retaining stricter model-specific gates for individual packages.
@@ -43,7 +47,7 @@ The project uses the `x.y.zzz` version format described in [`RELEASES.md`](RELEA
 - Moved the complete FW410 source implementation from `fw410/` to
   `devices/fw410/`, colocating both supported interface implementations under
   the multi-device layout.
-- Unified FW410 and FW1814 component versions at `0.4.000`.
+- Unified FW410 and FW1814 component versions at `0.04.000`.
 - Root `make`, component builds, uninstall and package targets now operate on
   both supported interfaces by default; `sudo make install` selects the
   connected interface while `sudo make install-force` installs both.
