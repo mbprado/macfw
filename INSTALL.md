@@ -21,7 +21,7 @@ Apple Silicon is not currently supported.
 2. Obtain the unified `.pkg` and install it normally, or from Terminal:
 
    ```bash
-   sudo installer -pkg macfw-0.4.000-<build>.pkg -target /
+   sudo installer -pkg macfw-0.04.003-<build>.pkg -target /
    ```
 
 3. The installer validates the connected interface(s) and installs only the
@@ -192,16 +192,17 @@ package/dist/
 For example:
 
 ```text
-package/dist/macfw-0.4.000-<git-sha>.pkg
-package/dist/macfw-fw410-0.4.000-<git-sha>.pkg
-package/dist/macfw-fw1814-0.4.000-<git-sha>.pkg
+package/dist/macfw-0.04.003-<git-sha>.pkg
+package/dist/macfw-fw410-0.04.003-<git-sha>.pkg
+package/dist/macfw-fw1814-0.04.003-<git-sha>.pkg
 ```
 
-Packages disable bundle relocation so both control applications are installed at their authoritative `/Applications` paths even when development copies exist elsewhere on the Mac.
+Packages disable bundle relocation so each selected control application is installed at its authoritative `/Applications` path even when development copies exist elsewhere on the Mac.
 
 ## Installed components
 
-The current installation includes:
+Depending on which interface(s) were connected, the installation includes the
+corresponding FW410 and/or FW1814 paths below:
 
 ```text
 /Applications/macfw FW410 Control.app
@@ -242,7 +243,7 @@ Persistent control state is stored in:
 
 ## Control panel
 
-The current control panel provides:
+The **FW410** control panel provides:
 
 - **Mixer** — 7-source x 5-bus main-mixer routing;
 - **Outputs** — Mixer/AUX source, independent L/R levels and stereo link;
@@ -252,11 +253,17 @@ The current control panel provides:
 - **Device** — connection state, active/requested rate, engine PID, CoreAudio buffer state and 44.1/48 kHz selection;
 - **Info** — component/runtime build identity, transport diagnostics, Copy Diagnostics and Open Transport Log.
 
-Sample-rate changes from the Device tab use the standard CoreAudio nominal-sample-rate property. The GUI does not call FireWire rate-control probes directly.
+The **FW1814** panel instead covers its two software-return pairs, four
+analog input pairs, two analog output pairs, both headphone outputs and the
+AUX bus. Its physical headphone encoders adjust saved volume and the panel
+updates the sliders while open. Both panels use the standard CoreAudio
+nominal-sample-rate property for Device-tab rate changes rather than calling
+FireWire rate-control probes directly.
 
 ## Control architecture and persistence
 
-The GUI and CLI do not open FireWire directly. Both use the transport-owned control socket:
+The GUI and CLI do not open FireWire directly. Each interface uses its own
+transport-owned control socket. For FW410:
 
 ```text
 macfw FW410 Control.app / fw410ctl
@@ -270,7 +277,14 @@ FW410 AV/C
 
 This allows hardware controls to coexist with active playback/capture without competing for the FireWire device.
 
-Successful user-facing writable control changes are recorded by `fw410state`. On engine startup/reconnect, saved state is restored after low-level engine readiness. Main-mixer routes are restored first through the validated full 35-cell baseline path, then saved differential routes and other controls are replayed.
+For FW1814, `fw1814ctl` and its control panel use
+`/tmp/macfw-fw1814-control.sock`; `fw1814state` saves validated controls,
+including gain changes made by the physical headphone encoders. For FW410,
+successful user-facing writable control changes are recorded by `fw410state`.
+On engine startup/reconnect, each service restores its own saved state after
+low-level engine readiness. FW410 main-mixer routes are restored first through
+the validated full 35-cell baseline path, then saved differential routes and
+other controls are replayed.
 
 The control panel's **Reset Defaults** action applies and records the documented macfw baseline. These are macfw defaults, not a claim about undocumented M-Audio factory state.
 
@@ -278,7 +292,7 @@ See [`devices/fw410/analysis/control-state-persistence.md`](devices/fw410/analys
 
 ## Checking status
 
-For a source checkout:
+For an FW410 source checkout:
 
 ```bash
 devices/fw410/tools/transport/transportstatus/transportstatus
@@ -290,7 +304,7 @@ Watch transitions continuously with:
 devices/fw410/tools/transport/transportstatus/transportstatus --watch
 ```
 
-Normal operation reports `ONLINE`. During a physical disconnect or transport recovery it may temporarily report `OFFLINE` or `RECOVERING`.
+Normal FW410 operation reports `ONLINE`. During a physical disconnect or transport recovery it may temporarily report `OFFLINE` or `RECOVERING`.
 
 To inspect the installed launchd service:
 
@@ -310,7 +324,10 @@ Package post-install diagnostics:
 /Library/Logs/macfw_install.log
 ```
 
-The control panel's **Copy Diagnostics** action is the preferred first support snapshot.
+The appropriate interface's control-panel diagnostics and transport log are
+the preferred first support snapshot. The FW1814 service label is
+`com.mbprado.macfw.fw1814.transport` and its log is
+`/Library/Logs/macfw-fw1814-transport.log`.
 
 ## Sample-rate switching
 
@@ -345,7 +362,7 @@ See [`devices/fw410/analysis/original-control-panel-mixer-model.md`](devices/fw4
 From the repository root:
 
 ```bash
-sudo make uninstall          # FW410 compatibility alias
+sudo make uninstall          # remove both interface stacks
 sudo make fw410-uninstall
 sudo make fw1814-uninstall
 ```

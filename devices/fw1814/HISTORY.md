@@ -4,6 +4,23 @@ This file records visible project milestones rather than every diagnostic
 experiment. Detailed protocol, transport and routing findings remain under
 `devices/fw1814/analysis/`.
 
+## 2026-09-16 — Physical headphone encoders in the `0.04.003` release
+
+The first unified `0.04.000` release included the FW1814 analog CoreAudio
+engine, routing/level controls and its own native panel and installer. Testing
+confirmed the combined package selects only connected interface stacks,
+including each model's distinct bootloader personality.
+
+The physical headphone knobs initially changed neither the transport's saved
+headphone gain nor the open panel's volume sliders. The Linux M-Audio special
+control service provided the model: poll the FW1814 meter area for transitions
+of the first two encoders, then apply the corresponding gain change to each
+headphone output. macfw now polls those encoder bytes through its transport
+owner, writes the selected headphone gain, saves the updated stereo level and
+refreshes the panel while it is open. Hardware testing confirmed the behavior
+and the fix was released as `0.04.003`. The write-only gain registers still
+use the transport's authoritative software cache.
+
 ## 2026-09-10 — Analog input monitoring matrix and levels validated
 
 The complete analog half of the FW1814 `MIX_ANA_DIG_IN` register was validated

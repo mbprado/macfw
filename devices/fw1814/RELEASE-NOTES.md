@@ -1,9 +1,12 @@
-# macfw FW1814 0.4.000 — Alpha
+# macfw FW1814 0.04.003 — Alpha
 
-`0.4.000` is the first installable macfw development release for the
-**M-Audio FireWire 1814**.
+`0.04.003` updates the installable macfw alpha for the
+**M-Audio FireWire 1814**. Its first unified release was `0.04.000`.
 
 ## Highlights
+
+- Physical headphone knobs adjust and persist their output volume; the open
+  control panel follows the changes.
 
 - Hardware-validated analog full-duplex CoreAudio operation at 44.1 and 48 kHz.
 - Runtime sample-rate switching from Audio MIDI Setup and the native Device tab.
@@ -32,11 +35,11 @@ comparison with the original M-Audio control panels.
 
 ## Installation
 
-The primary `0.4.000` distribution contains both device payloads and installs
+The primary `0.04.003` distribution contains both device payloads and installs
 only the connected interface stack(s):
 
 ```bash
-sudo installer -pkg macfw-0.4.000-<build>.pkg -target /
+sudo installer -pkg macfw-0.04.003-<build>.pkg -target /
 ```
 
 If both interfaces are connected, both stacks are installed. To install only
@@ -44,7 +47,7 @@ the FW1814 package regardless of FW410 presence, use the device-specific
 package:
 
 ```bash
-sudo installer -pkg macfw-fw1814-0.4.000-<build>.pkg -target /
+sudo installer -pkg macfw-fw1814-0.04.003-<build>.pkg -target /
 ```
 
 The package installs:

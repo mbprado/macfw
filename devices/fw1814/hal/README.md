@@ -12,7 +12,8 @@ The current HAL milestone is rate-switchable and analog-only:
 - Float32 interleaved CoreAudio streams;
 - no S/PDIF exposure yet;
 - no MIDI exposure yet;
-- no explicit headphone control yet;
+- headphone gain/source controls live in the separate transport and control
+  panel, rather than as CoreAudio HAL properties;
 - automatic transport selection and reconnect recovery through
   `fw1814supervisor`.
 

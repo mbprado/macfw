@@ -1,31 +1,31 @@
 # Known limitations
 
-This file records limitations and open items for the current macfw M-Audio FireWire 410 alpha release.
+This file records limitations and open items for the current FW410 and FW1814 alpha release. Device-specific notes below are labeled by interface.
 
 ## Platform scope
 
 - **Intel Macs only.** Apple Silicon is not currently a project target.
 - Hardware validation includes **macOS Monterey 12.7.6**, **Ventura 13.7.8**, **Sonoma 14.8.9**, and **Sequoia 15.x**.
 - **macOS Tahoe 26 is not supported.** Apple removed the native FireWire stack used by the current transport. Experimental future support may depend on an alternative such as [`ASFireWire`](https://github.com/mrmidi/ASFireWire), which is not currently integrated with macfw.
-- Hardware validation is still concentrated on a small number of Mac/FW410 combinations. A broader Mac / FireWire-adapter / firmware matrix is still needed.
+- Hardware validation is still concentrated on a small number of Mac/interface combinations. A broader Mac / FireWire-adapter / firmware matrix is still needed.
 - See [`COMPATIBILITY.md`](COMPATIBILITY.md) for the cumulative tested matrix.
 
 ## Supported hardware
 
-- The only supported audio interface is the **M-Audio FireWire 410**.
-- The installer recognizes the known FW410 operational and bootloader personalities.
-- Installation currently requires a supported interface to be connected. This is intentional and provides the foundation for future device-specific installers.
+- Supported interfaces are the **M-Audio FireWire 410** and **FireWire 1814**.
+- Installers distinguish each model's operational and bootloader personalities; the generic FW410 `FW Bootloader` identity does not select FW1814.
+- The combined package installs only connected interface stack(s); each focused package requires its matching device. Source `sudo make install-force` can install both without hardware detection.
 
 ## Audio formats
 
 - Native **44.1 kHz** and **48 kHz** are supported.
 - Higher sample rates are not currently exposed/supported.
-- Playback exposes Analog Out 1-8 plus S/PDIF L/R.
-- Capture exposes Analog In 1-2 plus S/PDIF L/R.
+- **FW410:** playback exposes Analog Out 1-8 plus S/PDIF L/R; capture exposes Analog In 1-2 plus S/PDIF L/R.
+- **FW1814:** playback exposes Analog Out 1-4; capture exposes Analog In 1-8. S/PDIF and ADAT are not yet exposed through its CoreAudio device.
 
 ## Latency
 
-Capture now uses a hardware-validated **256-frame prefill**, approximately 5.8 ms at 44.1 kHz and 5.3 ms at 48 kHz. Physical loopback with Logic software monitoring showed excellent subjective round-trip latency on the development system.
+**FW410** capture uses a hardware-validated **256-frame prefill**, approximately 5.8 ms at 44.1 kHz and 5.3 ms at 48 kHz. Physical loopback with Logic software monitoring showed excellent subjective round-trip latency on the development system.
 
 This prefill is only one internal buffering layer and must not be confused with complete CoreAudio or end-to-end latency.
 
@@ -33,7 +33,7 @@ The HAL does not yet publish calibrated `kAudioDevicePropertyLatency`, `kAudioDe
 
 ## 44.1 kHz lifecycle and rate-switch timing
 
-The FW410 requires a device-specific 44.1 kHz startup sequence, including a larger rate-specific ISO start lead and an AV/C rate reassertion after duplex streaming starts.
+The **FW410** requires a device-specific 44.1 kHz startup sequence, including a larger rate-specific ISO start lead and an AV/C rate reassertion after duplex streaming starts.
 
 The current 44.1 path is hardware-validated as stable and reliable in normal launchd-managed operation. However, **48 -> 44.1 kHz switching takes noticeably longer than 44.1 -> 48 kHz** because the slow direction performs additional settle/readback, startup-lead and post-start reassert work before reporting READY.
 
@@ -51,7 +51,7 @@ Broader testing across different Macs, sleep durations and FireWire adapter chai
 
 ## Offline behavior
 
-The CoreAudio endpoint intentionally remains present when the physical FW410 is disconnected or the transport is recovering.
+The **FW410** CoreAudio endpoint intentionally remains present when the physical interface is disconnected or the transport is recovering.
 
 During that period:
 
@@ -64,7 +64,7 @@ This is intentional behavior, not an indication that macOS still sees the physic
 
 ## Controls and mixer
 
-A substantial part of the FW410 control surface is implemented and hardware-validated:
+A substantial part of the **FW410** control surface is implemented and hardware-validated:
 
 - headphone source/level and five-pair mixer routing;
 - AUX levels;
@@ -83,6 +83,11 @@ The main mixer also has a device-specific state-management limitation: isolated 
 Persistent state follows the same safety model: saved main-mixer routes are restored through the full known baseline before differential route replay. The persisted reset baseline is a macfw-defined default, not a claim about undocumented M-Audio factory defaults.
 
 The GUI currently invokes `fw410ctl` subprocesses as its proven backend boundary for established hardware-control actions. This is functional and hardware-validated, but direct socket IPC may be a future efficiency cleanup.
+
+The **FW1814** exposes its validated analog mixer/routing, input monitoring,
+software-return levels, analog outputs, AUX and two headphone outputs. Its
+physical headphone encoders adjust saved gain and the open control panel
+follows those changes. Higher rates, digital I/O and MIDI remain deferred.
 
 ## S/PDIF control coverage
 
@@ -106,7 +111,7 @@ The package/source install paths include the native control-panel application, p
 
 Reboot recovery, delayed hardware attachment, sample-rate switching, physical disconnect/reconnect, sleep/wake on the recorded systems, and launchd process restart have all been validated during development testing.
 
-This does not constitute a broad compatibility guarantee across all Intel Mac models, FireWire adapters, macOS versions, or FW410 hardware revisions.
+This does not constitute a broad compatibility guarantee across all Intel Mac models, FireWire adapters, macOS versions, or supported-interface hardware revisions.
 
 ## Diagnostics
 
@@ -123,10 +128,10 @@ Useful reports should include:
 - macOS version;
 - exact Intel Mac model;
 - FireWire connection/adapters used;
-- FW410 behavior at 44.1 or 48 kHz;
+- interface model and behavior at 44.1 or 48 kHz;
 - whether the problem occurs after install, boot, rate switch, disconnect/reconnect, sleep/wake, normal streaming, or a control change;
 - whether persistent controls or Reset Defaults are involved;
 - Copy Diagnostics output where available;
-- relevant `/Library/Logs/macfw-fw410-transport.log` output;
+- relevant `/Library/Logs/macfw-fw410-transport.log` or `/Library/Logs/macfw-fw1814-transport.log` output;
 - `/Library/Logs/macfw_install.log` for package-install problems;
 - transport status output where available.

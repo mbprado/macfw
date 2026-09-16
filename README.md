@@ -8,9 +8,9 @@ The supported targets are the **M-Audio FireWire 410** and **M-Audio FireWire 18
 
 ## Current status
 
-The project is now on the unified **`0.4.000` alpha release line** for Intel macOS. Root builds cover both supported interfaces, the default source install selects connected hardware, and the combined package contains both independently namespaced payloads while installing only connected hardware. Focused FW410-only and FW1814-only packages are also available. Native audio, recovery, rate switching and the current control-panel scopes are hardware-validated on real FW410 and FW1814 hardware.
+The current unified release is **`0.04.003` alpha** for Intel macOS. Root builds cover both supported interfaces, the default source install selects connected hardware, and the combined package contains both independently namespaced payloads while installing only connected hardware. Focused FW410-only and FW1814-only packages are also available. Native audio, recovery, rate switching and the current control-panel scopes are hardware-validated on real FW410 and FW1814 hardware.
 
-Hardware-validated functionality includes:
+The following hardware-validated functionality applies specifically to **FW410**:
 
 - normal CoreAudio device integration;
 - native 44.1 kHz and 48 kHz full-duplex audio;
@@ -51,7 +51,7 @@ Current cumulative macOS hardware-test status:
 
 Apple Silicon is not currently supported. See [`COMPATIBILITY.md`](COMPATIBILITY.md) and [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) for the evidence-based compatibility status.
 
-The FW1814 implementation now has hardware-validated analog full-duplex CoreAudio operation, 44.1/48 kHz switching, reconnect recovery, persistent analog mixer/routing controls and a native AppKit control panel. Its runtime remains isolated from the FW410. The default source installer selects the connected interface, `install-force` installs both stacks, and the unified `.pkg` contains both payloads but installs only the connected interface(s). See [`devices/fw1814/README.md`](devices/fw1814/README.md) for its current scope.
+The FW1814 implementation has hardware-validated analog full-duplex CoreAudio operation, 44.1/48 kHz switching, reconnect recovery, persistent analog mixer/routing controls and physical headphone encoder volume reflected in its native AppKit control panel. Its runtime remains isolated from the FW410. The default source installer selects the connected interface, `install-force` installs both stacks, and the unified `.pkg` contains both payloads but installs only the connected interface(s). See [`devices/fw1814/README.md`](devices/fw1814/README.md) for its current scope.
 
 macOS Tahoe 26 is not currently supported because Apple removed the built-in FireWire stack on which macfw depends. Future Tahoe support may become possible through integration with an alternative stack such as [`ASFireWire`](https://github.com/mrmidi/ASFireWire), but that path is experimental and has not been integrated or validated with macfw.
 
@@ -246,7 +246,7 @@ The FW1814 has separately reached hardware-validated analog CoreAudio playback/c
 - [`RELEASE-NOTES.md`](RELEASE-NOTES.md) — current alpha release notes.
 - [`RELEASES.md`](RELEASES.md) — versioning, tagging and release contract.
 - [`devices/fw410/README.md`](devices/fw410/README.md) — detailed FW410 engineering status.
-- [`devices/fw1814/README.md`](devices/fw1814/README.md) — experimental FW1814 status and development scope.
+- [`devices/fw1814/README.md`](devices/fw1814/README.md) — released FW1814 scope and remaining development areas.
 
 ## Contributing and testing
 
@@ -258,7 +258,7 @@ I accept interface landing or donation, If you have a standing FireWire interfac
 
 ## Funding and support
 
-Time, hardware and AI are not for free, this software is. If this project was in any way useful to you, consider donate through [Ko-fi](https://ko-fi.com/mbprado) or [WoSatoshi](lnurl1dp68gurn8ghj7ampd3kx2ar0veekzar0wd5xjtnrdakj7tnhv4kxctttdehhwm30d3h82unvwqhk6cnswfskgmctc7u2q).  
+Time, hardware and AI are not free; this software is. If the project is useful to you, consider donating through [Ko-fi](https://ko-fi.com/mbprado) or using this WoSatoshi LNURL: `lnurl1dp68gurn8ghj7ampd3kx2ar0veekzar0wd5xjtnrdakj7tnhv4kxctttdehhwm30d3h82unvwqhk6cnswfskgmctc7u2q`.
 Share this project on groups and forums related to audio interfaces is also a great help. 
 
 ## Disclaimer
