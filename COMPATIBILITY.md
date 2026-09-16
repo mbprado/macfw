@@ -10,11 +10,33 @@ The table is cumulative across development releases; not every operating-system 
 
 | macOS version | Intel Mac | Installer | Playback | Capture | 44.1/48 kHz switching | Disconnect/reconnect | Sleep/wake | Status | UEFI
 |---|---|---|---|---|---|---|---|---|---|
-| Monterey 12.7.6 | validated | validated | validated | validated | validated | validated | not separately recorded | **Validated** | Stock/OpenCore LP |
+| Monterey 12.7.6 | validated | validated | validated | validated | validated | validated | validated | **Validated** | Stock/OpenCore LP |
 | Ventura 13.7.8 | validated | validated | validated | validated | validated | validated | validated | **Validated** | Stock/OpenCore LP |
 | Sonoma 14.8.9 | validated | validated | validated | validated | validated | validated | validated | **Validated** | OpenCore LP |
 | Sequoia 15.x | validated | validated | validated | validated | validated | validated | validated | **Validated** | OpenCore LP |
 | Tahoe 26.x | not supported | not supported | not supported | not supported | not supported | not supported | not supported | **Blocked by missing native FireWire stack** | N/A |
+
+## M-Audio FireWire 1814
+
+| macOS version | Intel Mac | Installer | Playback | Capture | 44.1/48 kHz switching | Disconnect/reconnect | Sleep/wake | Status | UEFI
+|---|---|---|---|---|---|---|---|---|---|
+| Monterey 12.7.6 | validated | validated | validated | validated | validated | validated | validated | **Validated** | Stock/OpenCore LP |
+| Ventura 13.7.8 | validated | validated | validated | validated | validated | validated | validated | **Validated** | Stock/OpenCore LP |
+| Sonoma 14.8.9 | validated | validated | validated | validated | validated | validated | validated | **Validated** | OpenCore LP |
+| Sequoia 15.x | validated | validated | validated | validated | validated | validated | validated | **Validated** | OpenCore LP |
+| Tahoe 26.x | not supported | not supported | not supported | not supported | not supported | not supported | not supported | **Blocked by missing native FireWire stack** | N/A |
+
+## Hardware
+
+ mac | Device | FW | Adapter | MacOS 12 | MacOS 13 | MacOS 14 | MacOS 15 | MacOS 26 | MacOS 27 | UEFI
+|---|---|---|---|---|---|---|---|---|---|---|
+|MacBook Pro 9,2 | FW410 | Native | - | O | O | X | X | X | X | OpenCore LP |
+|MacBook Pro 9,2 | FW1814 | Native | - | O | O | X | X | X | X | OpenCore LP |
+|MacBook Pro 12,1 | FW410 | Thunderbolt 2 | A1463 | O | O | O | O | X | X | Stock/OpenCore LP |
+|MacBook Pro 12,1 | FW1814 | Thunderbolt 2 | A1463 | O | O | O | O | X | X | Stock/OpenCore LP |
+|MacPro 6,1 | FW410 | Thunderbolt 2 | A1463 | O | O | O | O | X | X | Stock/OpenCore LP |
+|MacPro 6,1 | FW1814 | Thunderbolt 2 | A1463 | O | O | O | O | X | X | Stock/OpenCore LP |  
+  
 
 The native control panel and transport/control architecture have been exercised on the validated development systems. The control-path rule is common across releases: the GUI/CLI use the active transport's Unix-socket IPC rather than opening FireWire independently.
 
