@@ -252,7 +252,14 @@ The FW1814 has separately reached hardware-validated analog CoreAudio playback/c
 
 Useful contributions include hardware testing, FireWire captures, protocol/firmware analysis, macOS/CoreAudio development, and testing across different Intel Macs, macOS versions, adapters and supported interface revisions.
 
-When reporting runtime problems, use **Copy Diagnostics** from the control panel when available and include the system/connection details described in [`INSTALL.md`](INSTALL.md).
+When reporting runtime problems, use **Copy Diagnostics** from the control panel when available and include the system/connection details described in [`INSTALL.md`](INSTALL.md).  
+
+I accept interface landing or donation, If you have a standing FireWire interface and wish to have driver or simply get rid of it, contact me and we'll agree on the shipment, this way I can continue adding more drivers to the package.  
+
+## Funding and support
+
+Time, hardware and AI are not for free, this software is. If this project was in any way useful to you, consider donate through [Ko-fi](https://ko-fi.com/mbprado) or [WoSatoshi](lnurl1dp68gurn8ghj7ampd3kx2ar0veekzar0wd5xjtnrdakj7tnhv4kxctttdehhwm30d3h82unvwqhk6cnswfskgmctc7u2q).  
+Share this project on groups and forums related to audio interfaces is also a great help. 
 
 ## Disclaimer
 
