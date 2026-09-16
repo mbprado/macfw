@@ -9,7 +9,7 @@ also has one MIDI position, which macfw does not currently expose.
 | Rate | Device to host | Host to device | Status |
 |---|---:|---:|---|
 | 44.1/48 kHz | 10 PCM | 6 PCM | macfw analog audio validated |
-| 88.2/96 kHz | 10 PCM | 6 PCM | Linux reference; macfw hardware untested |
+| 88.2/96 kHz | 10 PCM | 6 PCM | Rate CONTROL/readback validated; streaming untested |
 | 176.4/192 kHz | 2 PCM | 4 PCM | Linux reference; macfw hardware untested |
 
 Linux's [FW1814 clock protocol](https://github.com/alsa-project/snd-firewire-ctl-services/blob/master/protocols/bebob/src/maudio/special.rs)
@@ -54,8 +54,23 @@ the CONTROL response succeeds.
 
 ## Next evidence gate
 
-After hardware confirms rate CONTROL and restore, a bounded duplex diagnostic
-must measure actual packet data blocks, DBC, SYT, channel labels, startup
-behavior and bus-generation changes at each rate. Only then can we derive a
-rate-specific transmitter, capture mapping and bandwidth reservations and
-consider a CoreAudio rate option.
+On the FW1814 test Mac, both high-rate CONTROL tests passed from an initial
+48 kHz INPUT rate. OUTPUT and INPUT CONTROL accepted 88.2 kHz (rate code
+`0x03`) and 96 kHz (`0x04`), respectively; authoritative INPUT STATUS returned
+the requested rate. Both tests restored OUTPUT and INPUT to 48 kHz and
+confirmed the restored INPUT STATUS. The reported FireWire generation remained
+63 throughout both tests. These results establish rate negotiation and
+restoration, not audio stream operation.
+
+The next bounded duplex diagnostic must measure actual packet data blocks,
+DBC, SYT, channel labels, startup behavior and bus-generation changes at each
+rate. Linux's [AMDTP blocking packet implementation](https://github.com/torvalds/linux/blob/master/sound/firewire/amdtp-stream.c)
+uses a 16-event SYT interval at 88.2/96 kHz, versus eight events at 44.1/48
+kHz. With the Linux S/PDIF formation's 11 capture slots and seven playback
+slots, the corresponding maximum data packet sizes are 712 and 456 bytes
+respectively (including the eight-byte CIP header). The existing 48 kHz
+diagnostic reserves only 360 and 232 bytes and emits eight-event packets;
+its transmitter and reservations must not be reused unchanged for high rates.
+Only after streaming measurements can we derive a rate-specific transmitter,
+capture mapping and bandwidth reservations and consider a CoreAudio rate
+option.
