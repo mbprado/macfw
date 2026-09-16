@@ -74,3 +74,29 @@ its transmitter and reservations must not be reused unchanged for high rates.
 Only after streaming measurements can we derive a rate-specific transmitter,
 capture mapping and bandwidth reservations and consider a CoreAudio rate
 option.
+
+## Experimental 96 kHz duplex packet probe
+
+The standalone `fw1814capture96_duplex_blocking` diagnostic uses the Linux
+reference 16-event blocking pattern (16/16/16/NODATA at 96 kHz), 11 capture
+slots and seven playback slots. It transmits silence only. It requires an
+operational FW1814 at 48 kHz with both PCR0 plugs available, and refuses to
+execute while the production FW1814 control socket is present. It connects
+both streams, attempts OUTPUT then INPUT 96 kHz CONTROL, observes capture for
+two seconds, disconnects the streams and attempts to restore 48 kHz. It checks
+the bus generation before PCR and rate restoration; if the generation changes,
+it skips stale writes and reports a failure. It does not modify the HAL or
+production transport.
+
+On the test Mac, with the FW1814 service stopped:
+
+```sh
+make -C devices/fw1814/tools duplex96-tool
+devices/fw1814/tools/fw1814capture96_duplex_blocking
+devices/fw1814/tools/fw1814capture96_duplex_blocking --execute --experimental-high-rate --raw
+```
+
+Keep the service stopped if the probe reports failed rate/PCR restoration or
+a changed bus generation. Record the full output, especially capture packet
+counts, CIP headers, generation, and restoration results. The diagnostic
+has not yet been compiled or run on macOS; review its dry run first.

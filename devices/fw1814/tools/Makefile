@@ -13,6 +13,7 @@ CAPTURE48_TOOL := fw1814capture48
 DUALCMP_TOOL := fw1814capture48_dualcmp
 DUALCMP_WAIT_TOOL := fw1814capture48_dualcmp_wait
 DUPLEX_BLOCKING_TOOL := fw1814capture48_duplex_blocking
+DUPLEX96_TOOL := fw1814capture96_duplex_blocking
 OUTPUT_WATCH_TOOL := fw1814capture48_output_watch
 TEARDOWN_WATCH_TOOL := fw1814teardown_watch
 CLIENT_CLOSE_WATCH_TOOL := fw1814client_close_watch
@@ -30,6 +31,7 @@ DEVICE_PROBE_TOOL := fw1814deviceprobe
 	dualcmp-tool dualcmp-check dualcmp dualcmp-raw \
 	dualcmp-wait-tool dualcmp-wait-check dualcmp-wait dualcmp-wait-raw \
 	duplex-blocking-tool duplex-blocking-check duplex-blocking duplex-blocking-raw \
+	duplex96-tool duplex96-check duplex96 duplex96-raw \
 	output-watch-tool output-watch-check output-watch output-watch-raw \
 	teardown-watch-tool teardown-watch-check teardown-watch \
 	client-close-watch-tool client-close-watch-check client-close-watch \
@@ -166,6 +168,22 @@ duplex-blocking: duplex-blocking-tool
 duplex-blocking-raw: duplex-blocking-tool
 	./$(DUPLEX_BLOCKING_TOOL) --execute --raw
 
+# Experimental 96 kHz duplex packet probe. This is not part of the normal
+# build or production transport; execution requires an explicit target.
+duplex96-tool: $(DUPLEX96_TOOL)
+
+$(DUPLEX96_TOOL): fw1814capture96_duplex_nodata.cpp fw1814_blocking_tx.h $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814capture96_duplex_nodata.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+duplex96-check: duplex96-tool
+	./$(DUPLEX96_TOOL)
+
+duplex96: duplex96-tool
+	./$(DUPLEX96_TOOL) --execute --experimental-high-rate
+
+duplex96-raw: duplex96-tool
+	./$(DUPLEX96_TOOL) --execute --experimental-high-rate --raw
+
 # Safety diagnostic for the observed generation change during duplex startup.
 # It starts the same correct blocking streams, sends OUTPUT 48 kHz only, and
 # watches the FireWire bus generation for 300 ms. INPUT CONTROL is never sent.
@@ -276,4 +294,4 @@ clean:
 	$(MAKE) -C $(BUS_RESET_DIR) clean
 	$(MAKE) -C $(CONTROL_DIR) clean
 	$(MAKE) -C $(STATE_CONTROL_DIR) clean
-	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(DEVICE_PROBE_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) $(PLAYBACK_MAP_TOOL) $(ROUTE_ANALOG_TOOL) fw1814capture48_duplex_nodata
+	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(DEVICE_PROBE_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(DUPLEX96_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) $(PLAYBACK_MAP_TOOL) $(ROUTE_ANALOG_TOOL) fw1814capture48_duplex_nodata
