@@ -13,6 +13,8 @@
 
 namespace macfw::fw1814::experimental {
 
+enum class FileChannel { Left, Right, Mix };
+
 // Convert a local mono/stereo audio file to 96 kHz, mix it to one output,
 // and pad the preloaded PCM ring with silence. ExtAudioFile performs format
 // and sample-rate conversion; no output AudioDevice is opened.
@@ -20,6 +22,7 @@ inline bool preloadFile96(const std::string& path,
                           std::vector<std::int32_t>& pcm,
                           std::size_t pcmChannels,
                           std::size_t position,
+                          FileChannel channel,
                           std::size_t& audioFrames) {
     audioFrames = 0;
     if (path.empty() || path.front() != '/' || pcmChannels == 0 ||
@@ -69,6 +72,10 @@ inline bool preloadFile96(const std::string& path,
     constexpr std::size_t kBlockFrames = 4096;
     constexpr std::size_t kMaximumAudioFrames = 3 * 96000;
     std::vector<float> block(kBlockFrames * source.mChannelsPerFrame);
+    std::vector<float> selected(kMaximumAudioFrames, 0.0f);
+    double channelPeak[2] = {};
+    double selectedPeak = 0.0;
+    double selectedSumSquares = 0.0;
     const std::size_t limit = std::min(kMaximumAudioFrames,
                                         pcm.size() / pcmChannels);
     while (audioFrames < limit) {
@@ -88,29 +95,53 @@ inline bool preloadFile96(const std::string& path,
         }
         if (received == 0) break;
         for (UInt32 frame = 0; frame < received; ++frame) {
-            double mixed = 0.0;
             for (UInt32 ch = 0; ch < source.mChannelsPerFrame; ++ch) {
                 const float value = block[frame * source.mChannelsPerFrame + ch];
                 if (!std::isfinite(value)) {
                     ExtAudioFileDispose(file);
                     return false;
                 }
-                mixed += value;
+                channelPeak[ch] = std::max(channelPeak[ch],
+                                           std::abs(static_cast<double>(value)));
             }
-            mixed /= source.mChannelsPerFrame;
-            // -12 dB from source peak, capped to the 24-bit AM824 range.
-            const double scaled = std::clamp(mixed * 0.25, -1.0, 1.0);
-            pcm[(audioFrames + frame) * pcmChannels + position] =
-                static_cast<std::int32_t>(scaled * 8388607.0);
+            const float left = block[frame * source.mChannelsPerFrame];
+            const float right = source.mChannelsPerFrame == 2
+                ? block[frame * source.mChannelsPerFrame + 1] : left;
+            const double value = channel == FileChannel::Left ? left
+                : channel == FileChannel::Right ? right
+                : (static_cast<double>(left) + right) * 0.5;
+            selected[audioFrames + frame] = static_cast<float>(value);
+            selectedPeak = std::max(selectedPeak, std::abs(value));
+            selectedSumSquares += value * value;
         }
         audioFrames += received;
     }
     ExtAudioFileDispose(file);
+    if (audioFrames == 0 || selectedPeak < 1e-7) {
+        std::cerr << "selected file channel is silent or nearly silent\n";
+        return false;
+    }
+    // Match the hardware-proven tone's -24 dBFS peak. This also avoids a
+    // quiet source disappearing under an extra fixed gain reduction.
+    const double scale = 529285.0 / selectedPeak;
+    std::size_t nonzeroFrames = 0;
+    for (std::size_t frame = 0; frame < audioFrames; ++frame) {
+        const auto sample = static_cast<std::int32_t>(selected[frame] * scale);
+        pcm[frame * pcmChannels + position] = sample;
+        nonzeroFrames += sample != 0;
+    }
     std::cout << "file source: " << source.mSampleRate << " Hz, "
               << source.mChannelsPerFrame << " channel(s)\n"
+              << "source channel peak L/R: " << channelPeak[0] << " / "
+              << channelPeak[1] << '\n'
+              << "selected channel: "
+              << (channel == FileChannel::Left ? "left" :
+                  channel == FileChannel::Right ? "right" : "mix") << '\n'
+              << "selected peak/RMS: " << selectedPeak << " / "
+              << std::sqrt(selectedSumSquares / audioFrames) << '\n'
               << "converted audio: " << audioFrames << " frames at 96000 Hz"
-              << " (mono mix, -12 dB; remaining buffer silent)\n";
-    return audioFrames > 0;
+              << " (" << nonzeroFrames << " nonzero, normalized to -24 dBFS peak)\n";
+    return nonzeroFrames > 0;
 }
 
 } // namespace macfw::fw1814::experimental

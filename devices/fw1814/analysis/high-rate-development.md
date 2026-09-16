@@ -216,3 +216,17 @@ Then use a longer local AIFF to hear a sustained excerpt. Keep the FW1814
 transport stopped, check rate/PCR restoration after each run, and report
 whether the file sounds clean. This test exercises file decode and conversion
 within the diagnostic; it does not expose 96 kHz through CoreAudio's HAL.
+
+The first file tests were silent despite successful CONTROL, ISO capture,
+and restoration. The stock `Glass.aiff` was reported as 48 kHz stereo and
+converted to 158408 frames at 96 kHz, while the live transmitter reported
+322560 frames read from its PCM ring with no underflow and 74 late cycle
+polls. These counters did not measure whether the converted or transmitted
+samples were nonzero; the file's waveform and stereo cancellation were not
+established. The file path now reports left/right source peaks, selected
+channel peak/RMS and nonzero frames, and the transmitter reports the number
+and peak of nonzero frames actually copied to AMDTP packets. It uses the
+left channel by default and normalizes its peak to the same -24 dBFS level
+as the clean test tones; `--file-channel right` or `mix` can be selected
+explicitly. Test a single file first and compare decoder and TX counters
+before drawing a conclusion about the device or PCM engine.

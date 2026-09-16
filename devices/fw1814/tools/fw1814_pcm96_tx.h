@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <sys/mman.h>
 #include <utility>
@@ -25,6 +26,8 @@ public:
         std::size_t framesRequested = 0;
         std::size_t framesFromBuffer = 0;
         std::size_t framesSilenced = 0;
+        std::size_t nonzeroFrames = 0;
+        std::int32_t peakSample = 0;
     };
 
     BlockingPcmTransmitRing96k() = default;
@@ -88,6 +91,7 @@ public:
 
             std::size_t offset = 8;
             for (std::size_t event = 0; event < kEventsPerDataPacket; ++event) {
+                bool nonzero = false;
                 for (std::size_t ch = 0; ch < kPcmChannels; ++ch) {
                     putBe32(payload + offset, 0x40000000u);
                     offset += 4;
@@ -175,12 +179,16 @@ public:
                     const auto sample = std::max<std::int32_t>(
                         -8388608, std::min<std::int32_t>(
                             8388607, frames[event * kPcmChannels + ch]));
+                    nonzero = nonzero || sample != 0;
+                    result.peakSample = std::max(result.peakSample,
+                        static_cast<std::int32_t>(std::abs(static_cast<std::int64_t>(sample))));
                     const std::uint32_t word = 0x40000000u |
                         (static_cast<std::uint32_t>(sample) & 0x00ffffffu);
                     const std::size_t off = 8 +
                         (event * kDbs + ch) * sizeof(std::uint32_t);
                     putBe32(storage_[i].payload + off, word);
                 }
+                result.nonzeroFrames += nonzero;
             }
             ++result.dataPacketsRefilled;
         }

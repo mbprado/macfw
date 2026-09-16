@@ -326,6 +326,7 @@ bool dumpReceive(const macfw::AmdtpReceiveRing& ring, bool raw) {
 }
 
 bool run(unsigned position, double frequencyHz, const std::string& filePath,
+         macfw::fw1814::experimental::FileChannel fileChannel,
          bool execute, bool raw) {
     if (position >= 6 || !std::isfinite(frequencyHz) ||
         frequencyHz < 20.0 || frequencyHz > 20000.0) {
@@ -473,7 +474,8 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
         } else {
             std::size_t audioFrames = 0;
             sourceReady = macfw::fw1814::experimental::preloadFile96(
-                filePath, samples, kPlaybackPcmChannels, position, audioFrames);
+                filePath, samples, kPlaybackPcmChannels, position,
+                fileChannel, audioFrames);
         }
         const bool preloaded = sourceReady && pcm.valid() &&
             pcm.write(samples.data(), framesToPreload) == framesToPreload;
@@ -634,9 +636,12 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
             std::cout << "dynamic TX: halves=" << stats.halvesRefilled
                       << " frames=" << stats.framesFromBuffer
                       << " silence=" << stats.framesSilenced
+                      << " nonzero=" << stats.nonzeroFrames
+                      << " peak=" << stats.peakSample
                       << " latePolls=" << stats.lateCyclePolls
                       << " remaining=" << pcm.availableFrames() << '\n';
             if (stats.framesFromBuffer == 0 || stats.framesSilenced != 0 ||
+                stats.nonzeroFrames == 0 ||
                 pcm.availableFrames() == 0) {
                 std::cout << "dynamic TX PCM underflow\n";
                 goto cleanup_stream;
@@ -762,6 +767,7 @@ cleanup:
 void usage(const char* argv0) {
     std::cout << "usage: " << argv0
               << " --position <0..5> [--frequency <20..20000> | --file /path/file.aiff]"
+                 " [--file-channel left|right|mix]"
                  " [--execute --experimental-high-rate] [--raw]\n";
 }
 
@@ -775,6 +781,7 @@ int main(int argc, char** argv) {
     unsigned position = 0;
     double frequencyHz = 440.0;
     std::string filePath;
+    auto fileChannel = macfw::fw1814::experimental::FileChannel::Left;
     bool haveFrequency = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -800,6 +807,16 @@ int main(int argc, char** argv) {
             } catch (...) { usage(argv[0]); return 64; }
         }
         else if (arg == "--file" && i + 1 < argc) filePath = argv[++i];
+        else if (arg == "--file-channel" && i + 1 < argc) {
+            const std::string choice = argv[++i];
+            if (choice == "left")
+                fileChannel = macfw::fw1814::experimental::FileChannel::Left;
+            else if (choice == "right")
+                fileChannel = macfw::fw1814::experimental::FileChannel::Right;
+            else if (choice == "mix")
+                fileChannel = macfw::fw1814::experimental::FileChannel::Mix;
+            else { usage(argv[0]); return 64; }
+        }
         else if (arg == "--raw") raw = true;
         else if (arg == "--help" || arg == "-h") {
             usage(argv[0]);
@@ -818,5 +835,5 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "macfw fw1814tone96-live — experimental dynamic 96 kHz playback diagnostic\n\n";
-    return run(position, frequencyHz, filePath, execute, raw) ? 0 : 1;
+    return run(position, frequencyHz, filePath, fileChannel, execute, raw) ? 0 : 1;
 }

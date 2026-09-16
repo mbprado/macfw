@@ -3,6 +3,7 @@
 #include "fw1814_pcm96_tx.h"
 #include "macfw/pcm_ring_buffer.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 
@@ -15,6 +16,8 @@ public:
         std::uint64_t dataPacketsRefilled = 0;
         std::uint64_t framesFromBuffer = 0;
         std::uint64_t framesSilenced = 0;
+        std::uint64_t nonzeroFrames = 0;
+        std::int32_t peakSample = 0;
         std::uint64_t lateCyclePolls = 0;
     };
 
@@ -86,6 +89,8 @@ private:
         stats_.dataPacketsRefilled += refill.dataPacketsRefilled;
         stats_.framesFromBuffer += refill.framesFromBuffer;
         stats_.framesSilenced += refill.framesSilenced;
+        stats_.nonzeroFrames += refill.nonzeroFrames;
+        stats_.peakSample = std::max(stats_.peakSample, refill.peakSample);
     }
 
     BlockingPcmTransmitRing96k* tx_ = nullptr;
