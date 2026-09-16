@@ -674,6 +674,15 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
                   << captureStore->invalidLabels.load(std::memory_order_relaxed)
                   << " dbcGaps=" << captureDecoder.stats().dbcDiscontinuities
                   << '\n';
+        std::cout << "experimental capture input peaks (dBFS):";
+        for (std::size_t physical = 0;
+             physical < captureDecoder.meterPeaks().size(); ++physical) {
+            const float peak = captureDecoder.meterPeaks()[physical];
+            const double db = peak > 0.0f
+                ? 20.0 * std::log10(static_cast<double>(peak)) : -120.0;
+            std::cout << " Analog" << (physical + 1) << '=' << db;
+        }
+        std::cout << '\n';
 
         std::cout << "duplex dynamic PCM experiment: "
                   << (success ? "96 kHz PACKETS RECEIVED" : "NO VALID 96 kHz PACKETS") << '\n';

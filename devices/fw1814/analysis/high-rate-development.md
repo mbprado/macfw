@@ -294,3 +294,11 @@ and up to 16 events per packet, and prints decoded frames, malformed packets,
 invalid MBLA labels and DBC gaps for the probe's 64 captured slots. A clean
 snapshot will validate packet decoding, not sustained production capture or
 the physical input map; those still need live input and HAL tests.
+
+The first 96-kHz tone run with this decoder returned 768 decoded frames,
+zero malformed packets, zero invalid MBLA labels and zero DBC gaps across
+the 64-slot capture snapshot. The stream retained its bus generation and
+restored the PCRs and original 48-kHz rate. The probe now also prints a peak
+reading for each decoded analog input. Feed a known signal into one analog
+input and check that its corresponding peak rises before claiming the 96-kHz
+physical input map; these readings cover only the captured snapshot.
