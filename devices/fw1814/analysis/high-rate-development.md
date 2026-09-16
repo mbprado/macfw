@@ -249,3 +249,22 @@ devices/fw1814/tools/fw1814tone96_live --position 2 \
 Record the converted/copied/nonzero frame counts, active duration, dynamic
 TX counts, restoration and what is actually audible. A valid capture stream
 alone does not prove that the FW1814 analog output used the PCM payload.
+
+The four-repeat Glass.aiff run audibly played three chimes; the first one was
+missing. This demonstrates sustained 96-kHz program audio, while suggesting
+the first part of playback is lost during stream startup. The exact time at
+which the analog output begins consuming host PCM is still unknown. To measure
+whether startup time explains the missing first chime, the probe accepts a
+configurable silent lead-in for repeated files:
+
+```sh
+devices/fw1814/tools/fw1814tone96_live --position 2 \
+  --file /System/Library/Sounds/Glass.aiff --repeat 4 --lead-ms 1750 \
+  --execute --experimental-high-rate
+```
+
+This schedules approximately 1.75 seconds of silence before the first chime
+and holds the stream open for up to 9.25 seconds. The PCM ring contains ten
+seconds of preloaded audio/silence. If all four chimes become audible, compare
+shorter lead-ins to bound the startup interval before integrating 96 kHz into
+the CoreAudio transport.

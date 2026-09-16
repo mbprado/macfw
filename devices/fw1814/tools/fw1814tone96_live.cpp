@@ -329,6 +329,7 @@ bool dumpReceive(const macfw::AmdtpReceiveRing& ring, bool raw) {
 bool run(unsigned position, double frequencyHz, const std::string& filePath,
          macfw::fw1814::experimental::FileChannel fileChannel,
          unsigned repeats,
+         unsigned leadMs,
          bool execute, bool raw) {
     if (position >= 6 || !std::isfinite(frequencyHz) ||
         frequencyHz < 20.0 || frequencyHz > 20000.0) {
@@ -465,7 +466,7 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
             device, kCapturePackets, kCaptureMaxPayload);
         macfw::PcmRingBuffer pcm(repeats > 1 ? kLongPcmCapacityFrames :
             kPcmCapacityFrames, kPlaybackPcmChannels);
-        const std::size_t framesToPreload = (repeats > 1 ? 8 : 5) * 96000;
+        const std::size_t framesToPreload = (repeats > 1 ? 10 : 5) * 96000;
         std::vector<std::int32_t> samples(framesToPreload * kPlaybackPcmChannels, 0);
         bool sourceReady = true;
         double runSeconds = 3.0;
@@ -478,12 +479,13 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
             }
         } else {
             std::size_t repeatedFrames = 0;
-            const std::size_t leadFrames = repeats > 1 ? 24000 : 0;
+            const std::size_t leadFrames = repeats > 1 ?
+                static_cast<std::size_t>(leadMs) * 96 : 0;
             sourceReady = macfw::fw1814::experimental::preloadFile96(
                 filePath, samples, kPlaybackPcmChannels, position,
                 fileChannel, repeats, leadFrames, repeatedFrames);
             if (repeats > 1)
-                runSeconds = std::min(7.0, std::max(1.0,
+                runSeconds = std::min(9.25, std::max(1.0,
                     static_cast<double>(leadFrames + repeatedFrames) / 96000.0 + 0.35));
         }
         const bool preloaded = sourceReady && pcm.valid() &&
@@ -778,6 +780,7 @@ void usage(const char* argv0) {
               << " --position <0..5> [--frequency <20..20000> | --file /path/file.aiff]"
                  " [--file-channel left|right|mix]"
                  " [--repeat 1..4 (with --file)]"
+                 " [--lead-ms 0..2000 (with --repeat)]"
                  " [--execute --experimental-high-rate] [--raw]\n";
 }
 
@@ -794,6 +797,8 @@ int main(int argc, char** argv) {
     auto fileChannel = macfw::fw1814::experimental::FileChannel::Left;
     bool haveFrequency = false;
     unsigned repeats = 1;
+    unsigned leadMs = 250;
+    bool haveLead = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--execute") execute = true;
@@ -825,6 +830,19 @@ int main(int argc, char** argv) {
             }
             repeats = static_cast<unsigned>(value[0] - '0');
         }
+        else if (arg == "--lead-ms" && i + 1 < argc) {
+            const std::string value = argv[++i];
+            if (value.empty() || value.find_first_not_of("0123456789") !=
+                                     std::string::npos) {
+                usage(argv[0]); return 64;
+            }
+            try {
+                const unsigned long parsed = std::stoul(value);
+                if (parsed > 2000) { usage(argv[0]); return 64; }
+                leadMs = static_cast<unsigned>(parsed);
+                haveLead = true;
+            } catch (...) { usage(argv[0]); return 64; }
+        }
         else if (arg == "--file-channel" && i + 1 < argc) {
             const std::string choice = argv[++i];
             if (choice == "left")
@@ -848,6 +866,9 @@ int main(int argc, char** argv) {
     if (!havePosition) { usage(argv[0]); return 64; }
     if (haveFrequency && !filePath.empty()) { usage(argv[0]); return 64; }
     if (repeats != 1 && filePath.empty()) { usage(argv[0]); return 64; }
+    if (haveLead && (filePath.empty() || repeats == 1)) {
+        usage(argv[0]); return 64;
+    }
     if (execute && !experimentalHighRate) {
         std::cerr << "96 kHz duplex execution requires --experimental-high-rate\n";
         return 64;
@@ -855,5 +876,5 @@ int main(int argc, char** argv) {
 
     std::cout << "macfw fw1814tone96-live — experimental dynamic 96 kHz playback diagnostic\n\n";
     return run(position, frequencyHz, filePath, fileChannel,
-               repeats, execute, raw) ? 0 : 1;
+               repeats, leadMs, execute, raw) ? 0 : 1;
 }
