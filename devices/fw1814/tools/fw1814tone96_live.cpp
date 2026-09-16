@@ -45,6 +45,7 @@ constexpr std::size_t kCapturePackets = 64;
 constexpr std::size_t kTxPackets = 1280;
 constexpr std::size_t kTxHalfPackets = kTxPackets / 2;
 constexpr std::size_t kPcmCapacityFrames = 524288;
+constexpr std::size_t kLongPcmCapacityFrames = 1048576;
 constexpr UInt32 kCyclesPerSecond = 8000;
 constexpr UInt32 kTxCycleLead = 4096;
 
@@ -327,6 +328,7 @@ bool dumpReceive(const macfw::AmdtpReceiveRing& ring, bool raw) {
 
 bool run(unsigned position, double frequencyHz, const std::string& filePath,
          macfw::fw1814::experimental::FileChannel fileChannel,
+         unsigned repeats,
          bool execute, bool raw) {
     if (position >= 6 || !std::isfinite(frequencyHz) ||
         frequencyHz < 20.0 || frequencyHz > 20000.0) {
@@ -352,7 +354,8 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
     if (filePath.empty())
         std::cout << "tone: " << frequencyHz << " Hz, -24 dBFS peak, 3 seconds\n";
     else
-        std::cout << "audio file: " << filePath << " (up to 3 seconds)\n";
+        std::cout << "audio file: " << filePath << " (up to 3 seconds per repeat, "
+                  << repeats << " repeat(s))\n";
     std::cout << "matched operational unit:\n"
               << "    product: " << kProduct << '\n'
               << "    generation: " << device.generation() << '\n'
@@ -460,10 +463,12 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
         }
         auto receiveRing = macfw::AmdtpReceiveRing::create(
             device, kCapturePackets, kCaptureMaxPayload);
-        macfw::PcmRingBuffer pcm(kPcmCapacityFrames, kPlaybackPcmChannels);
-        const std::size_t framesToPreload = 5 * 96000;
+        macfw::PcmRingBuffer pcm(repeats > 1 ? kLongPcmCapacityFrames :
+            kPcmCapacityFrames, kPlaybackPcmChannels);
+        const std::size_t framesToPreload = (repeats > 1 ? 8 : 5) * 96000;
         std::vector<std::int32_t> samples(framesToPreload * kPlaybackPcmChannels, 0);
         bool sourceReady = true;
+        double runSeconds = 3.0;
         if (filePath.empty()) {
             for (std::size_t frame = 0; frame < framesToPreload; ++frame) {
                 const double phase = 6.2831853071795864769 * frequencyHz *
@@ -472,10 +477,14 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
                     static_cast<std::int32_t>(std::sin(phase) * 529285.0);
             }
         } else {
-            std::size_t audioFrames = 0;
+            std::size_t repeatedFrames = 0;
+            const std::size_t leadFrames = repeats > 1 ? 24000 : 0;
             sourceReady = macfw::fw1814::experimental::preloadFile96(
                 filePath, samples, kPlaybackPcmChannels, position,
-                fileChannel, audioFrames);
+                fileChannel, repeats, leadFrames, repeatedFrames);
+            if (repeats > 1)
+                runSeconds = std::min(7.0, std::max(1.0,
+                    static_cast<double>(leadFrames + repeatedFrames) / 96000.0 + 0.35));
         }
         const bool preloaded = sourceReady && pcm.valid() &&
             pcm.write(samples.data(), framesToPreload) == framesToPreload;
@@ -626,8 +635,8 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
 
         std::cout << "*** " << (filePath.empty() ? "TONE" : "FILE")
                   << " ACTIVE on PCM position " << position
-                  << " for 3 seconds ***\n";
-        if (!serviceFor(3.0)) {
+                  << " for " << runSeconds << " seconds ***\n";
+        if (!serviceFor(runSeconds)) {
             std::cout << "dynamic TX service failed\n";
             goto cleanup_stream;
         }
@@ -768,6 +777,7 @@ void usage(const char* argv0) {
     std::cout << "usage: " << argv0
               << " --position <0..5> [--frequency <20..20000> | --file /path/file.aiff]"
                  " [--file-channel left|right|mix]"
+                 " [--repeat 1..4 (with --file)]"
                  " [--execute --experimental-high-rate] [--raw]\n";
 }
 
@@ -783,6 +793,7 @@ int main(int argc, char** argv) {
     std::string filePath;
     auto fileChannel = macfw::fw1814::experimental::FileChannel::Left;
     bool haveFrequency = false;
+    unsigned repeats = 1;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--execute") execute = true;
@@ -807,6 +818,13 @@ int main(int argc, char** argv) {
             } catch (...) { usage(argv[0]); return 64; }
         }
         else if (arg == "--file" && i + 1 < argc) filePath = argv[++i];
+        else if (arg == "--repeat" && i + 1 < argc) {
+            const std::string value = argv[++i];
+            if (value.size() != 1 || value[0] < '1' || value[0] > '4') {
+                usage(argv[0]); return 64;
+            }
+            repeats = static_cast<unsigned>(value[0] - '0');
+        }
         else if (arg == "--file-channel" && i + 1 < argc) {
             const std::string choice = argv[++i];
             if (choice == "left")
@@ -829,11 +847,13 @@ int main(int argc, char** argv) {
 
     if (!havePosition) { usage(argv[0]); return 64; }
     if (haveFrequency && !filePath.empty()) { usage(argv[0]); return 64; }
+    if (repeats != 1 && filePath.empty()) { usage(argv[0]); return 64; }
     if (execute && !experimentalHighRate) {
         std::cerr << "96 kHz duplex execution requires --experimental-high-rate\n";
         return 64;
     }
 
     std::cout << "macfw fw1814tone96-live — experimental dynamic 96 kHz playback diagnostic\n\n";
-    return run(position, frequencyHz, filePath, fileChannel, execute, raw) ? 0 : 1;
+    return run(position, frequencyHz, filePath, fileChannel,
+               repeats, execute, raw) ? 0 : 1;
 }

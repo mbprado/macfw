@@ -230,3 +230,22 @@ left channel by default and normalizes its peak to the same -24 dBFS level
 as the clean test tones; `--file-channel right` or `mix` can be selected
 explicitly. Test a single file first and compare decoder and TX counters
 before drawing a conclusion about the device or PCM engine.
+
+The subsequent short-file run still produced only the activation click, but
+reported 154961 nonzero transmit frames at the expected 529285 peak, no
+silence fill, and two late cycle polls. The device-side ISO packet snapshot
+remained valid. As a duration check, the file probe now offers `--repeat 4`:
+it leaves 250 ms of silence at the beginning, repeats the decoded excerpt up
+to four times in an eight-second PCM buffer, and keeps the 96-kHz stream open
+for up to seven seconds. This distinguishes a too-short sample from a playback
+path that stays silent even with sustained nonzero PCM:
+
+```sh
+devices/fw1814/tools/fw1814tone96_live --position 2 \
+  --file /System/Library/Sounds/Glass.aiff --repeat 4 \
+  --execute --experimental-high-rate
+```
+
+Record the converted/copied/nonzero frame counts, active duration, dynamic
+TX counts, restoration and what is actually audible. A valid capture stream
+alone does not prove that the FW1814 analog output used the PCM payload.

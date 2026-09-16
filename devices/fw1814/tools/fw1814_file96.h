@@ -23,10 +23,14 @@ inline bool preloadFile96(const std::string& path,
                           std::size_t pcmChannels,
                           std::size_t position,
                           FileChannel channel,
-                          std::size_t& audioFrames) {
-    audioFrames = 0;
+                          unsigned repeats,
+                          std::size_t leadFrames,
+                          std::size_t& repeatedFrames) {
+    std::size_t audioFrames = 0;
+    repeatedFrames = 0;
     if (path.empty() || path.front() != '/' || pcmChannels == 0 ||
-        position >= pcmChannels || pcm.size() % pcmChannels != 0)
+        position >= pcmChannels || pcm.size() % pcmChannels != 0 ||
+        repeats == 0 || repeats > 4 || leadFrames >= pcm.size() / pcmChannels)
         return false;
 
     auto url = CFURLCreateFromFileSystemRepresentation(
@@ -125,10 +129,15 @@ inline bool preloadFile96(const std::string& path,
     // quiet source disappearing under an extra fixed gain reduction.
     const double scale = 529285.0 / selectedPeak;
     std::size_t nonzeroFrames = 0;
-    for (std::size_t frame = 0; frame < audioFrames; ++frame) {
-        const auto sample = static_cast<std::int32_t>(selected[frame] * scale);
-        pcm[frame * pcmChannels + position] = sample;
-        nonzeroFrames += sample != 0;
+    const auto availableFrames = pcm.size() / pcmChannels;
+    for (unsigned repeat = 0; repeat < repeats; ++repeat) {
+        for (std::size_t frame = 0; frame < audioFrames &&
+             leadFrames + repeatedFrames < availableFrames; ++frame) {
+            const auto sample = static_cast<std::int32_t>(selected[frame] * scale);
+            pcm[(leadFrames + repeatedFrames) * pcmChannels + position] = sample;
+            nonzeroFrames += sample != 0;
+            ++repeatedFrames;
+        }
     }
     std::cout << "file source: " << source.mSampleRate << " Hz, "
               << source.mChannelsPerFrame << " channel(s)\n"
@@ -140,7 +149,9 @@ inline bool preloadFile96(const std::string& path,
               << "selected peak/RMS: " << selectedPeak << " / "
               << std::sqrt(selectedSumSquares / audioFrames) << '\n'
               << "converted audio: " << audioFrames << " frames at 96000 Hz"
-              << " (" << nonzeroFrames << " nonzero, normalized to -24 dBFS peak)\n";
+              << " (" << repeats << " repeats; " << repeatedFrames
+              << " copied, " << nonzeroFrames << " nonzero; "
+              << leadFrames << " lead-in silence frames; -24 dBFS peak)\n";
     return nonzeroFrames > 0;
 }
 
