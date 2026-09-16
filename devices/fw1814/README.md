@@ -35,7 +35,10 @@ The released FW1814 analog profile currently provides:
   and reconnect; all four analog input-pair monitor levels also survive a
   transport restart through the same state path.
 
-Higher sample rates remain under development. S/PDIF, ADAT and MIDI are intentionally deferred until macfw can be compared
+Higher sample rates remain under development; the first 88.2/96 kHz CONTROL
+and readback diagnostic is described in
+[`analysis/high-rate-development.md`](analysis/high-rate-development.md).
+S/PDIF, ADAT and MIDI are intentionally deferred until macfw can be compared
 directly with the original FW410 and FW1814 control panels running
 simultaneously.
 

@@ -12,6 +12,7 @@
 #include <iostream>
 #include <string>
 #include <thread>
+#include <unistd.h>
 
 namespace {
 
@@ -266,7 +267,10 @@ bool validateInfo(IOFireWireLibDeviceRef device, UInt32 generation,
 
 void usage(const char* argv0) {
     std::cout << "usage: " << argv0
-              << " [44100|48000] [--execute] [--raw]\n";
+              << " [44100|48000|88200|96000] [--execute]"
+                 " [--experimental-high-rate] [--raw]\n"
+              << "88.2/96 kHz execution requires --experimental-high-rate,"
+                 " an idle FW1814 service, and restores the prior 44.1/48 kHz rate.\n";
 }
 
 } // namespace
@@ -275,12 +279,16 @@ int main(int argc, char** argv) {
     unsigned targetRate = 48000;
     bool execute = false;
     bool raw = false;
+    bool experimentalHighRate = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "44100") targetRate = 44100;
         else if (arg == "48000") targetRate = 48000;
+        else if (arg == "88200") targetRate = 88200;
+        else if (arg == "96000") targetRate = 96000;
         else if (arg == "--execute") execute = true;
+        else if (arg == "--experimental-high-rate") experimentalHighRate = true;
         else if (arg == "--raw") raw = true;
         else if (arg == "--help" || arg == "-h") {
             usage(argv[0]);
@@ -289,6 +297,18 @@ int main(int argc, char** argv) {
             usage(argv[0]);
             return 64;
         }
+    }
+
+    const bool highRate = targetRate == 88200 || targetRate == 96000;
+    if (execute && highRate && !experimentalHighRate) {
+        std::cerr << "high-rate CONTROL requires --experimental-high-rate\n";
+        return 64;
+    }
+    if (execute && highRate &&
+        access("/tmp/macfw-fw1814-control.sock", F_OK) == 0) {
+        std::cerr << "stop the FW1814 transport service before the high-rate"
+                     " diagnostic (control socket is present)\n";
+        return 4;
     }
 
     std::cout << "macfw fw1814init — guarded M-Audio special-firmware initializer\n\n"
@@ -407,8 +427,19 @@ int main(int argc, char** argv) {
         (*responseSpace)->SetWriteHandler(responseSpace, responseHandler);
         (*responseSpace)->TurnOnNotification(responseSpace);
 
-        std::cout << "\nsetting known clock/digital baseline...\n";
-        const bool clockOk = setKnownClockBaseline(device, generation, node, ctx, raw);
+        unsigned previousRate = 0;
+        const bool baselineOk = !highRate ||
+            (readInputRate(device, generation, node, ctx, previousRate, raw) &&
+             (previousRate == 44100 || previousRate == 48000));
+        if (highRate)
+            std::cout << "preflight INPUT rate: "
+                      << (baselineOk ? std::to_string(previousRate) : "unavailable or unsupported")
+                      << " Hz\n";
+
+        std::cout << "\n" << (baselineOk ? "setting" : "skipping")
+                  << " known clock/digital baseline...\n";
+        const bool clockOk = baselineOk &&
+            setKnownClockBaseline(device, generation, node, ctx, raw);
         std::cout << "    result: " << (clockOk ? "PASS" : "FAIL") << '\n';
 
         bool rateOk = false;
@@ -436,7 +467,27 @@ int main(int argc, char** argv) {
             rateOk = outOk && inOk && readOk && actualRate == targetRate;
         }
 
-        std::cout << "known S/PDIF stream formation at 44.1/48 kHz:\n"
+        bool restored = true;
+        if (highRate && clockOk) {
+            // This is a CONTROL/readback diagnostic, not an audio engine.
+            // Return to the validated original rate even when high-rate
+            // readback fails, so the installed transport can resume normally.
+            std::cout << "restoring original " << previousRate << " Hz...\n";
+            const bool outOk = setSignalRate(device, generation, node, ctx,
+                                             0x18, previousRate, raw);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            const bool inOk = setSignalRate(device, generation, node, ctx,
+                                            0x19, previousRate, raw);
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            unsigned restoredRate = 0;
+            restored = outOk && inOk &&
+                readInputRate(device, generation, node, ctx, restoredRate, raw) &&
+                restoredRate == previousRate;
+            std::cout << "    restore result: " << (restored ? "PASS" : "FAIL") << '\n';
+        }
+
+        std::cout << "Linux reference S/PDIF stream formation at "
+                  << (highRate ? "88.2/96" : "44.1/48") << " kHz:\n"
                   << "    device -> host capture:  10 PCM + 1 MIDI\n"
                   << "    host -> device playback: 6 PCM + 1 MIDI\n";
 
@@ -447,7 +498,7 @@ int main(int argc, char** argv) {
         (*device)->Release(device);
         IOObjectRelease(iterator);
 
-        const bool ok = clockOk && rateOk;
+        const bool ok = clockOk && rateOk && restored;
         std::cout << "\nstatus: " << (ok ? "PASS" : "FAIL") << '\n';
         return ok ? 0 : 7;
     }

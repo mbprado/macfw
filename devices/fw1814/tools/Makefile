@@ -25,7 +25,7 @@ DEVICE_PROBE_TOOL := fw1814deviceprobe
 
 .PHONY: all runtime fingerprint probe boot-tool boot-check boot \
 	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe \
-	init-tool init-check init-48 init-44 \
+	init-tool init-check init-48 init-44 init-88-check init-96-check \
 	capture48-tool capture48-check capture48 capture48-raw \
 	dualcmp-tool dualcmp-check dualcmp dualcmp-raw \
 	dualcmp-wait-tool dualcmp-wait-check dualcmp-wait dualcmp-wait-raw \
@@ -89,6 +89,14 @@ init-48: init-tool
 
 init-44: init-tool
 	./$(INIT_TOOL) 44100 --execute
+
+# Read-only preflight for high-rate CONTROL diagnostics. Execution requires
+# an explicit --experimental-high-rate option with the transport stopped.
+init-88-check: init-tool
+	./$(INIT_TOOL) 88200
+
+init-96-check: init-tool
+	./$(INIT_TOOL) 96000
 
 $(LIBMACFW):
 	$(MAKE) -C ../../fw410/lib libmacfw.a
