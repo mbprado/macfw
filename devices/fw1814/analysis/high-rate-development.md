@@ -287,3 +287,10 @@ validate the production capture pump, HAL lifecycle or repeated sample-rate
 switching. Integrate those pieces under an experimental opt-in before exposing
 96 kHz to all installations. The 88.2-kHz variable transmit schedule remains
 a separate evidence gate.
+
+An experimental 96-kHz capture decoder has been added to the standalone live
+probe. It keeps the released 48-kHz decoder untouched, accepts `FDF=0x04`
+and up to 16 events per packet, and prints decoded frames, malformed packets,
+invalid MBLA labels and DBC gaps for the probe's 64 captured slots. A clean
+snapshot will validate packet decoding, not sustained production capture or
+the physical input map; those still need live input and HAL tests.

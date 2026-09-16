@@ -1,5 +1,6 @@
 #include "fw1814_pcm96_stream.h"
 #include "fw1814_file96.h"
+#include "fw1814_capture96_pump.h"
 #include "macfw/pcm_ring_buffer.h"
 #include "macfw/amdtp_receive_ring.h"
 #include "macfw/cmp.h"
@@ -19,6 +20,7 @@
 #include <vector>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -464,6 +466,10 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
         }
         auto receiveRing = macfw::AmdtpReceiveRing::create(
             device, kCapturePackets, kCaptureMaxPayload);
+        auto captureStore =
+            std::make_unique<macfw::fw1814::hal::capture::SharedCaptureRing>();
+        macfw::fw1814::hal::capture::initialize(*captureStore, 96000);
+        macfw::fw1814::experimental::CapturePump96k captureDecoder;
         macfw::PcmRingBuffer pcm(repeats > 1 ? kLongPcmCapacityFrames :
             kPcmCapacityFrames, kPlaybackPcmChannels);
         const std::size_t framesToPreload = (repeats > 1 ? 10 : 5) * 96000;
@@ -659,6 +665,15 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
             }
         }
         success = dumpReceive(receiveRing, raw);
+        captureDecoder.service(receiveRing, *captureStore);
+        std::cout << "experimental 96 kHz capture decode: frames="
+                  << captureStore->decodedFrames.load(std::memory_order_relaxed)
+                  << " malformed="
+                  << captureStore->malformedPackets.load(std::memory_order_relaxed)
+                  << " invalidLabels="
+                  << captureStore->invalidLabels.load(std::memory_order_relaxed)
+                  << " dbcGaps=" << captureDecoder.stats().dbcDiscontinuities
+                  << '\n';
 
         std::cout << "duplex dynamic PCM experiment: "
                   << (success ? "96 kHz PACKETS RECEIVED" : "NO VALID 96 kHz PACKETS") << '\n';
