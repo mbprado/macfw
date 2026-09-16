@@ -664,6 +664,17 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
                 goto cleanup_stream;
             }
         }
+        // The receive ring is cyclic. Freeze DMA before reading its metadata
+        // and payload, otherwise an in-flight slot can have a torn header.
+        if (captureStarted && captureChannel) {
+            const IOReturn kr = (*captureChannel)->Stop(captureChannel);
+            if (kr != kIOReturnSuccess) {
+                std::cout << "capture channel stop failed: 0x" << std::hex
+                          << kr << std::dec << '\n';
+                goto cleanup_stream;
+            }
+            captureStarted = false;
+        }
         success = dumpReceive(receiveRing, raw);
         captureDecoder.service(receiveRing, *captureStore);
         std::cout << "experimental 96 kHz capture decode: frames="

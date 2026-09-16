@@ -77,6 +77,10 @@ private:
         for (std::size_t index = begin; index < end; ++index) {
             const auto& slot = rx.slot(index);
             if (!slot.touched()) continue;
+            if (slot.packetLength() > slot.capacity) {
+                out.malformedPackets.fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
             const auto packet = slot.packet();
             if (!packet.hasCip()) continue;
             const auto h = packet.cip();

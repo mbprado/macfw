@@ -302,3 +302,15 @@ restored the PCRs and original 48-kHz rate. The probe now also prints a peak
 reading for each decoded analog input. Feed a known signal into one analog
 input and check that its corresponding peak rises before claiming the 96-kHz
 physical input map; these readings cover only the captured snapshot.
+
+With a 440 Hz, 0.2 V signal connected to Analog Input 1, the snapshot showed
+Analog1 at -26.84 dBFS while Analog2 through Analog8 were approximately
+-93 to -99 dBFS. This strongly supports the Analog Input 1 mapping at 96 kHz.
+The same run reported 768 decoded frames and zero decoder errors, but one
+capture slot had an impossible 41025-byte length. At that point the diagnostic
+still read a cyclic DMA ring while capture was running, and the decoder
+silently skipped oversized slots. The probe now stops capture before taking
+the snapshot and counts any oversized slot as malformed. Repeat this input
+test and check the packet summary and decoder counts before treating the
+snapshot as fully clean. Sustained capture and the remaining physical inputs
+are still separate checks.
