@@ -132,3 +132,29 @@ to their initial values after 10,240 cycles (7056 data packets). That is much
 larger than the current 128-packet static transmit ring. Choose a bounded,
 phase-correct transmit strategy and check its resource cost before trying
 88.2-kHz duplex on hardware.
+
+## First 96 kHz listening test
+
+`fw1814tone96` reuses the proven 96 kHz duplex probe and its restoration
+checks. It sends 500 Hz at -24 dBFS peak in exactly one of six playback PCM
+positions for three seconds; all other PCM positions are silent. The 128-cycle
+static transmit ring contains 1536 samples at 96 kHz, an exact eight periods
+of 500 Hz. This first test establishes audible routing without a tone seam at
+the ring boundary; it cannot validate arbitrary frequencies or AIFF playback.
+The mapping observed at 48 kHz was PCM position 2 to physical Analog Output 1,
+position 3 to Output 2, position 0 to Output 3 and position 1 to Output 4.
+It must be confirmed at 96 kHz, not assumed.
+
+With the production FW1814 transport stopped and monitor volume low:
+
+```sh
+make -C devices/fw1814/tools tone96-tool
+devices/fw1814/tools/fw1814tone96 --position 2
+devices/fw1814/tools/fw1814tone96 --position 2 --execute --experimental-high-rate
+```
+
+Try one position at a time, and record which physical output sounds, whether
+the tone is clean, the capture packet counts, and all restoration results.
+If the analog routing was reset, use the already documented
+`make -C devices/fw1814/tools route-analog` before repeating the listening
+test. Do not resume the service after a failed PCR or rate restoration.
