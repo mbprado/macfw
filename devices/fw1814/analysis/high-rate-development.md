@@ -325,3 +325,15 @@ the full receive header, status, timestamp, and first 16 payload bytes for
 every oversized slot to distinguish a damaged metadata word from a wider
 receive/DMA problem. Do not mark the capture path clean until this is
 understood and a repeated input test has no unexplained gaps.
+
+Several subsequent runs of the same 440 Hz Analog Input 1 test had clean
+snapshots. One recorded 48 data packets, 16 NODATA packets, zero oversized or
+other packets, and 768 decoded frames with zero malformed packets, invalid
+labels, or DBC gaps. Analog1 peaked at -25.39 dBFS; the other analog inputs
+were near the noise floor. The bus generation stayed unchanged and the
+original 48-kHz rate and both PCRs restored. This passes the bounded 96-kHz
+capture packet and Analog Input 1 mapping check. The earlier intermittent
+41025-byte headers have not been explained by the stop-before-snapshot change;
+retain the raw metadata diagnostics and watch for recurrence during a longer
+capture run. The next capture gate is continuous decoding with ring consumption
+and packet/error counters over the whole run, not just the final 64 slots.
