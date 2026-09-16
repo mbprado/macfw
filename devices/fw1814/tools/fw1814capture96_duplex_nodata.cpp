@@ -132,25 +132,49 @@ bool transaction(macfw::FireWireDevice& device,
 
     const CFAbsoluteTime deadline =
         CFAbsoluteTimeGetCurrent() + kFcpTimeoutSeconds;
-    while (!ctx.received && CFAbsoluteTimeGetCurrent() < deadline)
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.02, true);
+    while (CFAbsoluteTimeGetCurrent() < deadline) {
+        if (!ctx.received) {
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.02, true);
+            continue;
+        }
 
-    if (!ctx.received) {
-        std::cout << "        FCP response timeout\n";
-        return false;
+        if (raw) {
+            std::cout << "        response: ";
+            printBytes(ctx.bytes.data(), ctx.length);
+            std::cout << '\n';
+        }
+        // FCP can send an INTERIM reply and later a final reply, even after
+        // the next command has started. Match the subunit, opcode, direction
+        // and requested rate before consuming a response. In particular,
+        // 0x0f is INTERIM; it cannot confirm that CONTROL completed.
+        const bool matching = ctx.length >= 8 &&
+            ctx.bytes[1] == command[1] &&
+            ctx.bytes[2] == command[2] &&
+            ctx.bytes[3] == command[3] &&
+            ctx.bytes[4] == command[4] &&
+            (command[0] == 0x01 ||
+             (ctx.bytes[5] & 0x07) == (command[5] & 0x07));
+        const bool finalResponse = command[0] == 0x01
+            ? (ctx.bytes[0] == 0x0c || ctx.bytes[0] == 0x0d)
+            : (ctx.bytes[0] == 0x09 || ctx.bytes[0] == 0x0c ||
+               ctx.bytes[0] == 0x0d);
+        if (matching && finalResponse)
+            return true;
+
+        if (raw)
+            std::cout << "        ignoring "
+                      << (matching ? "interim/unexpected" : "unrelated")
+                      << " FCP reply\n";
+        ctx.received = false;
+        ctx.length = 0;
     }
 
-    if (raw) {
-        std::cout << "        response: ";
-        printBytes(ctx.bytes.data(), ctx.length);
-        std::cout << '\n';
-    }
-    return true;
+    std::cout << "        matching final FCP response timeout\n";
+    return false;
 }
 
 bool validControlResponse(UInt8 response) {
-    return response == 0x09 || response == 0x0c ||
-           response == 0x0d || response == 0x0f;
+    return response == 0x09 || response == 0x0c || response == 0x0d;
 }
 
 bool setSignalRate(macfw::FireWireDevice& device,
@@ -594,9 +618,12 @@ cleanup_stream:
             const bool inputOk = setSignalRate(device, ctx, 0x19, 0x02, raw);
             std::this_thread::sleep_for(std::chrono::milliseconds(250));
             unsigned restoredRate = 0;
-            restoreOk = outputOk && inputOk &&
-                readInputRate(device, ctx, restoredRate, raw) &&
+            const bool readOk = readInputRate(device, ctx, restoredRate, raw);
+            restoreOk = outputOk && inputOk && readOk &&
                 restoredRate == kBaselineRate;
+            std::cout << "restored INPUT readback: "
+                      << (readOk ? std::to_string(restoredRate) + " Hz" : "unavailable")
+                      << '\n';
         } else {
             restoreOk = false;
             std::cout << "bus generation changed; rate restoration requires a fresh device handle\n";

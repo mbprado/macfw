@@ -98,5 +98,13 @@ devices/fw1814/tools/fw1814capture96_duplex_blocking --execute --experimental-hi
 
 Keep the service stopped if the probe reports failed rate/PCR restoration or
 a changed bus generation. Record the full output, especially capture packet
-counts, CIP headers, generation, and restoration results. The diagnostic
-has not yet been compiled or run on macOS; review its dry run first.
+counts, CIP headers, generation, and restoration results.
+
+The first Mac duplex run at 96 kHz reached the stream kick with both ISO
+directions active. OUTPUT returned `0x0f` (INTERIM); subsequent INPUT and
+restore calls received replies to earlier commands. The first probe consumed
+the first FCP reply for each write without matching the command, so it exited
+before measuring any capture packets and could not establish the final INPUT
+rate. The bus generation remained 65 and both PCRs restored. A follow-up
+probe waits for a matching, final FCP reply and independently reads the
+restored INPUT rate. Streaming at 96 kHz remains unverified.
