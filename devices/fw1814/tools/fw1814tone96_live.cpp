@@ -53,6 +53,9 @@ constexpr UInt32 kTxCycleLead = 4096;
 
 macfw::fw1814::experimental::BlockingPcmStream96k* gStreamer = nullptr;
 IOFireWireLibDeviceRef gServiceNative = nullptr;
+const macfw::AmdtpReceiveRing* gCaptureRing = nullptr;
+macfw::fw1814::experimental::CapturePump96k* gCaptureDecoder = nullptr;
+macfw::fw1814::hal::capture::SharedCaptureRing* gCaptureStore = nullptr;
 bool gServiceHealthy = true;
 
 void serviceStream() {
@@ -63,6 +66,14 @@ void serviceStream() {
         return;
     }
     gStreamer->service((cycleTime >> 12) & 0x1fffu);
+    if (gCaptureRing && gCaptureDecoder && gCaptureStore) {
+        gCaptureDecoder->service(*gCaptureRing, *gCaptureStore);
+        // This standalone diagnostic has no HAL reader. Discard samples only
+        // after counting/decoding them so the bounded shared ring cannot fill.
+        gCaptureStore->readFrame.store(
+            gCaptureStore->writeFrame.load(std::memory_order_acquire),
+            std::memory_order_release);
+    }
 }
 
 bool serviceFor(double seconds) {
@@ -668,6 +679,16 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
             goto cleanup_stream;
         }
 
+        // Let the 64-slot DMA ring turn over after the 48 -> 96 kHz kick.
+        // The first decoder pass must not interpret pre-kick 48-kHz packets.
+        if (!serviceFor(0.030)) {
+            std::cout << "dynamic TX service failed during capture settle\n";
+            goto cleanup_stream;
+        }
+        gCaptureRing = &receiveRing;
+        gCaptureDecoder = &captureDecoder;
+        gCaptureStore = captureStore.get();
+
         std::cout << "*** " << (filePath.empty() ? "TONE" : "FILE")
                   << " ACTIVE on PCM position " << position
                   << " for " << runSeconds << " seconds ***\n";
@@ -702,6 +723,9 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
             }
             captureStarted = false;
         }
+        gCaptureRing = nullptr;
+        gCaptureDecoder = nullptr;
+        gCaptureStore = nullptr;
         success = dumpReceive(receiveRing, raw);
         captureDecoder.service(receiveRing, *captureStore);
         std::cout << "experimental 96 kHz capture decode: frames="
@@ -711,6 +735,15 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
                   << " invalidLabels="
                   << captureStore->invalidLabels.load(std::memory_order_relaxed)
                   << " dbcGaps=" << captureDecoder.stats().dbcDiscontinuities
+                  << '\n';
+        std::cout << "continuous capture: decodedPackets="
+                  << captureStore->decodedPackets.load(std::memory_order_relaxed)
+                  << " noData=" << captureDecoder.stats().noDataPackets
+                  << " completedChunks=" << captureDecoder.stats().completedChunks
+                  << " reordered=" << captureDecoder.stats().reorderedPackets
+                  << " stale=" << captureDecoder.stats().stalePackets
+                  << " timestampRegressions=" << captureDecoder.stats().timestampRegressions
+                  << " droppedFrames=" << captureStore->droppedFrames.load(std::memory_order_relaxed)
                   << '\n';
         std::cout << "experimental capture input peaks (dBFS):";
         for (std::size_t physical = 0;
@@ -726,6 +759,9 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
                   << (success ? "96 kHz PACKETS RECEIVED" : "NO VALID 96 kHz PACKETS") << '\n';
 
 cleanup_stream:
+        gCaptureRing = nullptr;
+        gCaptureDecoder = nullptr;
+        gCaptureStore = nullptr;
         gStreamer = nullptr;
         gServiceNative = nullptr;
         if (captureStarted && captureChannel) {

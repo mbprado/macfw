@@ -373,3 +373,26 @@ Makefile. `tone96-live-tool` now updates that archive before checking and
 relinking its executable; the startup output includes `receive metadata
 byte-swap guard: enabled` so a complete test log identifies the updated
 binary. The correction still needs a hardware run.
+
+The next Mac run confirmed the metadata correction: two slots were reported
+as byte-swapped, both decoded as ordinary 712-byte data/8-byte NODATA
+packets in sequence, and the complete 64-slot snapshot contained 48 data
+packets, 16 NODATA packets and 768 decoded frames without malformed packets,
+invalid labels, DBC gaps, or oversized headers. Analog Input 1 measured
+-29.01 dBFS with the 440 Hz test signal; other inputs remained close to the
+noise floor. This passes the bounded corrected-metadata capture test; it does
+not establish continuity over seconds.
+
+The live probe now also decodes completed 32-slot capture chunks while the
+96-kHz stream runs. After a 30 ms post-kick settling interval, it services
+capture alongside dynamic playback for the three-second active test and
+advances the diagnostic ring's read cursor so its 32768-frame buffer cannot
+fill. The final `experimental 96 kHz capture decode` line now reports totals
+over the run; `continuous capture` reports decoded data/NODATA packet counts,
+chunk completions, reordering, stale packets, timestamp regressions and
+dropped frames. The existing `capture result` still describes only the last
+64 DMA slots. Test with the same 440 Hz analog input and verify that frames
+grow well beyond 768, the packet count tracks elapsed time, and no malformed,
+invalid-label, DBC-gap, or dropped-frame counters increase. Rate and PCR
+restoration must still pass. Initial chunk synchronization and the realtime
+cost of decoding on the playback service loop require hardware validation.
