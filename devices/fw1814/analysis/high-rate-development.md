@@ -236,8 +236,8 @@ reported 154961 nonzero transmit frames at the expected 529285 peak, no
 silence fill, and two late cycle polls. The device-side ISO packet snapshot
 remained valid. As a duration check, the file probe now offers `--repeat 4`:
 it leaves 250 ms of silence at the beginning, repeats the decoded excerpt up
-to four times in an eight-second PCM buffer, and keeps the 96-kHz stream open
-for up to seven seconds. This distinguishes a too-short sample from a playback
+to four times in a ten-second PCM buffer, and keeps the 96-kHz stream open
+for the repeated excerpt. This distinguishes a too-short sample from a playback
 path that stays silent even with sustained nonzero PCM:
 
 ```sh
@@ -265,6 +265,8 @@ devices/fw1814/tools/fw1814tone96_live --position 2 \
 
 This schedules approximately 1.75 seconds of silence before the first chime
 and holds the stream open for up to 9.25 seconds. The PCM ring contains ten
-seconds of preloaded audio/silence. If all four chimes become audible, compare
-shorter lead-ins to bound the startup interval before integrating 96 kHz into
-the CoreAudio transport.
+seconds of preloaded audio/silence. The test Mac audibly played all four
+chimes with this lead-in, compared with three of four with the default 250 ms
+lead-in. The playback path is therefore working after startup; the exact
+minimum settling time remains unknown. Compare shorter lead-ins to bound
+the startup interval before integrating 96 kHz into the CoreAudio transport.
