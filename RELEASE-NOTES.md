@@ -1,6 +1,6 @@
-# macfw 0.4.000 — Alpha
+# macfw 0.04.003 — Alpha
 
-`0.4.000` is the first unified macfw development release for the **M-Audio
+`0.04.003` is the first unified macfw development release for the **M-Audio
 FireWire 410** and **M-Audio FireWire 1814**.
 
 Both interfaces now share one project version and one primary installer while
@@ -9,54 +9,8 @@ control-panel applications.
 
 ## Highlights
 
-- One `macfw-0.4.000-<build>.pkg` contains both payloads and installs only the
-  connected interface stack(s); if both interfaces are connected, both are
-  installed.
-- `macfw-fw410-0.4.000-<build>.pkg` and
-  `macfw-fw1814-0.4.000-<build>.pkg` are available as focused installers.
-- Root `make` builds the FW410 and FW1814 HAL, release runtime and control panel.
-- `sudo make install` detects the connected supported interface(s) and installs
-  only the matching stack(s).
-- `sudo make install-force` preflights every required artifact, then installs both interfaces without hardware detection.
-- Device-specific build, install and package targets remain available.
-- FW1814 reaches its first installable control-panel release scope.
-- FW410 retains the hardware-validated `0.03.000` audio/control baseline.
-- Package hardware detection distinguishes the FW410 generic `FW Bootloader`
-  identity from the model-specific `FW 1814 Bootloader` identity.
-
-## FW1814 release scope
-
-The FW1814 implementation provides hardware-validated analog full-duplex
-CoreAudio operation at 44.1 and 48 kHz, exposing Analog Outputs 1–4 and Analog
-Inputs 1–8. The current native AppKit control panel covers:
-
-- software-return mixer levels;
-- analog-input monitor level and pan;
-- analog-output source and volume;
-- both digital-volume headphone outputs;
-- AUX sends and AUX master volume;
-- continuous linked or independent stereo-slider updates;
-- persistent control restoration across restart, rate switch and reconnect.
-
-The runtime also provides automatic bootloader recovery, launchd supervision,
-sample-rate switching through CoreAudio and physical disconnect/reconnect
-recovery. S/PDIF, ADAT, higher sample rates and MIDI remain deferred.
-
-## FW410 retained baseline
-
-The existing FW410 release functionality remains included:
-
-- native 44.1/48 kHz full-duplex CoreAudio audio;
-- 10 playback and 4 capture channels;
-- dedicated Mach-paced real-time audio servicing and 256-frame capture prefill;
-- control-panel and Audio MIDI Setup rate switching;
-- bootloader, reboot, delayed-attachment and disconnect/reconnect recovery;
-- main mixer, physical output, headphone and AUX controls;
-- live input meters, Device diagnostics and Info/Diagnostics;
-- persistent control state and Reset Defaults.
-
-The FW410 still requires extra startup work at 44.1 kHz, so 48 -> 44.1 kHz
-switching is slower than the reverse direction.
+- This minor update fixes the volume control knob action on FW1814.
+- Headphones volume sliders in control panel now reflect knobs movement. 
 
 ## Build and installation
 
@@ -89,9 +43,9 @@ make fw1814-package
 The output is:
 
 ```text
-package/dist/macfw-0.4.000-<build>.pkg
-package/dist/macfw-fw410-0.4.000-<build>.pkg
-package/dist/macfw-fw1814-0.4.000-<build>.pkg
+package/dist/macfw-0.04.003-<build>.pkg
+package/dist/macfw-fw410-0.04.003-<build>.pkg
+package/dist/macfw-fw1814-0.04.003-<build>.pkg
 ```
 
 The combined hardware gate accepts either a connected FW410 or FW1814. Its
@@ -126,7 +80,7 @@ Apple removed the built-in FireWire stack used by macfw. See
 
 ## Signing and notarization
 
-`0.4.000` remains an alpha release. Unless explicitly stated otherwise on the
+`0.4.003` remains an alpha release. Unless explicitly stated otherwise on the
 GitHub Release, the package is **unsigned and unnotarized**.
 
 ## Diagnostics for testers
