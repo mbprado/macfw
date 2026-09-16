@@ -15,6 +15,7 @@ DUALCMP_WAIT_TOOL := fw1814capture48_dualcmp_wait
 DUPLEX_BLOCKING_TOOL := fw1814capture48_duplex_blocking
 DUPLEX96_TOOL := fw1814capture96_duplex_blocking
 TONE96_TOOL := fw1814tone96
+TONE96_LIVE_TOOL := fw1814tone96_live
 OUTPUT_WATCH_TOOL := fw1814capture48_output_watch
 TEARDOWN_WATCH_TOOL := fw1814teardown_watch
 CLIENT_CLOSE_WATCH_TOOL := fw1814client_close_watch
@@ -34,6 +35,7 @@ DEVICE_PROBE_TOOL := fw1814deviceprobe
 	duplex-blocking-tool duplex-blocking-check duplex-blocking duplex-blocking-raw \
 	duplex96-tool duplex96-check duplex96 duplex96-raw \
 	tone96-tool tone96-check tone96 tone96-raw \
+	tone96-live-tool tone96-live-check tone96-live \
 	output-watch-tool output-watch-check output-watch output-watch-raw \
 	teardown-watch-tool teardown-watch-check teardown-watch \
 	client-close-watch-tool client-close-watch-check client-close-watch \
@@ -205,6 +207,21 @@ tone96-raw: tone96-tool
 	@if [ -z "$(POSITION)" ]; then echo "usage: make tone96-raw POSITION=0..5"; exit 64; fi
 	./$(TONE96_TOOL) --position $(POSITION) --execute --experimental-high-rate --raw
 
+# Live PCM refill probe: frequencies need not fit the 128-cycle static ring.
+# FCP waits service the refill loop; this does not install a 96 kHz HAL.
+tone96-live-tool: $(TONE96_LIVE_TOOL)
+
+$(TONE96_LIVE_TOOL): fw1814tone96_live.cpp fw1814_pcm96_tx.h fw1814_pcm96_stream.h $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814tone96_live.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+tone96-live-check: tone96-live-tool
+	@if [ -z "$(POSITION)" ]; then echo "usage: make tone96-live-check POSITION=0..5 FREQUENCY=440"; exit 64; fi
+	./$(TONE96_LIVE_TOOL) --position $(POSITION) --frequency $(or $(FREQUENCY),440)
+
+tone96-live: tone96-live-tool
+	@if [ -z "$(POSITION)" ]; then echo "usage: make tone96-live POSITION=0..5 FREQUENCY=440"; exit 64; fi
+	./$(TONE96_LIVE_TOOL) --position $(POSITION) --frequency $(or $(FREQUENCY),440) --execute --experimental-high-rate
+
 # Safety diagnostic for the observed generation change during duplex startup.
 # It starts the same correct blocking streams, sends OUTPUT 48 kHz only, and
 # watches the FireWire bus generation for 300 ms. INPUT CONTROL is never sent.
@@ -315,4 +332,4 @@ clean:
 	$(MAKE) -C $(BUS_RESET_DIR) clean
 	$(MAKE) -C $(CONTROL_DIR) clean
 	$(MAKE) -C $(STATE_CONTROL_DIR) clean
-	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(DEVICE_PROBE_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(DUPLEX96_TOOL) $(TONE96_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) $(PLAYBACK_MAP_TOOL) $(ROUTE_ANALOG_TOOL) fw1814capture48_duplex_nodata
+	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(DEVICE_PROBE_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(DUPLEX96_TOOL) $(TONE96_TOOL) $(TONE96_LIVE_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) $(PLAYBACK_MAP_TOOL) $(ROUTE_ANALOG_TOOL) fw1814capture48_duplex_nodata

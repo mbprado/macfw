@@ -158,3 +158,41 @@ the tone is clean, the capture packet counts, and all restoration results.
 If the analog routing was reset, use the already documented
 `make -C devices/fw1814/tools route-analog` before repeating the listening
 test. Do not resume the service after a failed PCR or rate restoration.
+
+The test Mac reported clean 96-kHz 500 Hz playback at each of the four
+physical analog outputs. The observed PCM map matched the 48-kHz map:
+
+| Raw playback PCM position | Audible output |
+|---:|---|
+| 0 | Analog Output 3 |
+| 1 | Analog Output 4 |
+| 2 | Analog Output 1 |
+| 3 | Analog Output 2 |
+
+The next audible test must use a live-refilled transmitter for 440 Hz and a
+second non-loop-aligned frequency (the 44.1-kHz history used 523.25 Hz),
+then real file playback. The current 96-kHz 500 Hz test is deliberately
+phase-aligned to the static 128-cycle DCL ring; it cannot expose the boundary
+failure that once distorted 44.1/48-kHz program audio. Keep the 96-kHz
+production HAL hidden until arbitrary-frequency playback and rate restore
+are both verified.
+
+`fw1814tone96_live` is an experimental next gate. It adapts the proven
+48-kHz PCM refill to 16-event, 96-kHz packets, holds a five-second tone in
+memory, and refills two transmit halves as the bus cycle advances. Its FCP
+reply waits also service the PCM transmitter. It runs for three seconds and
+reports frames read, silence fill, late cycle polls and the capture packet
+summary, then checks rate and PCR restoration. Test it first at 440 Hz and
+then at 523.25 Hz on a known physical output. With the FW1814 service
+stopped and low monitor volume:
+
+```sh
+make -C devices/fw1814/tools tone96-live-tool
+devices/fw1814/tools/fw1814tone96_live --position 2 --frequency 440
+devices/fw1814/tools/fw1814tone96_live --position 2 --frequency 440 --execute --experimental-high-rate
+devices/fw1814/tools/fw1814tone96_live --position 2 --frequency 523.25 --execute --experimental-high-rate
+```
+
+The second execution should only follow a clean first run and successful
+restoration. This standalone PCM probe does not make 96 kHz available to
+CoreAudio, so AIFF command-line playback remains a later integration gate.
