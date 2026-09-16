@@ -349,3 +349,18 @@ now also prints header, status and timestamp for the first four slots on every
 run, permitting direct comparison with neighboring valid slots. Do not
 reconstruct packet lengths from the CIP prefix or expose this as reliable
 capture until the receive metadata anomaly is understood.
+
+Comparison with a clean run identified a consistent byte-order reversal of
+all three receive DCL metadata words in the anomalous slots. For example,
+the bad `0xa0410800` header, `0x51840000` status and `0x00f0ee0b`
+timestamp become an 8-byte header, the normal `0x00008451` status and a
+plausible timestamp when individually byte-swapped. A previous 41025-byte
+header similarly converts to a 712-byte data-packet header. The payload CIP
+prefixes were already in normal byte order. The shared receive reader now
+corrects metadata only when the native length exceeds the slot capacity,
+the swapped length is bounded and quadlet-aligned, and the swapped status
+matches the observed successful completion. The probe reports the number of
+corrected slots separately; test on the Mac before concluding all payload
+bytes and frame continuity are intact. This conditional correction leaves
+normal receive metadata unchanged and preserves unrecognized bad headers
+as malformed.
