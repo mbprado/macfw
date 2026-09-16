@@ -102,6 +102,11 @@ static AudioObjectID FindDevice(void){
     [self buildMixer];[self buildOutputs];[self buildHeadphones];[self buildAux];[self buildDevice];[self buildDiagnostics];
     [self.window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];
     dispatch_async(dispatch_get_main_queue(),^{[self refresh:nil];});
+    [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *timer){
+        (void)timer;
+        if (!self.window.isVisible || self.refreshing || [NSEvent pressedMouseButtons]) return;
+        [self refreshLevels:self.hpRows command:@"headphone-volume" args:HP()];
+    }];
 }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)s{(void)s;return YES;}
 - (NSView*)tab:(NSString*)label id:(NSString*)ident{

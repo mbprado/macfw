@@ -1,8 +1,10 @@
 #pragma once
 
 #include "../special_mixer.h"
+#include "headphone_rotaries.h"
 
 #include <array>
+#include <chrono>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -10,12 +12,16 @@
 #include <cstring>
 #include <fcntl.h>
 #include <iomanip>
+#include <spawn.h>
 #include <sstream>
 #include <string>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <sys/wait.h>
+
+extern char** environ;
 
 namespace macfw::fw1814::transport {
 
@@ -47,6 +53,8 @@ public:
         headphoneOutputLevelKnown_.fill(true);
         gainHeadphoneOut_.fill(macfw::fw1814::stereoMonitorLevelWord(
             macfw::fw1814::kMonitorLevelUnity));
+        rotaries_.reset();
+        nextRotaryPoll_ = std::chrono::steady_clock::now();
         auxSoftwareReturnLevelKnown_.fill(true);
         gainAuxStreamIn_.fill(macfw::fw1814::stereoMonitorLevelWord(
             macfw::fw1814::kMonitorLevelMute));
@@ -111,6 +119,7 @@ public:
         gainAnalogOut_.fill(0);
         headphoneOutputLevelKnown_.fill(false);
         gainHeadphoneOut_.fill(0);
+        rotaries_.reset();
         auxSoftwareReturnLevelKnown_.fill(false);
         gainAuxStreamIn_.fill(0);
         auxAnalogInputLevelKnown_.fill(false);
@@ -125,6 +134,8 @@ public:
 
     void service() {
         if (listenFd_ < 0 || !device_) return;
+
+        pollHeadphoneRotaries();
 
         if (clientFd_ < 0) {
             clientFd_ = accept(listenFd_, nullptr, nullptr);
@@ -160,6 +171,75 @@ public:
     }
 
 private:
+    void saveHeadphoneVolume(unsigned output, std::uint32_t word) {
+        constexpr const char* helper =
+            "/Library/Application Support/macfw/fw1814/bin/fw1814state";
+        const std::string number = std::to_string(output + 1);
+        const std::string key = "headphone-volume:" + number;
+        const int left = macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(word, 0));
+        const int right = macfw::fw1814::monitorLevelRaw(
+            macfw::fw1814::monitorLevelChannel(word, 1));
+        const std::string leftDb = left == -32768 ? "-inf" : std::to_string(left / 256);
+        const std::string rightDb = right == -32768 ? "-inf" : std::to_string(right / 256);
+        char* const argv[] = {
+            const_cast<char*>(helper), const_cast<char*>("record"),
+            const_cast<char*>(key.c_str()), const_cast<char*>("headphone-volume"),
+            const_cast<char*>("set"), const_cast<char*>(number.c_str()),
+            const_cast<char*>(leftDb.c_str()), const_cast<char*>(rightDb.c_str()), nullptr,
+        };
+        pid_t child = 0;
+        const int error = posix_spawn(&child, helper, nullptr, nullptr, argv, environ);
+        if (error != 0) {
+            std::fprintf(stderr, "FW1814: cannot save headphone knob setting: %s\n",
+                         std::strerror(error));
+            return;
+        }
+        int status = 0;
+        pid_t waited = 0;
+        do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
+        if (waited != child || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+            std::fprintf(stderr, "FW1814: headphone knob setting was not saved\n");
+    }
+
+    void pollHeadphoneRotaries() {
+        const auto now = std::chrono::steady_clock::now();
+        if (now < nextRotaryPoll_) return;
+        nextRotaryPoll_ = now + std::chrono::milliseconds(100);
+        if (restoringControlState_ ||
+            !macfw::fw1814::mixerGenerationMatches(*device_, generation_)) {
+            rotaries_.reset();
+            return;
+        }
+        std::array<std::uint8_t, 84> frame{};
+        UInt32 size = static_cast<UInt32>(frame.size());
+        if (device_->read(0xffc7, 0x00600000, frame.data(), size) !=
+                kIOReturnSuccess || size != frame.size() ||
+            !macfw::fw1814::mixerGenerationMatches(*device_, generation_)) {
+            rotaries_.reset();
+            return;
+        }
+        const auto steps = rotaries_.observe(frame);
+        for (unsigned output = 0; output < steps.size(); ++output) {
+            if (!steps[output] || !headphoneOutputLevelKnown_[output]) continue;
+            std::uint32_t desired = gainHeadphoneOut_[output];
+            for (unsigned channel = 0; channel < 2; ++channel) {
+                const int current = macfw::fw1814::monitorLevelRaw(
+                    macfw::fw1814::monitorLevelChannel(desired, channel));
+                desired = macfw::fw1814::setMonitorLevelChannel(
+                    desired, channel, static_cast<std::uint16_t>(
+                        rotaryGain(current, steps[output])));
+            }
+            if (desired == gainHeadphoneOut_[output]) continue;
+            const UInt32 address = output == 0
+                ? macfw::fw1814::kGainHeadphone1OutLo
+                : macfw::fw1814::kGainHeadphone2OutLo;
+            if (writeRegister(address, desired) != WriteResult::Ok) continue;
+            gainHeadphoneOut_[output] = desired;
+            saveHeadphoneVolume(output, desired);
+        }
+    }
+
     void finishClient() {
         if (clientFd_ >= 0) close(clientFd_);
         clientFd_ = -1;
@@ -1183,6 +1263,7 @@ private:
                   "software-return-levels=continuous-persistent "
                   "analog-output-levels=continuous-persistent "
                   "headphone-levels=continuous-persistent "
+                  "headphone-rotaries=meter-polled "
                   "aux-software-return-sends=continuous-persistent "
                   "aux-analog-input-sends=continuous-persistent "
                   "aux-output-level=continuous-persistent "
@@ -1260,6 +1341,8 @@ private:
     std::array<std::uint32_t, 2> gainAnalogOut_{{0, 0}};
     std::array<bool, 2> headphoneOutputLevelKnown_{{false, false}};
     std::array<std::uint32_t, 2> gainHeadphoneOut_{{0, 0}};
+    HeadphoneRotaries rotaries_{};
+    std::chrono::steady_clock::time_point nextRotaryPoll_{};
     std::array<bool, 2> auxSoftwareReturnLevelKnown_{{false, false}};
     std::array<std::uint32_t, 2> gainAuxStreamIn_{{0, 0}};
     std::array<bool, 4> auxAnalogInputLevelKnown_{{
