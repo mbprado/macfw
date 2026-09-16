@@ -364,3 +364,12 @@ corrected slots separately; test on the Mac before concluding all payload
 bytes and frame continuity are intact. This conditional correction leaves
 normal receive metadata unchanged and preserves unrecognized bad headers
 as malformed.
+
+A subsequent excerpt still showed a raw 41025-byte header, but did not
+include the new `byte-swapped receive metadata` summary, so it cannot yet
+show whether the correction was used. The tools Makefile could treat an
+existing shared `libmacfw.a` as up to date without re-entering its own
+Makefile. `tone96-live-tool` now updates that archive before checking and
+relinking its executable; the startup output includes `receive metadata
+byte-swap guard: enabled` so a complete test log identifies the updated
+binary. The correction still needs a hardware run.

@@ -209,7 +209,11 @@ tone96-raw: tone96-tool
 
 # Live PCM refill probe: frequencies need not fit the 128-cycle static ring.
 # FCP waits service the refill loop; this does not install a 96 kHz HAL.
-tone96-live-tool: $(TONE96_LIVE_TOOL)
+# The archive lives in a separate Makefile. Refresh it before checking the
+# executable's timestamp or a changed library object can leave an old tool.
+tone96-live-tool:
+	$(MAKE) -C ../../fw410/lib libmacfw.a
+	$(MAKE) $(TONE96_LIVE_TOOL)
 
 $(TONE96_LIVE_TOOL): fw1814tone96_live.cpp fw1814_pcm96_tx.h fw1814_pcm96_stream.h fw1814_capture96_pump.h fw1814_file96.h $(LIBMACFW)
 	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814tone96_live.cpp $(LIBMACFW) $(FRAMEWORKS) -framework AudioToolbox -o $@

@@ -380,6 +380,7 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
 
     const UInt32 initialGeneration = device.generation();
     std::cout << "selected playback PCM position: " << position << '\n';
+    std::cout << "receive metadata byte-swap guard: enabled\n";
     if (filePath.empty())
         std::cout << "tone: " << frequencyHz << " Hz, -24 dBFS peak, 3 seconds\n";
     else
