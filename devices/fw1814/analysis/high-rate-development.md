@@ -270,3 +270,20 @@ chimes with this lead-in, compared with three of four with the default 250 ms
 lead-in. The playback path is therefore working after startup; the exact
 minimum settling time remains unknown. Compare shorter lead-ins to bound
 the startup interval before integrating 96 kHz into the CoreAudio transport.
+
+Follow-up listening tests found that an 800 ms silent lead-in played all four
+chimes cleanly, while 700 ms cut the beginning of the first chime. This is an
+observed threshold for this Mac and device state, not a guaranteed device
+constant. Use at least 1000 ms of silent PCM as the initial conservative
+setting when prototyping the 96-kHz transport, with output activity verified
+after the actual rate CONTROL completes. Repeat the startup test after rate
+switches and bus reconnection before promoting the setting to a release.
+
+The current production integration still constrains sample rates to 44.1/48
+kHz in the HAL's nominal-rate list, shared-ring rate validation, supervisor
+selection, and rate-specific 44/48 transport engines. The standalone live
+96-kHz probe validates analog output PCM and rate restoration but does not
+validate the production capture pump, HAL lifecycle or repeated sample-rate
+switching. Integrate those pieces under an experimental opt-in before exposing
+96 kHz to all installations. The 88.2-kHz variable transmit schedule remains
+a separate evidence gate.
