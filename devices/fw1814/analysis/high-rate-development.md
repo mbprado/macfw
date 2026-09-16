@@ -9,7 +9,8 @@ also has one MIDI position, which macfw does not currently expose.
 | Rate | Device to host | Host to device | Status |
 |---|---:|---:|---|
 | 44.1/48 kHz | 10 PCM | 6 PCM | macfw analog audio validated |
-| 88.2/96 kHz | 10 PCM | 6 PCM | Rate CONTROL/readback validated; streaming untested |
+| 88.2 kHz | 10 PCM | 6 PCM | Rate CONTROL/readback validated; streaming untested |
+| 96 kHz | 10 PCM | 6 PCM | Duplex silent packet capture validated; audio mapping untested |
 | 176.4/192 kHz | 2 PCM | 4 PCM | Linux reference; macfw hardware untested |
 
 Linux's [FW1814 clock protocol](https://github.com/alsa-project/snd-firewire-ctl-services/blob/master/protocols/bebob/src/maudio/special.rs)
@@ -107,4 +108,27 @@ the first FCP reply for each write without matching the command, so it exited
 before measuring any capture packets and could not establish the final INPUT
 rate. The bus generation remained 65 and both PCRs restored. A follow-up
 probe waits for a matching, final FCP reply and independently reads the
-restored INPUT rate. Streaming at 96 kHz remains unverified.
+restored INPUT rate.
+
+The second Mac run at 96 kHz reached the capture observation. Both CONTROL
+commands received matching final responses; INPUT also produced an INTERIM
+response first. The receive ring contained 48 full 712-byte data packets with
+`DBS=11`, `FMT=0x10`, `FDF=0x04`, and 16 eight-byte NODATA packets, with zero
+unexpected packet shapes. The displayed data DBCs advanced by 16, including
+across NODATA cycles. Bus generation remained 66; both PCRs restored; OUTPUT
+and INPUT restoration succeeded and INPUT STATUS read 48 kHz twice after the
+stream stopped. This validates the initial silent duplex packet exchange at
+96 kHz, but not PCM playback, physical channel mapping, uninterrupted
+long-duration streaming or the CoreAudio engine.
+
+At 88.2 kHz the 16-event blocking cadence is variable. Linux's 44.1-kHz
+family SYT scheduler advances approximately 1386 ticks per interval modulo
+the 3072-tick bus cycle; a fixed 16/16/16/NODATA loop is specific to 96 kHz.
+The current transmit DCL ring repeats after 128 cycles, so an 88.2-kHz probe
+must preserve the scheduler phase and DBC across the ring boundary rather
+than repeat the 96-kHz pattern. A calculation using the Linux scheduler's
+initial phase (`67`) shows the phase, last SYT offset and 8-bit DBC all return
+to their initial values after 10,240 cycles (7056 data packets). That is much
+larger than the current 128-packet static transmit ring. Choose a bounded,
+phase-correct transmit strategy and check its resource cost before trying
+88.2-kHz duplex on hardware.
