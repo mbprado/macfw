@@ -927,10 +927,19 @@ OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef,
         if (gCaptureRing->active.load(std::memory_order_acquire) != 0 &&
             gCaptureRing->sampleRate.load(std::memory_order_acquire) ==
                 gSampleRate.load(std::memory_order_acquire)) {
-            got = macfw::fw1814::hal::capture::read(
-                *gCaptureRing, out, frames);
-            gCaptureRing->halFramesFromRing.fetch_add(got,
-                                                      std::memory_order_relaxed);
+            // The experimental 96-kHz path can retain a full 32768-frame
+            // queue after a client pauses. Reading at exactly 96 kHz then
+            // preserves ~341 ms of stale software-monitor audio forever.
+            // A flush makes this callback silent; the engine refills from
+            // fresh packets before enabling capture again.
+            const bool stale = gSampleRate.load(std::memory_order_acquire) == 96000 &&
+                macfw::fw1814::hal::capture::suspendStaleCapture(*gCaptureRing, 4096);
+            if (!stale) {
+                got = macfw::fw1814::hal::capture::read(
+                    *gCaptureRing, out, frames);
+                gCaptureRing->halFramesFromRing.fetch_add(got,
+                                                          std::memory_order_relaxed);
+            }
         }
 
         if (got < frames) {

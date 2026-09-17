@@ -559,3 +559,17 @@ READY backlog approaches the reserve, that any pre-ready silent underrun does
 not continue during playback, and that the first sound and sustained audio
 remain intact. Measure physical loopback round-trip latency before changing
 the packet ring depth or touching the released 44.1/48-kHz engines.
+
+At the 1.6-second preload, Logic software monitoring still had noticeable
+latency. The next log showed only 2176 playback PCM frames queued (~23 ms),
+while 32512 capture frames remained queued (~339 ms). Capture produced and
+Logic read 192000 frames per two seconds, so the old backlog could not drain
+at equal rates. Earlier time without an input reader had filled the ring and
+caused dropped *new* capture frames. The experimental 96-kHz HAL input reader
+now suspends capture when more than 4096 frames are queued, discards the whole
+stale backlog, and returns silence briefly while the engine primes 512 fresh
+frames before resuming. Initial activation also drops a stale full ring before
+its first 512-frame prefill. The released 44.1/48-kHz input behavior stays as is.
+The next hardware run must verify that `queued` falls near 512 while Logic
+monitors, `cap-drop` stops growing after the one-time catch-up, and capture
+audio remains continuous once the prefill has completed.

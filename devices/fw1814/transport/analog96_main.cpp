@@ -255,10 +255,17 @@ bool run() {
                 if (rateKicked.load(std::memory_order_acquire))
                     capturePump.service(rx, *captureShared.ring());
 
-                if (rateKicked.load(std::memory_order_acquire) && !captureReady &&
-                    captureShared.activateForConsumer(kCapturePrefillFrames)) {
-                    captureReady = true;
-                    std::cout << "FW1814 capture consumer detected; live capture enabled\n";
+                if (rateKicked.load(std::memory_order_acquire) &&
+                    captureShared.ring()->active.load(std::memory_order_acquire) == 0) {
+                    const bool resumed = captureReady;
+                    captureReady = false;
+                    if (captureShared.activateForConsumer(kCapturePrefillFrames)) {
+                        captureReady = true;
+                        std::cout << (resumed ? "FW1814 capture consumer resumed; "
+                                              "fresh capture enabled\n"
+                                              : "FW1814 capture consumer detected; "
+                                                "live capture enabled\n");
+                    }
                 }
 
                 const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();

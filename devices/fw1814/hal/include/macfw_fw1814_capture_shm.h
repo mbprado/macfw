@@ -78,6 +78,23 @@ inline std::size_t availableFrames(const SharedCaptureRing& ring) {
     return static_cast<std::size_t>(w - r);
 }
 
+// Called only by the HAL reader at 96 kHz. When no client reads for long
+// enough, the producer fills the ring and drops all subsequent (new) frames.
+// Keeping even a small part of that full ring would replay old audio before
+// fresh samples. Suspend reads, discard the whole backlog, and let the
+// transport prefill again from current capture packets before reactivation.
+inline bool suspendStaleCapture(SharedCaptureRing& ring,
+                                std::size_t maxQueuedFrames) {
+    const auto w = ring.writeFrame.load(std::memory_order_acquire);
+    const auto r = ring.readFrame.load(std::memory_order_acquire);
+    const auto queued = static_cast<std::size_t>(w - r);
+    if (queued <= maxQueuedFrames) return false;
+    ring.active.store(0, std::memory_order_release);
+    ring.readFrame.store(w, std::memory_order_release);
+    ring.droppedFrames.fetch_add(queued, std::memory_order_relaxed);
+    return true;
+}
+
 inline void observeQueueDepth(SharedCaptureRing& ring, std::uint64_t queued) {
     auto minQueued = ring.halMinQueuedFrames.load(std::memory_order_relaxed);
     while (queued < minQueued &&
