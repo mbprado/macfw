@@ -57,7 +57,8 @@ public:
                                                 std::size_t packetCount = kRequiredPackets) {
         BlockingPcmTransmitRing88200 ring;
         auto native = device.nativeHandle();
-        if (!native || packetCount != kRequiredPackets)
+        if (!native || (packetCount != kRequiredPackets &&
+                        packetCount != kExtendedPackets))
             return ring;
 
         ring.packetCount_ = packetCount;
@@ -158,7 +159,8 @@ public:
                         macfw::am824::Playback44100State& state,
                         UInt32& cycle) {
         RefillResult result{};
-        if (!storage_ || packetCount_ != kRequiredPackets || !pcm.valid() ||
+        if (!storage_ || (packetCount_ != kRequiredPackets &&
+                          packetCount_ != kExtendedPackets) || !pcm.valid() ||
             pcm.channelCount() != kPcmChannels || firstPacket >= packetCount_ ||
             packetCount == 0)
             return result;
@@ -220,6 +222,7 @@ private:
     static constexpr std::size_t kDbs = 7;
     static constexpr std::size_t kEventsPerDataPacket = 16;
     static constexpr std::size_t kRequiredPackets = 640;
+    static constexpr std::size_t kExtendedPackets = 1280;
     static constexpr UInt32 kMaxPacketBytes =
         8 + kEventsPerDataPacket * kDbs * sizeof(std::uint32_t); // 456
 
@@ -346,7 +349,8 @@ public:
     bool valid() const {
         return tx_ && pcm_ && static_cast<bool>(*tx_) && pcm_->valid() &&
                pcm_->channelCount() == BlockingPcmTransmitRing88200::pcmChannels() &&
-               tx_->packetCount() == 640 && halfPackets_ == 320;
+               (tx_->packetCount() == 640 || tx_->packetCount() == 1280) &&
+               tx_->packetCount() == halfPackets_ * 2;
     }
 
     bool prime() {

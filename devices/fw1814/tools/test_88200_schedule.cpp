@@ -10,6 +10,7 @@ int main() {
     // actual 44.1-family state across the full DBC/SYT cycle, not just a
     // single 640-packet ring.
     constexpr std::size_t kRing = 640;
+    constexpr std::size_t kExtendedRing = 1280;
     constexpr std::size_t kPeriod = 10240;
     std::array<bool, kRing> firstLengths{};
     macfw::am824::Playback44100State state{};
@@ -27,11 +28,15 @@ int main() {
             (dataCount != 441 || state.dbc != 144 ||
              state.lastSytOffset != macfw::am824::kTicksPerCycle ||
              state.sytOffsetPhase != 67)) return 2;
+        if (cycle == kExtendedRing - 1 &&
+            (dataCount != 882 || state.dbc != 32 ||
+             state.lastSytOffset != macfw::am824::kTicksPerCycle ||
+             state.sytOffsetPhase != 67)) return 4;
     }
     if (dataCount != 7056 || state.dbc != 0 ||
         state.lastSytOffset != macfw::am824::kTicksPerCycle ||
         state.sytOffsetPhase != 67) return 3;
-    std::printf("88.2 schedule: PASS (640 packet-length period; "
-                "441 data/ring; 7056 data/full phase)\n");
+    std::printf("88.2 schedule: PASS (640/1280 packet ring lengths; "
+                "441/882 data packets; 7056 data/full phase)\n");
     return 0;
 }

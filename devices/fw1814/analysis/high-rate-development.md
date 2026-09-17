@@ -167,6 +167,26 @@ and a silent tail. It prints the nonzero frame count and checks the same
 capture packets and rate/PCR restoration. Audibility and the physical output
 mapping still require testing on the interface.
 
+The first 88.2-kHz 440-Hz test on PCM position 2 was audible but broken,
+despite 44 full/20 NODATA packets in the snapshot, 259198 nonzero TX frames,
+zero PCM underruns and successful PCR/rate restoration. A valid capture
+snapshot and queued TX samples do not prove continuous or correctly timed
+host-to-device audio. As a bounded A/B diagnostic, `--extended-tx-ring` uses
+1280 NuDCL packets and 640-packet refill halves instead of the original
+640/320. The variable data/NODATA packet lengths repeat every 640 cycles;
+both ring sizes pass the offline schedule check. Try the same listening test
+with the larger ring:
+
+```sh
+devices/fw1814/tools/fw1814capture88_duplex_blocking \
+  --tone-440 --position 2 --extended-tx-ring \
+  --execute --experimental-high-rate
+```
+
+The comparison tests whether the shorter refill window contributes to the
+distortion. Even a clean result would still require a sustained capture and
+playback validation before enabling 88.2 kHz in the installed driver.
+
 ## First 96 kHz listening test
 
 `fw1814tone96` reuses the proven 96 kHz duplex probe and its restoration

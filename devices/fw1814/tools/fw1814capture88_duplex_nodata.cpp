@@ -303,7 +303,8 @@ bool dumpReceive(const macfw::AmdtpReceiveRing& ring, bool raw) {
            noData > 0 && other == 0;
 }
 
-bool run(bool execute, bool raw, bool tone, unsigned position) {
+bool run(bool execute, bool raw, bool tone, unsigned position,
+         bool extendedTxRing) {
     if (execute && access("/tmp/macfw-fw1814-control.sock", F_OK) == 0) {
         std::cout << "stop the FW1814 transport service before this diagnostic\n";
         return false;
@@ -429,8 +430,11 @@ bool run(bool execute, bool raw, bool tone, unsigned position) {
 
         auto receiveRing = macfw::AmdtpReceiveRing::create(
             device, kCapturePackets, kCaptureMaxPayload);
+        const std::size_t txPackets = extendedTxRing ? 1280 : kTxPackets;
+        std::cout << "TX ring: " << txPackets << " packets / "
+                  << txPackets / 2 << "-packet refill halves\n";
         auto transmitRing = macfw::fw1814::transport::BlockingPcmTransmitRing88200::create(
-            device, firstTxCycle, kTxPackets);
+            device, firstTxCycle, txPackets);
         macfw::PcmRingBuffer silentPcm(524288, kPlaybackPcmChannels);
         const std::size_t preloadFrames = tone ? kPreloadFrames : 4 * 88200;
         std::vector<std::int32_t> preload(
@@ -449,7 +453,7 @@ bool run(bool execute, bool raw, bool tone, unsigned position) {
         const std::size_t preloadWritten = silentPcm.write(
             preload.data(), preloadFrames);
         macfw::fw1814::transport::BlockingPcmStream88200 streamer(
-            transmitRing, silentPcm, currentCycle, firstTxCycle);
+            transmitRing, silentPcm, currentCycle, firstTxCycle, txPackets / 2);
         std::atomic<bool> stopTx{false};
         std::atomic<bool> txHealthy{true};
         std::thread txWorker;
@@ -734,7 +738,7 @@ cleanup:
 void usage(const char* argv0) {
     std::cout << "usage: " << argv0
               << " [--execute --experimental-high-rate] [--raw]"
-                 " [--tone-440 --position 0..5]\n";
+                 " [--tone-440 --position 0..5] [--extended-tx-ring]\n";
 }
 
 } // namespace
@@ -744,6 +748,7 @@ int main(int argc, char** argv) {
     bool raw = false;
     bool experimentalHighRate = false;
     bool tone = false;
+    bool extendedTxRing = false;
     unsigned position = 2;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -751,6 +756,7 @@ int main(int argc, char** argv) {
         else if (arg == "--experimental-high-rate") experimentalHighRate = true;
         else if (arg == "--raw") raw = true;
         else if (arg == "--tone-440") tone = true;
+        else if (arg == "--extended-tx-ring") extendedTxRing = true;
         else if (arg == "--position" && i + 1 < argc) {
             const std::string value = argv[++i];
             if (value.size() != 1 || value[0] < '0' || value[0] > '5') {
@@ -774,5 +780,5 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "macfw fw1814capture88-duplex-blocking — experimental high-rate duplex diagnostic\n\n";
-    return run(execute, raw, tone, position) ? 0 : 1;
+    return run(execute, raw, tone, position, extendedTxRing) ? 0 : 1;
 }
