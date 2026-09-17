@@ -36,9 +36,12 @@ constexpr UInt32 kCaptureMaxPacket = 712;
 constexpr UInt32 kPlaybackMaxPacket = 456;
 // Keep publication chunks at 32 slots; use a deeper ring for service jitter.
 constexpr std::size_t kCaptureSlots = 256;
-// Geometry proven by fw1814tone96_live; still experimental in this engine.
-constexpr std::size_t kTxPackets = 1280;
-constexpr std::size_t kTxHalfPackets = 640;
+// The standalone probe validated 1280/640. Reduce only the experimental
+// installed engine to the 80-ms ring / 40-ms halves used by the 48-kHz engine;
+// Logic monitoring with the longer ring remained noticeably delayed after
+// both shared-memory queues had been brought down to a few milliseconds.
+constexpr std::size_t kTxPackets = 640;
+constexpr std::size_t kTxHalfPackets = 320;
 constexpr std::size_t kPcmCapacityFrames = 262144;
 constexpr std::size_t kCapturePrefillFrames = 512;
 constexpr UInt32 kCycleLead = 4096;
@@ -142,7 +145,7 @@ bool run() {
         }
         std::cout << "FW1814 playback TX ring: " << kTxPackets
                   << " packets / " << kTxHalfPackets
-                  << "-packet halves (160 ms / 80 ms)\n";
+                  << "-packet halves (80 ms / 40 ms)\n";
         std::cout << "FW1814 capture RX ring: " << kCaptureSlots
                   << " packets / 32-packet publication chunks\n";
 

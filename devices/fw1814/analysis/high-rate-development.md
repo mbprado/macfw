@@ -557,8 +557,8 @@ seconds while retaining the 4096-frame READY reserve and the already-tested
 INPUT rate kick before making playback available. Check that its reported
 READY backlog approaches the reserve, that any pre-ready silent underrun does
 not continue during playback, and that the first sound and sustained audio
-remain intact. Measure physical loopback round-trip latency before changing
-the packet ring depth or touching the released 44.1/48-kHz engines.
+remain intact. Measure physical loopback round-trip latency before treating
+the setting as settled or touching the released 44.1/48-kHz engines.
 
 At the 1.6-second preload, Logic software monitoring still had noticeable
 latency. The next log showed only 2176 playback PCM frames queued (~23 ms),
@@ -573,3 +573,15 @@ its first 512-frame prefill. The released 44.1/48-kHz input behavior stays as is
 The next hardware run must verify that `queued` falls near 512 while Logic
 monitors, `cap-drop` stops growing after the one-time catch-up, and capture
 audio remains continuous once the prefill has completed.
+
+The capture catch-up test brought its steady queue down to 128–512 frames
+(~1–5 ms); playback PCM was 320–512 frames (~3–5 ms). Across the reported
+interval `cap-drop` and input zero-fill stopped increasing; TX underrun
+increased by only 64 frames in one interval, then stabilized. Logic software
+monitoring improved markedly, though some latency remained noticeable.
+The next experimental change halves the 96-kHz TX packet ring from 1280/640
+to 640/320 slots, an 80-ms ring with 40-ms refill halves. The 48-kHz engine
+already uses this ring duration; the working standalone 96-kHz probe used
+the longer one. This shorter 96-kHz packet schedule requires a fresh Mac
+test for first-onset integrity, sustained audio and new TX underruns; the
+prior 96-kHz packet geometry remains available in Git for comparison.
