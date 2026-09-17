@@ -683,3 +683,18 @@ first-start distortion occurred. Preserve this promising experiment while
 collecting both first and second startup logs, including the `live playback
 enabled` handoff line and the earliest two-second service statistics, before
 changing its timing again.
+
+A later log containing one 48 -> 44.1-kHz transition shows the handoff after
+1.27 s with 7056 PCM frames remaining. Its queue then stays around 7528–7560
+frames (~171 ms) across five two-second reports, with no new TX silence,
+PCM underrun or playback drops; 44.1 capture holds a small queue. In the
+previous especially responsive run the queue was only ~300 frames (~7 ms),
+after earlier cumulative TX underruns. The change in perceived latency has a
+real playback-queue counterpart here; the supplied log does not contain
+multiple transitions, so it cannot establish cumulative latency across rate
+switches or rule out a Logic buffer contribution at other rates. The next
+44.1-kHz experiment lowers the *live handoff reserve* from 8192 to 2048
+frames. It still preloads the full 88200 silent frames before ISO startup.
+Expect a handoff near one 320-packet TX refill (~1764 frames); test both the
+first start and several 48/44.1/96 switches for first-sound distortion and
+new TX underruns before accepting the smaller steady playback queue.

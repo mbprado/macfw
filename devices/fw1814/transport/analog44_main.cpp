@@ -49,7 +49,10 @@ constexpr std::size_t kWarmupPcmFrames = 2 * kRate;
 // Retain the hardware-proven ISO startup preload, but let its unused silence
 // drain before admitting live HAL frames. The normal TX/audio service loop
 // runs throughout; this only changes when the playback SHM is consumed.
-constexpr std::size_t kLivePcmReserveFrames = 8192;
+// One 320-packet TX refill consumes about 1764 frames at 44.1 kHz. Allow
+// live playback into PCM after the silent preload has fallen to roughly one
+// refill, instead of retaining ~170 ms of silence throughout the session.
+constexpr std::size_t kLivePcmReserveFrames = 2048;
 
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
