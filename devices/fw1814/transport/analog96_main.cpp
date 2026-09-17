@@ -44,10 +44,11 @@ constexpr std::size_t kCapturePrefillFrames = 512;
 constexpr UInt32 kCycleLead = 4096;
 constexpr UInt32 kCyclesPerSecond = 8000;
 constexpr std::uint64_t kAudioServicePeriodNs = 250000;
-// The 2-second preload left about 42k frames (~436 ms) queued when CoreAudio
-// playback began in the first clean 96-kHz run. Preserve the one-second
-// post-kick warmup, but start with 300 ms less buffered silence.
-constexpr std::size_t kSilentStartupFrames = 17 * kRate / 10;
+// The first clean 96-kHz run left 42k frames (~436 ms) queued at READY with
+// two seconds preloaded. A 1.7-second preload improved perceived latency but
+// remained too long. The one-second post-kick warmup is timed separately;
+// pre-ready TX underflow is silent, and a short reserve is topped up below.
+constexpr std::size_t kSilentStartupFrames = 8 * kRate / 5;
 constexpr std::size_t kMinReadySilenceFrames = 4096;
 
 volatile std::sig_atomic_t gStopRequested = 0;

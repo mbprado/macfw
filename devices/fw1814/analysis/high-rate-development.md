@@ -549,3 +549,13 @@ It reports the PCM backlog at READY and any pre-ready underrun. This is a
 bounded initial reduction of roughly 300 ms of excess queued silence based
 on the clean run; hardware must confirm onset, uninterrupted audio and the
 new measured round-trip latency before further reduction.
+
+The first 1.7-second preload improved perceived latency, but it remained
+noticeable. The next experimental step shortens the initial silence to 1.6
+seconds while retaining the 4096-frame READY reserve and the already-tested
+1280-slot TX packet ring. The 96-kHz engine still waits one second after the
+INPUT rate kick before making playback available. Check that its reported
+READY backlog approaches the reserve, that any pre-ready silent underrun does
+not continue during playback, and that the first sound and sustained audio
+remain intact. Measure physical loopback round-trip latency before changing
+the packet ring depth or touching the released 44.1/48-kHz engines.
