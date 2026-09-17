@@ -65,6 +65,9 @@ struct CaptureWindow {
 std::array<CaptureWindow, 24> gCaptureWindows{};
 std::size_t gCaptureWindowCount = 0;
 CFAbsoluteTime gCaptureStart = 0;
+std::uint64_t gAnalog1ToneFrames = 0;
+std::uint64_t gAnalog1PositiveCrossings = 0;
+bool gAnalog1WasNegative = false;
 bool gServiceHealthy = true;
 
 void serviceStream() {
@@ -77,12 +80,28 @@ void serviceStream() {
     gStreamer->service((cycleTime >> 12) & 0x1fffu);
     if (gCaptureRing && gCaptureDecoder && gCaptureStore) {
         gCaptureDecoder->service(*gCaptureRing, *gCaptureStore);
+        const double elapsed = CFAbsoluteTimeGetCurrent() - gCaptureStart;
+        const auto read = gCaptureStore->readFrame.load(std::memory_order_acquire);
+        const auto write = gCaptureStore->writeFrame.load(std::memory_order_acquire);
+        if (elapsed >= 0.5) {
+            constexpr float kHysteresis = 0.002f;
+            for (auto frame = read; frame < write; ++frame) {
+                const float value = gCaptureStore->samples[
+                    (frame % macfw::fw1814::hal::capture::kCapacityFrames) *
+                    macfw::fw1814::hal::capture::kInputChannels];
+                ++gAnalog1ToneFrames;
+                if (value < -kHysteresis) gAnalog1WasNegative = true;
+                else if (value > kHysteresis && gAnalog1WasNegative) {
+                    ++gAnalog1PositiveCrossings;
+                    gAnalog1WasNegative = false;
+                }
+            }
+        }
         // This standalone diagnostic has no HAL reader. Discard samples only
         // after counting/decoding them so the bounded shared ring cannot fill.
         gCaptureStore->readFrame.store(
             gCaptureStore->writeFrame.load(std::memory_order_acquire),
             std::memory_order_release);
-        const double elapsed = CFAbsoluteTimeGetCurrent() - gCaptureStart;
         if (gCaptureWindowCount < gCaptureWindows.size() &&
             elapsed >= (gCaptureWindowCount + 1) * 0.5) {
             gCaptureWindows[gCaptureWindowCount++] = {
@@ -708,6 +727,9 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
         gCaptureStore = captureStore.get();
         gCaptureWindowCount = 0;
         gCaptureStart = CFAbsoluteTimeGetCurrent();
+        gAnalog1ToneFrames = 0;
+        gAnalog1PositiveCrossings = 0;
+        gAnalog1WasNegative = false;
 
         std::cout << "*** " << (filePath.empty() ? "TONE" : "FILE")
                   << " ACTIVE on PCM position " << position
@@ -788,6 +810,13 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
                           << '\n';
                 previous = current;
             }
+            std::cout << "steady Analog1 waveform (after 0.5 s): frames="
+                      << gAnalog1ToneFrames
+                      << " positiveCrossings=" << gAnalog1PositiveCrossings
+                      << " estimatedHz=" << (gAnalog1ToneFrames
+                          ? 96000.0 * static_cast<double>(gAnalog1PositiveCrossings) /
+                              static_cast<double>(gAnalog1ToneFrames) : 0.0)
+                      << '\n';
             std::cout << "experimental capture input peaks (dBFS):";
             for (std::size_t physical = 0;
                  physical < captureDecoder.meterPeaks().size(); ++physical) {

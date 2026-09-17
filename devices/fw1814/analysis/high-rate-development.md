@@ -410,3 +410,27 @@ and counts metadata byte swaps over every processed chunk. Find whether the
 shortfall occurs during startup or persists through the run before using this
 path as reliable 96-kHz capture. The cause of the extra NODATA cycles is
 unknown from these counters alone.
+
+The half-second windows resolved that question. The first window carried 485
+data and 3259 NODATA packets, while every later window carried 3000 data and
+1000 NODATA packets, yielding approximately 96 kHz in each steady window.
+The device therefore has a startup capture interval dominated by NODATA
+after the rate kick, followed by stable 96-kHz packet formation for at least
+2.5 seconds in this test. The exact transition time within the first half
+second has not been measured. No malformed packets, invalid labels, DBC gaps,
+reordering, stale packets, timestamp regressions or dropped frames were
+reported; both PCRs and the original 48-kHz rate restored. Analog Input 1
+peaked at -25.46 dBFS with a 440 Hz signal, but amplitude alone does not
+verify the captured waveform frequency or uninterrupted audio. The production
+transport must withhold capture during startup and prime silent playback
+before delivering user audio; an experimental end-to-end input signal check
+remains useful before exposing 96 kHz in the HAL.
+
+The live probe now counts hysteretic positive crossings in the decoded
+Analog Input 1 samples after the first 0.5 seconds. It reports the captured
+frame count and an estimated tone frequency using the known 96-kHz sample
+rate. With the known 440 Hz input, a result close to 440 Hz would confirm
+that the steady input samples contain the expected waveform; this simple
+estimate is diagnostic and does not replace an audio quality or long-running
+CoreAudio capture test. The threshold is 0.002 full scale, so a very quiet
+signal might not produce a useful estimate.
