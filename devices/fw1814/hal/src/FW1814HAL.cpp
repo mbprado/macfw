@@ -76,8 +76,12 @@ int OpenStableShm(const char* name, std::size_t bytes) {
         return -1;
 
     struct stat st{};
+    // macOS POSIX SHM may report the mapped size rounded up to a VM page.
+    // Keep the existing mapping when it is large enough for this ABI; a
+    // strict equality check can unlink a live object and split the HAL from
+    // the transport process.
     if (fstat(fd, &st) == 0 && st.st_size >= 0 &&
-        static_cast<std::size_t>(st.st_size) == bytes) {
+        static_cast<std::size_t>(st.st_size) >= bytes) {
         return fd;
     }
 

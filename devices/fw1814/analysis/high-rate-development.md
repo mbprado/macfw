@@ -518,3 +518,20 @@ engine, and returns the available rates to 44.1/48 kHz. If the unit remains at
 96 kHz after an interrupted run, stop the service and use the guarded
 `fw1814init 48000 --execute` recovery only after verifying the device is in
 its operational personality.
+
+The first integrated 96-kHz playback test remained online and moved 192000
+CoreAudio and TX frames per two seconds, with no HAL playback drops, PCM
+underruns, TX silence or accumulating TX late polls, but playback sounded
+broken. The same Logic-exported 440-Hz recording played cleanly after
+switching the device back to 48 kHz; YouTube playback also sounded broken at
+96 kHz. This points to the 96-kHz playback path rather than the file. The
+capture ring filled while no CoreAudio input reads were reported in the
+provided log, so its drop counter cannot explain the playback symptom.
+An AIFF exported separately from Logic contained a continuous 440-Hz
+waveform; the log and export cannot yet establish identical capture intervals.
+The 96-kHz engine now anchors its TX cycle after the large silent preload and
+RX allocation, mirroring the standalone tone probe, and reports the setup
+delay before ISO servicing. If the setup consumes nearly the 4096-cycle lead,
+it refuses the kick. A separate HAL SHM size check now accepts macOS page
+rounding to avoid replacing a live shared-memory object. Both changes require
+macOS hardware validation; neither establishes that the audio issue is fixed.

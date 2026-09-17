@@ -99,15 +99,6 @@ bool run() {
         goto cleanup;
 
     {
-        UInt32 cycleTime = 0;
-        if ((*device.nativeHandle())->GetCycleTime(device.nativeHandle(), &cycleTime) !=
-            kIOReturnSuccess) {
-            std::cerr << "FW1814 GetCycleTime failed\n";
-            goto cleanup;
-        }
-        const UInt32 initialCycle = cycleCount(cycleTime);
-        const UInt32 firstCycle = (initialCycle + kCycleLead) % kCyclesPerSecond;
-
         macfw::PcmRingBuffer pcm(kPcmCapacityFrames,
                                  macfw::fw1814::kPlaybackPcmPositions);
         std::vector<std::int32_t> silence(
@@ -119,6 +110,18 @@ bool run() {
         }
         auto rx = macfw::AmdtpReceiveRing::create(
             device, kCaptureSlots, kCaptureMaxPacket);
+        // The startup PCM preload and RX allocation can take appreciable
+        // time. Anchor the 4096-cycle transmit lead only after they finish,
+        // as the working standalone tone probe does.
+        UInt32 cycleTime = 0;
+        if ((*device.nativeHandle())->GetCycleTime(device.nativeHandle(), &cycleTime) !=
+            kIOReturnSuccess) {
+            std::cerr << "FW1814 GetCycleTime failed\n";
+            goto cleanup;
+        }
+        const UInt32 initialCycle = cycleCount(cycleTime);
+        const CFAbsoluteTime cycleAnchorTime = CFAbsoluteTimeGetCurrent();
+        const UInt32 firstCycle = (initialCycle + kCycleLead) % kCyclesPerSecond;
         auto tx = macfw::fw1814::experimental::BlockingPcmTransmitRing96k::create(
             device, firstCycle, kTxPackets);
         if (!pcm.valid() || !rx || !tx) {
@@ -167,6 +170,23 @@ bool run() {
 
         if (!lifecycle.startIsoch(isochCallbackThread.runLoop())) {
             std::cerr << "FW1814 duplex ISO/CMP start failed\n";
+            goto cleanup;
+        }
+        UInt32 startedCycleTime = 0;
+        if ((*device.nativeHandle())->GetCycleTime(device.nativeHandle(),
+                                                    &startedCycleTime) != kIOReturnSuccess) {
+            std::cerr << "FW1814 GetCycleTime after ISO start failed\n";
+            goto cleanup;
+        }
+        const double isoStartDelayMs =
+            (CFAbsoluteTimeGetCurrent() - cycleAnchorTime) * 1000.0;
+        std::cout << "FW1814 96 kHz TX cycle anchor: " << initialCycle
+                  << " first=" << firstCycle
+                  << " at-ISO-start=" << cycleCount(startedCycleTime)
+                  << " setup-ms=" << isoStartDelayMs << '\n';
+        if (isoStartDelayMs >= 450.0) {
+            std::cerr << "FW1814 96 kHz TX lead nearly expired before audio servicing; "
+                         "refusing rate kick\n";
             goto cleanup;
         }
         isochCallbackThread.startPumping();
