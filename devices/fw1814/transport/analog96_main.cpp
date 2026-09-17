@@ -258,7 +258,11 @@ bool run() {
                               << " pcm=" << pcm.availableFrames()
                               << " tx-audio=" << txStats.framesFromBuffer
                               << " tx-silence=" << txStats.framesSilenced
+                              << " tx-nonzero=" << txStats.nonzeroFrames
+                              << " tx-peak=" << txStats.peakSample
                               << " tx-late=" << txStats.lateCyclePolls
+                              << " pcm-underrun=" << pcm.underrunFrames()
+                              << " pb-read=" << playbackPumpStats.framesRead
                               << " hal-calls=" << pb->doIOCalls.load(std::memory_order_relaxed)
                               << " hal-frames=" << pb->doIOFrames.load(std::memory_order_relaxed)
                               << " hal-drop=" << pb->droppedFrames.load(std::memory_order_relaxed)
@@ -269,6 +273,12 @@ bool run() {
                               << " (delta " << (captureFrames - lastCaptureFrames) << ')'
                               << " queued="
                               << macfw::fw1814::hal::capture::availableFrames(*captureShared.ring())
+                              << " cap-drop=" << captureShared.ring()->droppedFrames.load(std::memory_order_relaxed)
+                              << " cap-active=" << captureShared.ring()->active.load(std::memory_order_relaxed)
+                              << " hal-in-reads=" << captureShared.ring()->halReadCalls.load(std::memory_order_relaxed)
+                              << " hal-in-frames=" << captureShared.ring()->halFramesFromRing.load(std::memory_order_relaxed)
+                              << " hal-in-zero=" << captureShared.ring()->halZeroFilledFrames.load(std::memory_order_relaxed)
+                              << " hal-in-underrun=" << captureShared.ring()->halUnderrunEvents.load(std::memory_order_relaxed)
                               << " rx-touched=" << rx.touchedCount() << '/' << rx.packetCount()
                               << " chunks=" << rxStats.completedChunks
                               << " malformed=" << captureShared.ring()->malformedPackets.load()
