@@ -599,3 +599,28 @@ longer-duration and reconnect/rate-change checks; they are not evidence of
 sustained loss during the logged steady intervals. Keep this working
 experimental packet geometry until physical loopback round-trip latency is
 measured and any subsequent change has an isolated hardware comparison.
+
+## Logic rate switching while monitoring (2026-09-17)
+
+The Mac test switched a Logic project from 44.1 to 48 to 96 kHz while
+software monitoring. All three transitions completed, and the listener heard
+no dropouts or crackles. Perceived monitoring latency was bad at 44.1 kHz,
+best at 48 kHz, and good at 96 kHz.
+
+| Rate | Steady playback PCM queue | Capture queue in logged interval | Observation |
+| --- | --- | --- | --- |
+| 44.1 kHz | ~63472–63592 frames (~1.44 s) | 352–11640 frames (~8–264 ms) | Bad latency; capture DBC gaps rose 0 to 130 and one reorder appeared. |
+| 48 kHz | 1664 frames (~35 ms) | 512 frames (~11 ms) | Best perceived latency; capture gap and reorder counters stayed at zero. |
+| 96 kHz | 6528 frames (~68 ms) | 512–640 frames (~5–7 ms) | Good perceived latency; capture gap and reorder counters stayed at zero. |
+
+The large 44.1-kHz playback queue is consistent with its required
+88200-frame silent startup preload draining through the ordinary service
+loop. It is a strong explanation for the rate's relative monitoring delay,
+but this log is not a physical round-trip measurement. The earlier 44.1-kHz
+hardware A/B tests in `dynamic-rate-switching-success.md` found that reducing
+or resetting the preload and gating READY distorted playback. Preserve that
+validated startup sequence until an isolated hardware experiment demonstrates
+clean audio with less queued silence. Investigate the growing 44.1-kHz capture
+queue and DBC gaps independently; the log does not establish whether they
+contribute audibly to monitoring latency. Keep the measured 48/96-kHz paths
+as reference points for any subsequent latency changes.
