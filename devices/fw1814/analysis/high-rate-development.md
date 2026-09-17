@@ -667,5 +667,19 @@ the live SHM into PCM normally. Expect a temporary mute after selecting
 44.1 kHz; the log reports its duration and the PCM reserve at handoff.
 Hardware must confirm clean first sound, sustained playback, output-only
 latency, and S1/SW3 monitoring before this approach can replace the earlier
-hardware-validated ordering. If the first sound distorts, revert this
-experiment instead of reducing the 88200-frame initial preload.
+hardware-validated ordering. Repeated startup distortion blocks release of
+this experiment; reducing the 88200-frame initial preload is not a substitute.
+
+Initial Mac feedback on the live-playback handoff: 44.1-kHz monitoring and
+output-only playback had very low perceived latency and sounded clean on the
+second transport start. The first transport start produced broken audio; its
+startup log has not yet been captured, so the cause is unknown. In three
+steady two-second lines of the successful run the PCM queue fell from 304 to
+296 frames (~7 ms), `tx-silence`/`pcm-underrun` held at 706272 frames,
+`hal-drop` stayed zero, and capture advanced by exactly 88200 frames with
+no DBC gaps. The high cumulative TX-silence and capture-drop counters were
+already present before these steady lines; they cannot establish when the
+first-start distortion occurred. Preserve this promising experiment while
+collecting both first and second startup logs, including the `live playback
+enabled` handoff line and the earliest two-second service statistics, before
+changing its timing again.
