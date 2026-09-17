@@ -124,14 +124,31 @@ long-duration streaming or the CoreAudio engine.
 At 88.2 kHz the 16-event blocking cadence is variable. Linux's 44.1-kHz
 family SYT scheduler advances approximately 1386 ticks per interval modulo
 the 3072-tick bus cycle; a fixed 16/16/16/NODATA loop is specific to 96 kHz.
-The current transmit DCL ring repeats after 128 cycles, so an 88.2-kHz probe
-must preserve the scheduler phase and DBC across the ring boundary rather
-than repeat the 96-kHz pattern. A calculation using the Linux scheduler's
-initial phase (`67`) shows the phase, last SYT offset and 8-bit DBC all return
-to their initial values after 10,240 cycles (7056 data packets). That is much
-larger than the current 128-packet static transmit ring. Choose a bounded,
-phase-correct transmit strategy and check its resource cost before trying
-88.2-kHz duplex on hardware.
+The static 96-kHz probe's 128-cycle transmit ring cannot use that cadence.
+The experimental 88.2-kHz probe instead uses a 640-packet NuDCL ring with
+320-packet live refills: packet *lengths* repeat every 640 cycles (441 data
+packets), while DBC and SYT continue across each wrap. An offline check follows
+the full scheduler phase for 10,240 cycles (7056 data packets) and confirms
+that every repeated NuDCL slot keeps its original transfer length. This is a
+packet-schedule check, not proof of stream behavior on hardware.
+
+Build and run the guarded first hardware probe with the FW1814 transport
+stopped and the interface operational at 48 kHz:
+
+```sh
+make -C devices/fw1814/tools schedule88-check
+make -C devices/fw1814/tools duplex88-tool
+devices/fw1814/tools/fw1814capture88_duplex_blocking
+devices/fw1814/tools/fw1814capture88_duplex_blocking --execute --experimental-high-rate --raw
+```
+
+The read-only invocation checks device identity, INPUT rate, and free PCRs.
+The explicit execution sends silent 6-PCM/1-MIDI variable-cadence packets,
+attempts the OUTPUT-then-INPUT rate kick with both ISO directions running,
+and checks for 712-byte, 16-event capture packets with FDF `0x03` and
+8-byte NODATA packets. It then stops both streams, restores both PCRs and the
+original 48-kHz rate, and checks the final INPUT readback. Audio playback,
+capture channel mapping, and CoreAudio 88.2-kHz support remain unverified.
 
 ## First 96 kHz listening test
 

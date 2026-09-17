@@ -14,6 +14,7 @@ DUALCMP_TOOL := fw1814capture48_dualcmp
 DUALCMP_WAIT_TOOL := fw1814capture48_dualcmp_wait
 DUPLEX_BLOCKING_TOOL := fw1814capture48_duplex_blocking
 DUPLEX96_TOOL := fw1814capture96_duplex_blocking
+DUPLEX88_TOOL := fw1814capture88_duplex_blocking
 TONE96_TOOL := fw1814tone96
 TONE96_LIVE_TOOL := fw1814tone96_live
 OUTPUT_WATCH_TOOL := fw1814capture48_output_watch
@@ -34,6 +35,7 @@ DEVICE_PROBE_TOOL := fw1814deviceprobe
 	dualcmp-wait-tool dualcmp-wait-check dualcmp-wait dualcmp-wait-raw \
 	duplex-blocking-tool duplex-blocking-check duplex-blocking duplex-blocking-raw \
 	duplex96-tool duplex96-check duplex96 duplex96-raw \
+	duplex88-tool duplex88-check duplex88 duplex88-raw schedule88-check \
 	tone96-tool tone96-check tone96 tone96-raw \
 	tone96-live-tool tone96-live-check tone96-live \
 	output-watch-tool output-watch-check output-watch output-watch-raw \
@@ -187,6 +189,28 @@ duplex96: duplex96-tool
 
 duplex96-raw: duplex96-tool
 	./$(DUPLEX96_TOOL) --execute --experimental-high-rate --raw
+
+# Guarded 88.2 kHz duplex probe with a live 640/320-slot TX refill. Like the
+# 96 kHz probe, it is excluded from the default build and installed service.
+duplex88-tool: $(DUPLEX88_TOOL)
+
+$(DUPLEX88_TOOL): fw1814capture88_duplex_nodata.cpp ../transport/blocking_pcm_tx88.h $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814capture88_duplex_nodata.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+duplex88-check: duplex88-tool
+	./$(DUPLEX88_TOOL)
+
+duplex88: duplex88-tool
+	./$(DUPLEX88_TOOL) --execute --experimental-high-rate
+
+duplex88-raw: duplex88-tool
+	./$(DUPLEX88_TOOL) --execute --experimental-high-rate --raw
+
+# Offline proof that all immutable NuDCL send lengths match through the full
+# base-44.1 scheduler phase and that DBC continues through ring reuse.
+schedule88-check: test_88200_schedule.cpp
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) $< -o /tmp/macfw-fw1814-schedule88-check
+	/tmp/macfw-fw1814-schedule88-check
 
 # Experimental 96 kHz, phase-aligned 500 Hz tone in one playback position.
 # Uses the proven duplex probe's FCP reply matching and restore checks.
