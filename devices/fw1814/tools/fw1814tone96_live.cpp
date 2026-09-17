@@ -56,6 +56,15 @@ IOFireWireLibDeviceRef gServiceNative = nullptr;
 const macfw::AmdtpReceiveRing* gCaptureRing = nullptr;
 macfw::fw1814::experimental::CapturePump96k* gCaptureDecoder = nullptr;
 macfw::fw1814::hal::capture::SharedCaptureRing* gCaptureStore = nullptr;
+struct CaptureWindow {
+    double elapsed = 0;
+    std::uint64_t frames = 0;
+    std::uint64_t dataPackets = 0;
+    std::uint64_t noDataPackets = 0;
+};
+std::array<CaptureWindow, 24> gCaptureWindows{};
+std::size_t gCaptureWindowCount = 0;
+CFAbsoluteTime gCaptureStart = 0;
 bool gServiceHealthy = true;
 
 void serviceStream() {
@@ -73,6 +82,15 @@ void serviceStream() {
         gCaptureStore->readFrame.store(
             gCaptureStore->writeFrame.load(std::memory_order_acquire),
             std::memory_order_release);
+        const double elapsed = CFAbsoluteTimeGetCurrent() - gCaptureStart;
+        if (gCaptureWindowCount < gCaptureWindows.size() &&
+            elapsed >= (gCaptureWindowCount + 1) * 0.5) {
+            gCaptureWindows[gCaptureWindowCount++] = {
+                elapsed,
+                gCaptureStore->decodedFrames.load(std::memory_order_relaxed),
+                gCaptureStore->decodedPackets.load(std::memory_order_relaxed),
+                gCaptureDecoder->stats().noDataPackets};
+        }
     }
 }
 
@@ -688,6 +706,8 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
         gCaptureRing = &receiveRing;
         gCaptureDecoder = &captureDecoder;
         gCaptureStore = captureStore.get();
+        gCaptureWindowCount = 0;
+        gCaptureStart = CFAbsoluteTimeGetCurrent();
 
         std::cout << "*** " << (filePath.empty() ? "TONE" : "FILE")
                   << " ACTIVE on PCM position " << position
@@ -726,37 +746,61 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
         gCaptureRing = nullptr;
         gCaptureDecoder = nullptr;
         gCaptureStore = nullptr;
-        success = dumpReceive(receiveRing, raw);
-        captureDecoder.service(receiveRing, *captureStore);
-        std::cout << "experimental 96 kHz capture decode: frames="
-                  << captureStore->decodedFrames.load(std::memory_order_relaxed)
-                  << " malformed="
-                  << captureStore->malformedPackets.load(std::memory_order_relaxed)
-                  << " invalidLabels="
-                  << captureStore->invalidLabels.load(std::memory_order_relaxed)
-                  << " dbcGaps=" << captureDecoder.stats().dbcDiscontinuities
-                  << '\n';
-        std::cout << "continuous capture: decodedPackets="
-                  << captureStore->decodedPackets.load(std::memory_order_relaxed)
-                  << " noData=" << captureDecoder.stats().noDataPackets
-                  << " completedChunks=" << captureDecoder.stats().completedChunks
-                  << " reordered=" << captureDecoder.stats().reorderedPackets
-                  << " stale=" << captureDecoder.stats().stalePackets
-                  << " timestampRegressions=" << captureDecoder.stats().timestampRegressions
-                  << " droppedFrames=" << captureStore->droppedFrames.load(std::memory_order_relaxed)
-                  << '\n';
-        std::cout << "experimental capture input peaks (dBFS):";
-        for (std::size_t physical = 0;
-             physical < captureDecoder.meterPeaks().size(); ++physical) {
-            const float peak = captureDecoder.meterPeaks()[physical];
-            const double db = peak > 0.0f
-                ? 20.0 * std::log10(static_cast<double>(peak)) : -120.0;
-            std::cout << " Analog" << (physical + 1) << '=' << db;
-        }
-        std::cout << '\n';
+        {
+            success = dumpReceive(receiveRing, raw);
+            captureDecoder.service(receiveRing, *captureStore);
+            const double captureElapsed = CFAbsoluteTimeGetCurrent() - gCaptureStart;
+            const CaptureWindow captureEnd{
+                captureElapsed,
+                captureStore->decodedFrames.load(std::memory_order_relaxed),
+                captureStore->decodedPackets.load(std::memory_order_relaxed),
+                captureDecoder.stats().noDataPackets};
+            std::cout << "experimental 96 kHz capture decode: frames="
+                      << captureStore->decodedFrames.load(std::memory_order_relaxed)
+                      << " malformed="
+                      << captureStore->malformedPackets.load(std::memory_order_relaxed)
+                      << " invalidLabels="
+                      << captureStore->invalidLabels.load(std::memory_order_relaxed)
+                      << " dbcGaps=" << captureDecoder.stats().dbcDiscontinuities
+                      << '\n';
+            std::cout << "continuous capture: decodedPackets="
+                      << captureStore->decodedPackets.load(std::memory_order_relaxed)
+                      << " noData=" << captureDecoder.stats().noDataPackets
+                      << " completedChunks=" << captureDecoder.stats().completedChunks
+                      << " reordered=" << captureDecoder.stats().reorderedPackets
+                      << " stale=" << captureDecoder.stats().stalePackets
+                      << " timestampRegressions=" << captureDecoder.stats().timestampRegressions
+                      << " droppedFrames=" << captureStore->droppedFrames.load(std::memory_order_relaxed)
+                      << " metadataByteSwaps=" << captureDecoder.stats().metadataByteSwaps
+                      << '\n';
+            std::cout << "capture windows (elapsed seconds, data/NODATA packets, effective Hz):\n";
+            CaptureWindow previous{};
+            for (std::size_t i = 0; i <= gCaptureWindowCount; ++i) {
+                const CaptureWindow& current = i == gCaptureWindowCount
+                    ? captureEnd : gCaptureWindows[i];
+                const double interval = current.elapsed - previous.elapsed;
+                if (interval < 0.01) continue;
+                std::cout << "    " << previous.elapsed << '-' << current.elapsed
+                          << " s: data=" << (current.dataPackets - previous.dataPackets)
+                          << " NODATA=" << (current.noDataPackets - previous.noDataPackets)
+                          << " effectiveHz=" << static_cast<unsigned>(
+                              (current.frames - previous.frames) / interval + 0.5)
+                          << '\n';
+                previous = current;
+            }
+            std::cout << "experimental capture input peaks (dBFS):";
+            for (std::size_t physical = 0;
+                 physical < captureDecoder.meterPeaks().size(); ++physical) {
+                const float peak = captureDecoder.meterPeaks()[physical];
+                const double db = peak > 0.0f
+                    ? 20.0 * std::log10(static_cast<double>(peak)) : -120.0;
+                std::cout << " Analog" << (physical + 1) << '=' << db;
+            }
+            std::cout << '\n';
 
-        std::cout << "duplex dynamic PCM experiment: "
-                  << (success ? "96 kHz PACKETS RECEIVED" : "NO VALID 96 kHz PACKETS") << '\n';
+            std::cout << "duplex dynamic PCM experiment: "
+                      << (success ? "96 kHz PACKETS RECEIVED" : "NO VALID 96 kHz PACKETS") << '\n';
+        }
 
 cleanup_stream:
         gCaptureRing = nullptr;

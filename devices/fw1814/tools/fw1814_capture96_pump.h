@@ -24,6 +24,7 @@ public:
         std::uint64_t stalePackets = 0;
         std::uint64_t completedChunks = 0;
         std::uint64_t noDataPackets = 0;
+        std::uint64_t metadataByteSwaps = 0;
     };
 
     std::size_t service(const macfw::AmdtpReceiveRing& rx,
@@ -77,6 +78,7 @@ private:
         for (std::size_t index = begin; index < end; ++index) {
             const auto& slot = rx.slot(index);
             if (!slot.touched()) continue;
+            if (slot.metadataByteSwapped) ++stats_.metadataByteSwaps;
             if (slot.packetLength() > slot.capacity) {
                 out.malformedPackets.fetch_add(1, std::memory_order_relaxed);
                 continue;

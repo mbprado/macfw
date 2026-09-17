@@ -396,3 +396,17 @@ grow well beyond 768, the packet count tracks elapsed time, and no malformed,
 invalid-label, DBC-gap, or dropped-frame counters increase. Rate and PCR
 restoration must still pass. Initial chunk synchronization and the realtime
 cost of decoding on the playback service loop require hardware validation.
+
+The first full-run test decoded 247760 frames from 15485 data packets over
+742 completed 32-slot chunks (23744 bus cycles), plus 8259 NODATA packets.
+The final 64 slots looked healthy at 48 data and 16 NODATA, and malformed,
+invalid-label, DBC-gap, reordering, stale, timestamp-regression and dropped
+frame counters were all zero. Nevertheless, 247760 frames in approximately
+2.968 seconds of completed cycles is only about 83.5 kHz; sustained 96 kHz
+would carry about 285k frames over that interval. The final snapshot therefore
+cannot represent the entire run. The live probe now reports half-second
+capture windows with data packets, NODATA packets and effective frame rate,
+and counts metadata byte swaps over every processed chunk. Find whether the
+shortfall occurs during startup or persists through the run before using this
+path as reliable 96-kHz capture. The cause of the extra NODATA cycles is
+unknown from these counters alone.
