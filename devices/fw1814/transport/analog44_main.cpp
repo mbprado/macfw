@@ -46,6 +46,10 @@ constexpr std::uint64_t kAudioServicePeriodNs = 250000;
 constexpr double kPi = 3.14159265358979323846;
 constexpr std::size_t kPrimePcmFrames = 441 * 8;
 constexpr std::size_t kWarmupPcmFrames = 2 * kRate;
+// Retain the hardware-proven ISO startup preload, but let its unused silence
+// drain before admitting live HAL frames. The normal TX/audio service loop
+// runs throughout; this only changes when the playback SHM is consumed.
+constexpr std::size_t kLivePcmReserveFrames = 8192;
 
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
@@ -328,14 +332,29 @@ bool run() {
             CFAbsoluteTime lastGenerationCheck = CFAbsoluteTimeGetCurrent();
             CFAbsoluteTime lastStatus = lastGenerationCheck;
             std::uint64_t lastCaptureFrames = 0;
+            bool awaitingLivePlayback = true;
+            const CFAbsoluteTime playbackWaitStart = CFAbsoluteTimeGetCurrent();
 
             while (!gStopRequested) {
                 pacer.wait();
 
                 if (!playbackOnlyDiagnostic)
                     capturePump.service(rx, *captureShared.ring());
-                drainPlayback(*playbackShared.ring(), pcm, audio, mapped,
-                              &playbackPumpStats);
+                if (awaitingLivePlayback) {
+                    // CoreAudio can write during the preload. Drop those old
+                    // frames so the first admitted sample is current audio.
+                    playbackShared.discardBacklog();
+                    if (pcm.availableFrames() <= kLivePcmReserveFrames) {
+                        awaitingLivePlayback = false;
+                        std::cout << "FW1814 44.1 live playback enabled after "
+                                  << CFAbsoluteTimeGetCurrent() - playbackWaitStart
+                                  << " s; PCM reserve=" << pcm.availableFrames()
+                                  << " frames\n";
+                    }
+                } else {
+                    drainPlayback(*playbackShared.ring(), pcm, audio, mapped,
+                                  &playbackPumpStats);
+                }
 
                 UInt32 serviceCycleTime = 0;
                 if ((*native)->GetCycleTime(native, &serviceCycleTime) == kIOReturnSuccess)

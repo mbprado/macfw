@@ -653,3 +653,19 @@ queue stops filling, and DBC gaps stabilize before considering a reduction
 of the 44.1-kHz playback preload. If those numbers still diverge, the extra
 logging distinguishes this specific replay hypothesis from other capture
 timing faults.
+
+The post-reboot comparison returned 48/96-kHz monitoring latency to its
+previous state. The 44.1-kHz capture stream produced exactly 88200 frames
+and 500 completed chunks every two seconds, with a small steady queue and
+no new DBC gaps, but 44.1 playback still held ~63600 PCM frames (~1.44 s)
+even for playback alone. The next 44.1-kHz experiment retains the proven
+88200-frame silence preload and starts the same ordinary audio service loop
+immediately after the stream kick. While that preload drains, it discards
+CoreAudio playback SHM backlog rather than adding incoming audio behind the
+silence. When no more than 8192 silent PCM frames remain, it starts draining
+the live SHM into PCM normally. Expect a temporary mute after selecting
+44.1 kHz; the log reports its duration and the PCM reserve at handoff.
+Hardware must confirm clean first sound, sustained playback, output-only
+latency, and S1/SW3 monitoring before this approach can replace the earlier
+hardware-validated ordering. If the first sound distorts, revert this
+experiment instead of reducing the 88200-frame initial preload.
