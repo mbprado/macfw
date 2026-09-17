@@ -533,5 +533,19 @@ The 96-kHz engine now anchors its TX cycle after the large silent preload and
 RX allocation, mirroring the standalone tone probe, and reports the setup
 delay before ISO servicing. If the setup consumes nearly the 4096-cycle lead,
 it refuses the kick. A separate HAL SHM size check now accepts macOS page
-rounding to avoid replacing a live shared-memory object. Both changes require
-macOS hardware validation; neither establishes that the audio issue is fixed.
+rounding to avoid replacing a live shared-memory object. The next FW1814
+hardware test confirmed clean 96-kHz playback and monitoring: setup took
+23 ms of the 512-ms TX lead; the engine sustained 192000 TX frames per two
+seconds with no HAL playback drops, PCM underruns, accumulated late polls,
+capture DBC gaps, or capture reorders in that run. This establishes a usable
+96-kHz audio path, while latency and longer-run recovery remain untested.
+
+The same clean run held 41856 queued PCM frames at steady state, about 436 ms
+before even accounting for the DMA packet ring and CoreAudio buffering. The
+user reported noticeable latency. The experimental engine now preloads 1.7
+seconds of silence rather than 2 seconds and, before opening HAL playback,
+tops up to at least 4096 silent frames if startup consumed its preload.
+It reports the PCM backlog at READY and any pre-ready underrun. This is a
+bounded initial reduction of roughly 300 ms of excess queued silence based
+on the clean run; hardware must confirm onset, uninterrupted audio and the
+new measured round-trip latency before further reduction.

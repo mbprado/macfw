@@ -44,7 +44,11 @@ constexpr std::size_t kCapturePrefillFrames = 512;
 constexpr UInt32 kCycleLead = 4096;
 constexpr UInt32 kCyclesPerSecond = 8000;
 constexpr std::uint64_t kAudioServicePeriodNs = 250000;
-constexpr std::size_t kSilentStartupFrames = 2 * kRate;
+// The 2-second preload left about 42k frames (~436 ms) queued when CoreAudio
+// playback began in the first clean 96-kHz run. Preserve the one-second
+// post-kick warmup, but start with 300 ms less buffered silence.
+constexpr std::size_t kSilentStartupFrames = 17 * kRate / 10;
+constexpr std::size_t kMinReadySilenceFrames = 4096;
 
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
@@ -349,6 +353,23 @@ bool run() {
         if (startupOk) {
             if (!control.start(device, kRate))
                 std::cerr << "warning: FW1814 control socket unavailable\n";
+            // Only the audio thread reads this ring. Before releasing its HAL
+            // producer, top up a short silence reserve if a slow FCP exchange
+            // consumed more of the startup preload than expected.
+            const auto queued = pcm.availableFrames();
+            if (queued < kMinReadySilenceFrames &&
+                pcm.write(silence.data(), kMinReadySilenceFrames - queued) !=
+                    kMinReadySilenceFrames - queued) {
+                std::cerr << "FW1814 96 kHz ready silence top-up failed\n";
+                startupOk = false;
+            }
+            std::cout << "FW1814 96 kHz playback reserve at READY: "
+                      << pcm.availableFrames() << " frames ("
+                      << pcm.availableFrames() * 1000 / kRate << " ms); "
+                      << "pre-ready TX underrun=" << pcm.underrunFrames()
+                      << " frames\n";
+        }
+        if (startupOk) {
             releasePlayback.store(true, std::memory_order_release);
             signalEngineReady();
             playbackShared.ring()->active.store(1, std::memory_order_release);
