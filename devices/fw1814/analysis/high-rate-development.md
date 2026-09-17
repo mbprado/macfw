@@ -446,3 +446,21 @@ DMA stops. It prints the dominant frequency and amplitude, amplitude near
 440 Hz and near the observed 1969 Hz crossing count, and RMS. Compare these
 values before judging whether the captured 440 Hz waveform is intact; do
 not infer capture fidelity from packet/DBC counters alone.
+
+The earlier source was an audio signal, rather than the pure wave assumed by
+the crossing-count test. With a raw 440 Hz waveform connected to Analog Input
+1, the test decoded exactly 1100 positive crossings over 240000 steady frames
+(2.5 seconds), estimating 440 Hz. The 8192-frame spectrum placed the dominant
+peak in the 445.3125 Hz bin nearest 440 Hz, at approximately 0.020 amplitude;
+the bin near 1969 Hz measured about 3.5e-7. The measured Analog1 peak was
+-32.91 dBFS. Every half-second capture window after startup carried 3000
+data and 1000 NODATA packets at approximately 96 kHz. There were no malformed
+packets, invalid labels, DBC gaps, reordered or stale packets, dropped frames
+or byte-swapped metadata in this run, and both PCRs and 48-kHz rate restored.
+One timestamp regression was reported; its cause and placement have not been
+verified. The probe now prints the first previous/current receive timestamps
+when this counter is nonzero, so a later run can distinguish a timer wrap
+from genuine packet reordering. These results validate the steady standalone
+96-kHz input waveform
+for Analog Input 1, alongside the previously tested analog playback, while
+the production HAL and rate-change lifecycle remain untested at 96 kHz.

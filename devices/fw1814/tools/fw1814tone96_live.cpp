@@ -856,6 +856,12 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
                       << " droppedFrames=" << captureStore->droppedFrames.load(std::memory_order_relaxed)
                       << " metadataByteSwaps=" << captureDecoder.stats().metadataByteSwaps
                       << '\n';
+            if (captureDecoder.stats().timestampRegressions) {
+                std::cout << "first timestamp regression: previous=0x"
+                          << std::hex << captureDecoder.stats().firstRegressionPreviousTimestamp
+                          << " current=0x" << captureDecoder.stats().firstRegressionCurrentTimestamp
+                          << std::dec << '\n';
+            }
             std::cout << "capture windows (elapsed seconds, data/NODATA packets, effective Hz):\n";
             CaptureWindow previous{};
             for (std::size_t i = 0; i <= gCaptureWindowCount; ++i) {

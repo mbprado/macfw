@@ -20,6 +20,8 @@ public:
     struct Stats {
         std::uint64_t dbcDiscontinuities = 0;
         std::uint64_t timestampRegressions = 0;
+        std::uint32_t firstRegressionPreviousTimestamp = 0;
+        std::uint32_t firstRegressionCurrentTimestamp = 0;
         std::uint64_t reorderedPackets = 0;
         std::uint64_t stalePackets = 0;
         std::uint64_t completedChunks = 0;
@@ -203,8 +205,13 @@ private:
         haveExpectedDbc_ = true;
 
         if (haveTimestamp_ &&
-            static_cast<std::int32_t>(candidate.timestamp - lastTimestamp_) <= 0)
+            static_cast<std::int32_t>(candidate.timestamp - lastTimestamp_) <= 0) {
+            if (stats_.timestampRegressions == 0) {
+                stats_.firstRegressionPreviousTimestamp = lastTimestamp_;
+                stats_.firstRegressionCurrentTimestamp = candidate.timestamp;
+            }
             ++stats_.timestampRegressions;
+        }
         lastTimestamp_ = candidate.timestamp;
         haveTimestamp_ = true;
 
