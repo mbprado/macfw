@@ -9,12 +9,13 @@ HAL_INCLUDE := ../hal/include
 
 ANALOG48 := fw1814analog48
 ANALOG44 := fw1814analog44
+ANALOG96 := fw1814analog96
 SHM_TEST := fw1814shmtest
 SUPERVISOR := fw1814supervisor
 DUPLEX44_PROBE := fw1814duplex44
 TONE44_PROBE := fw1814tone44
 
-.PHONY: all runtime analog48 analog44 shm-test supervisor duplex44-probe tone44-probe clean
+.PHONY: all runtime analog48 analog44 analog96-experimental shm-test supervisor duplex44-probe tone44-probe clean
 
 all: $(ANALOG48) $(ANALOG44) $(SHM_TEST) $(SUPERVISOR) $(DUPLEX44_PROBE) $(TONE44_PROBE)
 
@@ -38,6 +39,20 @@ $(ANALOG44): analog44_main.cpp blocking_pcm_tx44.h capture_pump44.h \
 	../hal/include/macfw_fw1814_capture_shm.h $(LIBMACFW)
 	$(CXX) $(CXXFLAGS) -I$(LIBMACFW_INCLUDE) -I$(DEVICE_INCLUDE) -I$(HAL_INCLUDE) \
 		analog44_main.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+# Explicit build only. This engine is neither installed nor selected by the
+# supervisor until the HAL rate gate and startup lifecycle are validated.
+$(ANALOG96): analog96_main.cpp ../tools/fw1814_pcm96_tx.h \
+	../tools/fw1814_pcm96_stream.h ../tools/fw1814_capture96_pump.h \
+	duplex_lifecycle.h engine_ready.h fw1814_control_server.h playback_pump.h realtime_service.h shared_io.h \
+	../channel_map.h ../fcp_control.h ../special_mixer.h ../special_mixer_model.h \
+	../hal/include/macfw_fw1814_hal_shm.h ../hal/include/macfw_fw1814_capture_shm.h $(LIBMACFW)
+	$(CXX) $(CXXFLAGS) -I$(LIBMACFW_INCLUDE) -I$(DEVICE_INCLUDE) -I$(HAL_INCLUDE) \
+		analog96_main.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+analog96-experimental:
+	$(MAKE) -C ../../fw410/lib libmacfw.a
+	$(MAKE) $(ANALOG96)
 
 $(SHM_TEST): shm_test.cpp ../hal/include/macfw_fw1814_hal_shm.h \
 	../hal/include/macfw_fw1814_capture_shm.h
@@ -70,4 +85,4 @@ duplex44-probe: $(DUPLEX44_PROBE)
 tone44-probe: $(TONE44_PROBE)
 
 clean:
-	rm -f $(ANALOG48) $(ANALOG44) $(SHM_TEST) $(SUPERVISOR) $(DUPLEX44_PROBE) $(TONE44_PROBE)
+	rm -f $(ANALOG48) $(ANALOG44) $(ANALOG96) $(SHM_TEST) $(SUPERVISOR) $(DUPLEX44_PROBE) $(TONE44_PROBE)

@@ -464,3 +464,24 @@ from genuine packet reordering. These results validate the steady standalone
 96-kHz input waveform
 for Analog Input 1, alongside the previously tested analog playback, while
 the production HAL and rate-change lifecycle remain untested at 96 kHz.
+
+## Guarded production transport prototype
+
+`make -C devices/fw1814/transport analog96-experimental` builds a separate
+`fw1814analog96` executable using the proven 96-kHz blocking TX and capture
+decoder. It is excluded from the normal `all`, `runtime`, installation and
+supervisor paths. Execution requires the explicit `--experimental-high-rate`
+argument, a stopped FW1814 service, and a playback shared ring already set to
+96 kHz. The released HAL still accepts only 44.1/48 kHz, so this first stage
+is a build and integration review target rather than a working CoreAudio
+rate option.
+
+The prototype preflights the device at the known 48-kHz baseline, preloads
+two seconds of silent PCM, starts the audio service thread before the 4096-cycle
+TX lead and FCP kick, sends OUTPUT 96 kHz then INPUT 96 kHz 100 ms later,
+withholds capture for 500 ms after the kick, and waits another 500 ms before
+publishing playback readiness. It restores 48 kHz after stopping both ISO
+directions and restoring PCRs when the bus generation is unchanged. This
+startup and restore path has not yet been compiled or run on macOS; validate
+the build first, then implement an opt-in HAL/supervisor rate gate and test
+controlled rate switching before offering 96 kHz to CoreAudio users.
