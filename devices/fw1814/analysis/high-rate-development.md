@@ -585,3 +585,17 @@ already uses this ring duration; the working standalone 96-kHz probe used
 the longer one. This shorter 96-kHz packet schedule requires a fresh Mac
 test for first-onset integrity, sustained audio and new TX underruns; the
 prior 96-kHz packet geometry remains available in Git for comparison.
+
+The FW1814 Mac test of the 640/320-slot TX ring found Logic software
+monitoring usable, though some delay remains audible. During sustained
+playback the PCM queue stayed at 512–768 frames (~5–8 ms), and CoreAudio
+playback drops and cumulative TX late polls did not grow. Capture initially
+showed 3648 queued frames (~38 ms), then recovered to 640 (~7 ms) after a
+one-time stale-buffer catch-up. That transition added 4448 capture dropped
+frames, 896 input zero-filled frames, 4 DBC gaps and 15 reordered packets;
+those counters then stabilized in the provided log. TX silence/PCM underrun
+grew by 128 frames once, then also stabilized. These transients warrant
+longer-duration and reconnect/rate-change checks; they are not evidence of
+sustained loss during the logged steady intervals. Keep this working
+experimental packet geometry until physical loopback round-trip latency is
+measured and any subsequent change has an isolated hardware comparison.
