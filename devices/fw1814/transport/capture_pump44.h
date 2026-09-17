@@ -25,6 +25,7 @@ public:
         std::uint64_t reorderedPackets = 0;
         std::uint64_t stalePackets = 0;
         std::uint64_t completedChunks = 0;
+        std::uint64_t repeatedTerminalTimestamps = 0;
         std::uint64_t noDataPackets = 0;
     };
 
@@ -44,10 +45,21 @@ public:
             const std::uint64_t signature =
                 (static_cast<std::uint64_t>(terminal.timestamp) << 32) |
                 static_cast<std::uint64_t>(terminal.isoHeader);
-            if (!terminal.touched() || terminal.timestamp == 0 ||
-                signature == lastChunkSignature_[chunk])
+            if (!terminal.touched() || terminal.timestamp == 0)
                 continue;
 
+            // A DMA update can expose a changed terminal header with the old
+            // completion timestamp. That is not a new 32-packet publication:
+            // replaying it can decode more than 44100 frames per second.
+            if (terminal.timestamp == lastChunkTimestamp_[chunk]) {
+                if (signature != lastChunkSignature_[chunk]) {
+                    ++stats_.repeatedTerminalTimestamps;
+                    lastChunkSignature_[chunk] = signature;
+                }
+                continue;
+            }
+
+            lastChunkTimestamp_[chunk] = terminal.timestamp;
             lastChunkSignature_[chunk] = signature;
             ++stats_.completedChunks;
             totalFrames += processChunk(rx, begin, end, out);
@@ -230,6 +242,7 @@ private:
     }
 
     std::array<std::uint64_t, 8> lastChunkSignature_{};
+    std::array<std::uint32_t, 8> lastChunkTimestamp_{};
     Stats stats_{};
     bool haveExpectedDbc_ = false;
     std::uint8_t expectedDbc_ = 0;

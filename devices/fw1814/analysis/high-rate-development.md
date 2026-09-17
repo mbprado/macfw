@@ -636,3 +636,20 @@ buffering; a rising capture queue with fewer HAL input reads or unexpected
 decoded frames points to a separate input timing problem. These counters do
 not change stream behavior and avoid repeating the previously distorted
 44.1-kHz warm-up variants before identifying which side dominates the delay.
+
+In a subsequent 44.1-kHz monitoring run, the playback queue stayed near
+61968–61984 frames (~1.4 s) with zero PCM underruns while both `pb-read` and
+`tx-audio` advanced by 88200 frames per two seconds. The capture queue filled
+to ~32528 frames; decoded capture briefly jumped by 124984 frames in two
+seconds (the expected amount is 88200), DBC gaps rose by hundreds, and capture
+drops increased. That points to two distinct issues: persistent playback
+buffering and a receive-side overcount/replay or publication fault. The 44.1
+decoder now accepts a 32-slot completion only when its terminal timestamp
+changes. A header change with the previous timestamp no longer replays the
+entire chunk. `repeat-ts` counts such header changes, and `ts-regress` reports
+packet timestamp regressions. Confirm on the Mac that `capture (delta ...)`
+returns to ~88200 per two seconds, `chunks` advances by ~500, the capture
+queue stops filling, and DBC gaps stabilize before considering a reduction
+of the 44.1-kHz playback preload. If those numbers still diverge, the extra
+logging distinguishes this specific replay hypothesis from other capture
+timing faults.

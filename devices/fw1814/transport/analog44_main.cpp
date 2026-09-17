@@ -392,10 +392,12 @@ bool run() {
                               << " hal-in-underrun=" << captureShared.ring()->halUnderrunEvents.load(std::memory_order_relaxed)
                               << " rx-touched=" << rx.touchedCount() << '/' << rx.packetCount()
                               << " chunks=" << rxStats.completedChunks
+                              << " repeat-ts=" << rxStats.repeatedTerminalTimestamps
                               << " malformed=" << captureShared.ring()->malformedPackets.load()
                               << " invalid=" << captureShared.ring()->invalidLabels.load()
                               << " nodata=" << rxStats.noDataPackets
                               << " dbc-gap=" << rxStats.dbcDiscontinuities
+                              << " ts-regress=" << rxStats.timestampRegressions
                               << " reorder=" << rxStats.reorderedPackets
                               << " stale=" << rxStats.stalePackets << '\n';
                     lastCaptureFrames = captureFrames;
