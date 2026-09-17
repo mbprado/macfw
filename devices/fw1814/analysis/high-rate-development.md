@@ -468,13 +468,10 @@ the production HAL and rate-change lifecycle remain untested at 96 kHz.
 ## Guarded production transport prototype
 
 `make -C devices/fw1814/transport analog96-experimental` builds a separate
-`fw1814analog96` executable using the proven 96-kHz blocking TX and capture
-decoder. It is excluded from the normal `all`, `runtime`, installation and
-supervisor paths. Execution requires the explicit `--experimental-high-rate`
-argument, a stopped FW1814 service, and a playback shared ring already set to
-96 kHz. The released HAL still accepts only 44.1/48 kHz, so this first stage
-is a build and integration review target rather than a working CoreAudio
-rate option.
+`fw1814analog96` executable using the validated 96-kHz blocking TX and capture
+decoder. It is excluded from the normal `all`, `runtime` and release package.
+The executable compiled on the FW1814 test Mac. Its supervised CoreAudio
+start and rate-change lifecycle remain untested on hardware.
 
 The prototype preflights the device at the known 48-kHz baseline, preloads
 two seconds of silent PCM, starts the audio service thread before the 4096-cycle
@@ -482,6 +479,42 @@ TX lead and FCP kick, sends OUTPUT 96 kHz then INPUT 96 kHz 100 ms later,
 withholds capture for 500 ms after the kick, and waits another 500 ms before
 publishing playback readiness. It restores 48 kHz after stopping both ISO
 directions and restoring PCRs when the bus generation is unchanged. This
-startup and restore path has not yet been compiled or run on macOS; validate
-the build first, then implement an opt-in HAL/supervisor rate gate and test
-controlled rate switching before offering 96 kHz to CoreAudio users.
+startup and restore path has not yet been run on hardware.
+
+## Opt-in CoreAudio integration (experimental)
+
+Build all FW1814 artifacts and the separate engine, then preflight and install
+the test stack with the device connected:
+
+```sh
+make fw1814-experimental96
+sudo make fw1814-install-experimental96
+```
+
+The opt-in installer validates hardware and **all** binaries before changing
+the HAL or service. It installs the 96-kHz engine and a root-owned, non-writable
+marker at `/Library/Application Support/macfw/fw1814/enable-96-experimental`.
+Only when that marker exists do the HAL and supervisor accept 96 kHz. CoreAudio
+advertises 96 kHz for input and output, while the supervisor first initializes
+the known 48-kHz baseline and lets the engine perform the duplex 96-kHz kick.
+The usual `sudo make fw1814-install` removes the opt-in marker and engine;
+normal installation and release packages continue at 44.1/48 kHz.
+
+Start with no audio clients, then select 96 kHz for macfw FW1814 in Audio MIDI
+Setup. Confirm the supervisor log reports the experimental engine ONLINE and
+the device is usable for both playback and capture. Switch back to 48 kHz and
+verify the rate restores and the 48-kHz engine starts. Test a 440 Hz playback
+signal and a 440 Hz analog input at 96 kHz, listening for missing onset,
+dropouts or distortion. Record any failures and the service log:
+
+```sh
+tail -n 120 /Library/Logs/macfw-fw1814-transport.log
+```
+
+To roll back, close any FW1814 audio clients, run `sudo make fw1814-install`
+with the same built tree and connected FW1814, and reopen the device. This
+replaces the experimental service and HAL, removes the marker and the 96-kHz
+engine, and returns the available rates to 44.1/48 kHz. If the unit remains at
+96 kHz after an interrupted run, stop the service and use the guarded
+`fw1814init 48000 --execute` recovery only after verifying the device is in
+its operational personality.

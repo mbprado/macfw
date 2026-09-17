@@ -64,7 +64,7 @@ bool run() {
     SharedPlaybackReader playbackShared;
     if (!playbackShared.open()) {
         std::cerr << "FW1814 playback shared ring unavailable; "
-                     "experimental 96 kHz HAL integration is not yet enabled\n";
+                     "install the guarded 96 kHz HAL and open the CoreAudio device\n";
         return false;
     }
     if (playbackShared.ring()->sampleRate.load(std::memory_order_acquire) != kRate) {
@@ -377,7 +377,7 @@ cleanup:
 int main(int argc, char** argv) {
     if (argc != 2 || std::strcmp(argv[1], "--experimental-high-rate") != 0) {
         std::cerr << "usage: fw1814analog96 --experimental-high-rate\n"
-                     "This uninstalled engine requires a 96 kHz playback SHM "
+                     "This guarded engine requires a 96 kHz playback SHM "
                      "and stopped FW1814 supervisor.\n";
         return 64;
     }

@@ -1,6 +1,6 @@
 .PHONY: all all-interfaces clean \
 	fw410 fw410-hal fw410-runtime fw410-gui fw410-tools fw410-install-check fw410-install fw410-uninstall fw410-clean fw410-package \
-	fw1814 fw1814-hal fw1814-runtime fw1814-gui fw1814-tools fw1814-install-check fw1814-install fw1814-uninstall fw1814-clean fw1814-package \
+	fw1814 fw1814-hal fw1814-runtime fw1814-gui fw1814-tools fw1814-experimental96 fw1814-install-experimental96 fw1814-install-check fw1814-install fw1814-uninstall fw1814-clean fw1814-package \
 	hal runtime gui tools all-tools install-check install install-force uninstall package package-all
 
 # Root build/component, uninstall and package targets cover every supported
@@ -107,6 +107,8 @@ fw1814-hal:
 	$(MAKE) -C devices/fw1814 hal
 fw1814-runtime:
 	$(MAKE) -C devices/fw1814 runtime
+fw1814-experimental96: fw1814
+	$(MAKE) -C devices/fw1814/transport analog96-experimental
 fw1814-gui:
 	$(MAKE) -C devices/fw1814 gui
 fw1814-tools:
@@ -115,6 +117,8 @@ fw1814-install-check:
 	$(MAKE) -C devices/fw1814 install-check
 fw1814-install:
 	$(MAKE) -C devices/fw1814 install
+fw1814-install-experimental96:
+	$(MAKE) -C devices/fw1814 install-experimental96
 fw1814-uninstall:
 	$(MAKE) -C devices/fw1814 uninstall
 fw1814-clean:

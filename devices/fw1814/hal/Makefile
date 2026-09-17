@@ -13,7 +13,7 @@ SRC := src/FW1814HAL.cpp
 
 all: $(MACOS)/macfw-fw1814
 
-$(MACOS)/macfw-fw1814: $(SRC) include/macfw_fw1814_hal_shm.h include/macfw_fw1814_capture_shm.h Info.plist ../version.h
+$(MACOS)/macfw-fw1814: $(SRC) include/macfw_fw1814_hal_shm.h include/macfw_fw1814_capture_shm.h include/macfw_fw1814_high_rate.h Info.plist ../version.h
 	mkdir -p $(MACOS)
 	cp Info.plist $(CONTENTS)/Info.plist
 	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(VERSION)" $(CONTENTS)/Info.plist

@@ -5,6 +5,7 @@
 
 #include "../include/macfw_fw1814_capture_shm.h"
 #include "../include/macfw_fw1814_hal_shm.h"
+#include "../include/macfw_fw1814_high_rate.h"
 
 #include <atomic>
 #include <cerrno>
@@ -23,6 +24,7 @@ constexpr AudioObjectID kOutputStreamID = 3;
 constexpr AudioObjectID kInputStreamID = 4;
 constexpr Float64 kRate44100 = 44100.0;
 constexpr Float64 kRate48000 = 48000.0;
+constexpr Float64 kRate96000 = 96000.0;
 constexpr UInt32 kOutputChannels = macfw::fw1814::hal::kOutputChannels;
 constexpr UInt32 kInputChannels = macfw::fw1814::hal::capture::kInputChannels;
 
@@ -47,7 +49,12 @@ bool IsKnownObject(AudioObjectID id) {
 }
 
 bool IsSupportedRate(std::uint32_t rate) {
-    return rate == 44100 || rate == 48000;
+    return rate == 44100 || rate == 48000 ||
+           (rate == 96000 && macfw::fw1814::experimental::enabled96());
+}
+
+UInt32 AvailableRateCount() {
+    return macfw::fw1814::experimental::enabled96() ? 3 : 2;
 }
 
 int OpenStableShm(const char* name, std::size_t bytes) {
@@ -301,7 +308,8 @@ OSStatus STDMETHODCALLTYPE PerformDeviceConfigurationChange(AudioServerPlugInDri
                                                             void*) {
     if (device != kDeviceID)
         return kAudioHardwareBadObjectError;
-    if (action != 44100 && action != 48000)
+    if (action > UINT32_MAX ||
+        !IsSupportedRate(static_cast<std::uint32_t>(action)))
         return kAudioHardwareIllegalOperationError;
 
     const auto rate = static_cast<std::uint32_t>(action);
@@ -466,7 +474,7 @@ UInt32 PropertySize(AudioObjectID object,
             case kAudioDevicePropertyNominalSampleRate:
                 return sizeof(Float64);
             case kAudioDevicePropertyAvailableNominalSampleRates:
-                return 2 * sizeof(AudioValueRange);
+                return AvailableRateCount() * sizeof(AudioValueRange);
             default:
                 return sizeof(UInt32);
         }
@@ -481,7 +489,7 @@ UInt32 PropertySize(AudioObjectID object,
                 return sizeof(AudioStreamBasicDescription);
             case kAudioStreamPropertyAvailableVirtualFormats:
             case kAudioStreamPropertyAvailablePhysicalFormats:
-                return 2 * sizeof(AudioStreamRangedDescription);
+                return AvailableRateCount() * sizeof(AudioStreamRangedDescription);
             default:
                 return sizeof(UInt32);
         }
@@ -652,12 +660,14 @@ OSStatus STDMETHODCALLTYPE GetPropertyData(AudioServerPlugInDriverRef driver,
                     static_cast<Float64>(
                         gSampleRate.load(std::memory_order_acquire)));
             case kAudioDevicePropertyAvailableNominalSampleRates: {
-                if (inSize < 2 * sizeof(AudioValueRange))
+                const UInt32 count = AvailableRateCount();
+                if (inSize < count * sizeof(AudioValueRange))
                     return kAudioHardwareBadPropertySizeError;
                 auto* rates = static_cast<AudioValueRange*>(outData);
                 rates[0] = {kRate44100, kRate44100};
                 rates[1] = {kRate48000, kRate48000};
-                *outSize = 2 * sizeof(AudioValueRange);
+                if (count == 3) rates[2] = {kRate96000, kRate96000};
+                *outSize = count * sizeof(AudioValueRange);
                 return kAudioHardwareNoError;
             }
             default:
@@ -693,7 +703,8 @@ OSStatus STDMETHODCALLTYPE GetPropertyData(AudioServerPlugInDriverRef driver,
                 return CopyScalar(inSize, outSize, outData, format);
             case kAudioStreamPropertyAvailableVirtualFormats:
             case kAudioStreamPropertyAvailablePhysicalFormats: {
-                if (inSize < 2 * sizeof(AudioStreamRangedDescription))
+                const UInt32 count = AvailableRateCount();
+                if (inSize < count * sizeof(AudioStreamRangedDescription))
                     return kAudioHardwareBadPropertySizeError;
                 auto* formats =
                     static_cast<AudioStreamRangedDescription*>(outData);
@@ -708,7 +719,11 @@ OSStatus STDMETHODCALLTYPE GetPropertyData(AudioServerPlugInDriverRef driver,
                     formats[1] = {
                         OutputFormat(kRate48000), {kRate48000, kRate48000}};
                 }
-                *outSize = 2 * sizeof(AudioStreamRangedDescription);
+                if (count == 3)
+                    formats[2] = isInput
+                        ? AudioStreamRangedDescription{InputFormat(kRate96000), {kRate96000, kRate96000}}
+                        : AudioStreamRangedDescription{OutputFormat(kRate96000), {kRate96000, kRate96000}};
+                *outSize = count * sizeof(AudioStreamRangedDescription);
                 return kAudioHardwareNoError;
             }
             default:
@@ -737,7 +752,8 @@ OSStatus STDMETHODCALLTYPE SetPropertyData(AudioServerPlugInDriverRef driver,
         if (inSize != sizeof(Float64))
             return kAudioHardwareBadPropertySizeError;
         const Float64 rate = *static_cast<const Float64*>(inData);
-        if (rate != kRate44100 && rate != kRate48000)
+        if (rate != kRate44100 && rate != kRate48000 &&
+            !(rate == kRate96000 && macfw::fw1814::experimental::enabled96()))
             return kAudioHardwareIllegalOperationError;
         if (static_cast<std::uint32_t>(rate) ==
             gSampleRate.load(std::memory_order_acquire))

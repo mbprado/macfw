@@ -40,8 +40,7 @@ $(ANALOG44): analog44_main.cpp blocking_pcm_tx44.h capture_pump44.h \
 	$(CXX) $(CXXFLAGS) -I$(LIBMACFW_INCLUDE) -I$(DEVICE_INCLUDE) -I$(HAL_INCLUDE) \
 		analog44_main.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
 
-# Explicit build only. This engine is neither installed nor selected by the
-# supervisor until the HAL rate gate and startup lifecycle are validated.
+# Explicit build only. The opt-in installer enables selection separately.
 $(ANALOG96): analog96_main.cpp ../tools/fw1814_pcm96_tx.h \
 	../tools/fw1814_pcm96_stream.h ../tools/fw1814_capture96_pump.h \
 	duplex_lifecycle.h engine_ready.h fw1814_control_server.h playback_pump.h realtime_service.h shared_io.h \
@@ -58,7 +57,7 @@ $(SHM_TEST): shm_test.cpp ../hal/include/macfw_fw1814_hal_shm.h \
 	../hal/include/macfw_fw1814_capture_shm.h
 	$(CXX) $(CXXFLAGS) -I$(DEVICE_INCLUDE) -I$(HAL_INCLUDE) shm_test.cpp -o $@
 
-$(SUPERVISOR): supervisor_main.cpp ../hal/include/macfw_fw1814_hal_shm.h
+$(SUPERVISOR): supervisor_main.cpp ../hal/include/macfw_fw1814_hal_shm.h ../hal/include/macfw_fw1814_high_rate.h
 	$(CXX) $(CXXFLAGS) -I$(DEVICE_INCLUDE) -I$(HAL_INCLUDE) supervisor_main.cpp -o $@
 
 $(DUPLEX44_PROBE): ../tools/fw1814duplex44.cpp blocking_pcm_tx44.h \
