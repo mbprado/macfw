@@ -698,3 +698,23 @@ frames. It still preloads the full 88200 silent frames before ISO startup.
 Expect a handoff near one 320-packet TX refill (~1764 frames); test both the
 first start and several 48/44.1/96 switches for first-sound distortion and
 new TX underruns before accepting the smaller steady playback queue.
+
+The first Mac run with the 2048-frame handoff reserve had near-synchronous
+perceived S1/SW3 monitoring at 44.1 kHz. Two steady two-second statistics
+reported PCM queues of 1744 and 1736 frames (~40 ms), 88200 capture frames
+per interval, `hal-drop=0`, and no increase in TX silence, PCM underruns,
+capture drops, or DBC gaps. This is much better than the previous 8192-frame
+handoff result, but repeated cold starts and rate switches still need
+validation before release.
+
+One supplied 48-kHz restart after a rate change sounded broken. Across six
+two-second status lines its PCM queue stayed at 1792 frames (~37 ms), both
+TX and HAL advanced by 96000 frames per interval, and `tx-silence=26624`,
+`tx-late=1` and `hal-drop=0` did not increase. Its capture was mostly steady,
+with four cumulative DBC gaps appearing in one interval. The supervisor also
+restored 22 saved control values on that start. These observations do not
+identify whether the audible failure came from control routing, software
+output, or another device-side condition; do not alter the 48-kHz transport
+based only on its steady counters. On a repeat, compare the control-panel
+routing and whether both the direct and software-return paths are affected,
+and preserve the complete log from the rate transition.
