@@ -150,6 +150,23 @@ and checks for 712-byte, 16-event capture packets with FDF `0x03` and
 original 48-kHz rate, and checks the final INPUT readback. Audio playback,
 capture channel mapping, and CoreAudio 88.2-kHz support remain unverified.
 
+The first silent run on the test FW1814 passed: 44 full packets and 20
+NODATA packets in the 64-slot snapshot, zero unexpected packet shapes or
+TX underruns, and both PCRs and the 48-kHz INPUT rate restored. An optional
+bounded listening test is now available on the same guarded executable:
+
+```sh
+make -C devices/fw1814/tools duplex88-tool
+devices/fw1814/tools/fw1814capture88_duplex_blocking \
+  --tone-440 --position 2 --execute --experimental-high-rate
+```
+
+With the transport stopped and the interface at 48 kHz, it sends 1.5 seconds
+of silence, three seconds of 440 Hz at -24 dBFS on playback PCM position 0-5,
+and a silent tail. It prints the nonzero frame count and checks the same
+capture packets and rate/PCR restoration. Audibility and the physical output
+mapping still require testing on the interface.
+
 ## First 96 kHz listening test
 
 `fw1814tone96` reuses the proven 96 kHz duplex probe and its restoration

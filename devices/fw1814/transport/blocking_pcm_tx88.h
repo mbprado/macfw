@@ -33,6 +33,7 @@ public:
         std::size_t framesRequested = 0;
         std::size_t framesFromBuffer = 0;
         std::size_t framesSilenced = 0;
+        std::size_t nonzeroFrames = 0;
     };
 
     BlockingPcmTransmitRing88200() = default;
@@ -179,17 +180,20 @@ public:
                 result.framesSilenced += rr.framesSilenced;
 
                 for (std::size_t event = 0; event < kEventsPerDataPacket; ++event) {
+                    bool nonzero = false;
                     for (std::size_t ch = 0; ch < kPcmChannels; ++ch) {
                         const auto sample = std::max<std::int32_t>(
                             -8388608,
                             std::min<std::int32_t>(
                                 8388607, frames[event * kPcmChannels + ch]));
+                        nonzero = nonzero || sample != 0;
                         const std::uint32_t word = 0x40000000u |
                             (static_cast<std::uint32_t>(sample) & 0x00ffffffu);
                         const std::size_t off = 8 +
                             (event * kDbs + ch) * sizeof(std::uint32_t);
                         putBe32(packet.bytes + off, word);
                     }
+                    result.nonzeroFrames += nonzero;
                 }
                 ++result.dataPacketsRefilled;
             }
@@ -323,6 +327,7 @@ public:
         std::uint64_t dataPacketsRefilled = 0;
         std::uint64_t framesFromBuffer = 0;
         std::uint64_t framesSilenced = 0;
+        std::uint64_t nonzeroFrames = 0;
         std::uint64_t lateCyclePolls = 0;
     };
 
@@ -384,6 +389,7 @@ public:
             stats_.dataPacketsRefilled += rr.dataPacketsRefilled;
             stats_.framesFromBuffer += rr.framesFromBuffer;
             stats_.framesSilenced += rr.framesSilenced;
+            stats_.nonzeroFrames += rr.nonzeroFrames;
             ++lastHalfNumber_;
         }
     }
