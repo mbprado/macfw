@@ -434,3 +434,15 @@ that the steady input samples contain the expected waveform; this simple
 estimate is diagnostic and does not replace an audio quality or long-running
 CoreAudio capture test. The threshold is 0.002 full scale, so a very quiet
 signal might not produce a useful estimate.
+
+The first crossing-count run reported 240000 steady frames over 2.5 seconds,
+but 4923 positive crossings produced an apparent 1969.2 Hz for the injected
+440 Hz source. Packet formation and transport restore passed; one timestamp
+regression was counted. A threshold-crossing count alone cannot distinguish
+the intended tone from additional high-frequency content or glitches. The
+probe now retains 8192 decoded Analog Input 1 frames after the first half
+second and performs a Hann-windowed spectral scan from 100 to 4000 Hz after
+DMA stops. It prints the dominant frequency and amplitude, amplitude near
+440 Hz and near the observed 1969 Hz crossing count, and RMS. Compare these
+values before judging whether the captured 440 Hz waveform is intact; do
+not infer capture fidelity from packet/DBC counters alone.

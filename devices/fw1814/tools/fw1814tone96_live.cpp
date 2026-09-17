@@ -68,6 +68,9 @@ CFAbsoluteTime gCaptureStart = 0;
 std::uint64_t gAnalog1ToneFrames = 0;
 std::uint64_t gAnalog1PositiveCrossings = 0;
 bool gAnalog1WasNegative = false;
+constexpr std::size_t kAnalog1SpectrumFrames = 8192;
+std::array<float, kAnalog1SpectrumFrames> gAnalog1Spectrum{};
+std::size_t gAnalog1SpectrumCount = 0;
 bool gServiceHealthy = true;
 
 void serviceStream() {
@@ -89,6 +92,8 @@ void serviceStream() {
                 const float value = gCaptureStore->samples[
                     (frame % macfw::fw1814::hal::capture::kCapacityFrames) *
                     macfw::fw1814::hal::capture::kInputChannels];
+                if (gAnalog1SpectrumCount < gAnalog1Spectrum.size())
+                    gAnalog1Spectrum[gAnalog1SpectrumCount++] = value;
                 ++gAnalog1ToneFrames;
                 if (value < -kHysteresis) gAnalog1WasNegative = true;
                 else if (value > kHysteresis && gAnalog1WasNegative) {
@@ -150,6 +155,61 @@ void printBytes(const UInt8* p, std::size_t n) {
                   << static_cast<unsigned>(p[i]);
     }
     std::cout << std::dec << std::setfill(' ');
+}
+
+void printAnalog1Spectrum() {
+    if (gAnalog1SpectrumCount != gAnalog1Spectrum.size()) {
+        std::cout << "steady Analog1 spectrum: insufficient frames\n";
+        return;
+    }
+
+    // A Hann window limits leakage when the known test tone does not land
+    // exactly on an 8192-sample DFT bin. Run this only after ISO DMA stops.
+    std::array<double, kAnalog1SpectrumFrames> windowed{};
+    double squares = 0;
+    for (std::size_t n = 0; n < windowed.size(); ++n) {
+        const double value = gAnalog1Spectrum[n];
+        squares += value * value;
+        windowed[n] = value * (0.5 - 0.5 * std::cos(
+            6.2831853071795864769 * n / (windowed.size() - 1)));
+    }
+    const auto amplitude = [&](unsigned bin) {
+        const double coefficient = 2.0 * std::cos(
+            6.2831853071795864769 * bin / windowed.size());
+        double previous = 0, older = 0;
+        for (const double value : windowed) {
+            const double next = value + coefficient * previous - older;
+            older = previous;
+            previous = next;
+        }
+        const double power = previous * previous + older * older -
+            coefficient * previous * older;
+        return 4.0 * std::sqrt(std::max(0.0, power)) / windowed.size();
+    };
+
+    const unsigned firstBin = static_cast<unsigned>(
+        std::ceil(100.0 * windowed.size() / 96000.0));
+    const unsigned lastBin = static_cast<unsigned>(
+        std::floor(4000.0 * windowed.size() / 96000.0));
+    unsigned strongestBin = firstBin;
+    double strongestAmplitude = 0;
+    for (unsigned bin = firstBin; bin <= lastBin; ++bin) {
+        const double measured = amplitude(bin);
+        if (measured > strongestAmplitude) {
+            strongestBin = bin;
+            strongestAmplitude = measured;
+        }
+    }
+    const auto binFor = [&](double frequency) {
+        return static_cast<unsigned>(std::round(
+            frequency * windowed.size() / 96000.0));
+    };
+    std::cout << "steady Analog1 spectrum (8192 frames): dominantHz="
+              << (96000.0 * strongestBin / windowed.size())
+              << " dominantAmplitude=" << strongestAmplitude
+              << " near440Amplitude=" << amplitude(binFor(440))
+              << " near1969Amplitude=" << amplitude(binFor(1969.2))
+              << " rms=" << std::sqrt(squares / windowed.size()) << '\n';
 }
 
 bool validateInfo(macfw::FireWireDevice& device) {
@@ -730,6 +790,7 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
         gAnalog1ToneFrames = 0;
         gAnalog1PositiveCrossings = 0;
         gAnalog1WasNegative = false;
+        gAnalog1SpectrumCount = 0;
 
         std::cout << "*** " << (filePath.empty() ? "TONE" : "FILE")
                   << " ACTIVE on PCM position " << position
@@ -817,6 +878,7 @@ bool run(unsigned position, double frequencyHz, const std::string& filePath,
                           ? 96000.0 * static_cast<double>(gAnalog1PositiveCrossings) /
                               static_cast<double>(gAnalog1ToneFrames) : 0.0)
                       << '\n';
+            printAnalog1Spectrum();
             std::cout << "experimental capture input peaks (dBFS):";
             for (std::size_t physical = 0;
                  physical < captureDecoder.meterPeaks().size(); ++physical) {
