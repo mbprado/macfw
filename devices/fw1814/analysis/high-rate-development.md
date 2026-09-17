@@ -624,3 +624,15 @@ clean audio with less queued silence. Investigate the growing 44.1-kHz capture
 queue and DBC gaps independently; the log does not establish whether they
 contribute audibly to monitoring latency. Keep the measured 48/96-kHz paths
 as reference points for any subsequent latency changes.
+
+The 44.1-kHz verbose service line now also reports `pb-read`,
+`pcm-underrun`, `cap-drop`, `cap-active`, `hal-in-reads`, `hal-in-frames`,
+`hal-in-zero` and `hal-in-underrun`. During the same Logic S1/SW3 monitoring
+test, compare consecutive two-second lines: `pb-read` should rise by about
+88200 frames if HAL audio is entering playback, and `hal-in-frames` should
+rise by about 88200 if Logic is continuously consuming capture. A steady
+~63480-frame PCM queue despite those increments points to persistent playback
+buffering; a rising capture queue with fewer HAL input reads or unexpected
+decoded frames points to a separate input timing problem. These counters do
+not change stream behavior and avoid repeating the previously distorted
+44.1-kHz warm-up variants before identifying which side dominates the delay.
