@@ -583,8 +583,10 @@ bool run(bool execute, bool raw) {
 
         std::cout << "capture: waiting up to 2 s for packets\n";
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, 2.0, false);
-        const bool captureOk = dumpReceive(receiveRing, raw);
-        success = txHealthy.load(std::memory_order_acquire) && captureOk;
+        {
+            const bool captureOk = dumpReceive(receiveRing, raw);
+            success = txHealthy.load(std::memory_order_acquire) && captureOk;
+        }
 
         std::cout << "duplex-blocking-silence experiment: "
                   << (success ? "88.2 kHz PACKETS RECEIVED" : "NO VALID 88.2 kHz PACKETS") << '\n';
