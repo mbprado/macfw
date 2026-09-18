@@ -42,7 +42,6 @@ public:
         struct ReadyChunk {
             std::size_t index = 0;
             std::uint32_t timestamp = 0;
-            std::uint64_t signature = 0;
         };
         std::array<ReadyChunk, 8> ready{};
         std::size_t readyCount = 0;
@@ -50,14 +49,25 @@ public:
             const std::size_t begin = chunk * kChunkSlots;
             const std::size_t end = std::min(rx.packetCount(), begin + kChunkSlots);
             const auto& terminal = rx.slot(end - 1);
-            const std::uint64_t signature =
-                (static_cast<std::uint64_t>(terminal.timestamp) << 32) |
-                static_cast<std::uint64_t>(terminal.isoHeader);
             if (!terminal.touched() || terminal.timestamp == 0 ||
-                signature == lastChunkSignature_[chunk])
+                terminal.timestamp == lastChunkTimestamp_[chunk])
                 continue;
 
-            ready[readyCount++] = {chunk, terminal.timestamp, signature};
+            // The terminal header can change before the group is published.
+            // Waiting for every slot's timestamp to advance prevents a
+            // partial group from being decoded as a new 32-cycle capture.
+            bool complete = true;
+            for (std::size_t slotIndex = begin; slotIndex < end; ++slotIndex) {
+                const auto& slot = rx.slot(slotIndex);
+                if (slot.timestamp == 0 ||
+                    slot.timestamp == lastSlotTimestamp_[slotIndex]) {
+                    complete = false;
+                    break;
+                }
+            }
+            if (!complete) continue;
+
+            ready[readyCount++] = {chunk, terminal.timestamp};
         }
 
         // The ring's index zero is not a time origin. In particular, when
@@ -71,7 +81,7 @@ public:
                   });
         for (std::size_t i = 0; i < readyCount; ++i) {
             const auto chunk = ready[i].index;
-            lastChunkSignature_[chunk] = ready[i].signature;
+            lastChunkTimestamp_[chunk] = ready[i].timestamp;
             ++stats_.completedChunks;
             const std::size_t begin = chunk * kChunkSlots;
             totalFrames += processChunk(
@@ -289,7 +299,7 @@ private:
             out, decoded.data(), candidate.events);
     }
 
-    std::array<std::uint64_t, 8> lastChunkSignature_{};
+    std::array<std::uint32_t, 8> lastChunkTimestamp_{};
     std::array<std::uint32_t, 256> lastSlotTimestamp_{};
     Stats stats_{};
     std::array<float, macfw::fw1814::hal::capture::kInputChannels> meterPeaks_{};
