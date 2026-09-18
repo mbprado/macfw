@@ -320,6 +320,8 @@ bool run() {
                               << " incomplete=" << rxStats.incompleteGroups
                               << " recovered=" << rxStats.recoveredGroups
                               << " overwritten=" << rxStats.overwrittenGroups
+                              << " salvaged=" << rxStats.salvagedGroups
+                              << " skipped-slots=" << rxStats.skippedSlots
                               << " first-incomplete-slot=" << rxStats.firstIncompleteSlot
                               << " ts-regress=" << rxStats.timestampRegressions
                               << " metadata-swaps=" << rxStats.metadataByteSwaps

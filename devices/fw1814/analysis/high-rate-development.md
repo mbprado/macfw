@@ -227,8 +227,17 @@ but every subsequent data packet was marked stale. The receive timestamp's
 seconds field rolls over independently of a 32-bit integer comparison. The
 88.2-kHz decoder now orders and filters packets using the modulo-8000
 FireWire cycle field (bits 12..24), which remains unambiguous across the
-32-ms RX ring. Continuous recording across that rollover requires another
-Mac test; playback and the completed-group check are unchanged.
+32-ms RX ring. Subsequent Mac recording and monitoring ran continuously
+without audible cutoffs; playback and the completed-group check are unchanged.
+
+A few two-second windows missed one 32-cycle RX group (352 capture frames).
+Instrumentation showed each miss matched an incomplete group being
+overwritten, while most incomplete groups recovered before the next ring
+rotation. A guarded follow-up waits two milliseconds; if exactly one of the
+32 slots still has its previous timestamp, it decodes the other 31 and
+reports `salvaged` and `skipped-slots`. It never decodes a group with two or
+more missing timestamps. Validate recording quality and these counters on
+the Mac before treating this as an improvement.
 
 ## Experimental 88.2 kHz CoreAudio trial
 

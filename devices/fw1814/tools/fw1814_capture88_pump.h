@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -32,6 +33,8 @@ public:
         std::uint64_t incompleteGroups = 0;
         std::uint64_t recoveredGroups = 0;
         std::uint64_t overwrittenGroups = 0;
+        std::uint64_t salvagedGroups = 0;
+        std::uint64_t skippedSlots = 0;
         std::size_t firstIncompleteSlot = 0;
     };
 
@@ -70,6 +73,7 @@ public:
             // Waiting for every slot's timestamp to advance prevents a
             // partial group from being decoded as a new 32-cycle capture.
             bool complete = true;
+            std::size_t freshSlots = 0;
             for (std::size_t slotIndex = begin; slotIndex < end; ++slotIndex) {
                 const auto& slot = rx.slot(slotIndex);
                 if (slot.timestamp == 0 ||
@@ -79,14 +83,28 @@ public:
                         ++stats_.incompleteGroups;
                         stats_.firstIncompleteSlot = slotIndex;
                         incompletePending_[chunk] = true;
+                        incompleteSince_[chunk] = std::chrono::steady_clock::now();
                     }
-                    break;
+                } else {
+                    ++freshSlots;
                 }
             }
-            if (!complete) continue;
+            if (!complete) {
+                // One receive DCL can retain its previous completion stamp
+                // for an entire ring rotation. After 2 ms, the other 31
+                // slots are stable and can be decoded safely. processChunk
+                // already skips the unchanged slot; losing at most one
+                // packet is preferable to dropping all 32 cycles.
+                const bool singleMissing = freshSlots + 1 == end - begin;
+                const bool settled = std::chrono::steady_clock::now() -
+                    incompleteSince_[chunk] >= std::chrono::milliseconds(2);
+                if (!singleMissing || !settled) continue;
+                ++stats_.salvagedGroups;
+                ++stats_.skippedSlots;
+            }
 
             if (incompletePending_[chunk]) {
-                ++stats_.recoveredGroups;
+                if (complete) ++stats_.recoveredGroups;
                 incompletePending_[chunk] = false;
             }
 
@@ -270,6 +288,7 @@ private:
     std::array<std::uint32_t, 8> lastChunkTimestamp_{};
     std::array<std::uint32_t, 8> observedChunkTimestamp_{};
     std::array<bool, 8> incompletePending_{};
+    std::array<std::chrono::steady_clock::time_point, 8> incompleteSince_{};
     std::array<std::uint32_t, 256> lastSlotTimestamp_{};
     Stats stats_{};
     std::array<float, macfw::fw1814::hal::capture::kInputChannels> meterPeaks_{};
