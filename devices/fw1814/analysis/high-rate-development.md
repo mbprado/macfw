@@ -297,6 +297,34 @@ late TX polls. These counters prevent a claim of bit-perfect continuity, but
 the recording sounded clean in this test. Retain the diagnostics and explicit
 opt-in while checking future runs for an increase in skips or audible artifacts.
 
+### Next guarded rate check: 176.4 kHz CONTROL
+
+The Linux S/PDIF formation changes to 2 capture PCM positions and 4 playback
+PCM positions at 176.4/192 kHz. This requires a separate packet schedule,
+channel mapping and stream validation. The first 176.4-kHz gate extends the
+existing `fw1814init` CONTROL-only diagnostic: it requires both
+`--experimental-high-rate` and `--experimental-quad-rate`, an idle FW1814
+transport, and an original 44.1/48-kHz INPUT rate. It applies the documented
+clock/digital baseline, sets OUTPUT then INPUT 100 ms later, checks INPUT
+STATUS and attempts to restore the original rate even if the high-rate
+readback fails. It does not start either ISO direction or expose a new HAL
+rate. Rate 192 kHz remains outside this diagnostic until 176.4-kHz CONTROL
+and restoration have been checked on the test Mac.
+
+Build and inspect the dry run first. With the installed FW1814 transport
+stopped and no audio clients, execute the separate guarded test:
+
+```sh
+make -C devices/fw1814/tools init-tool
+devices/fw1814/tools/fw1814init 176400
+sudo launchctl bootout system/com.mbprado.macfw.fw1814.transport
+devices/fw1814/tools/fw1814init 176400 --execute --experimental-high-rate --experimental-quad-rate --raw
+```
+
+Check the final OUTPUT/INPUT restoration and authoritative INPUT readback
+before restarting the transport. A matching CONTROL result would only prove
+rate negotiation; it would not establish working 176.4-kHz audio.
+
 ## First 96 kHz listening test
 
 `fw1814tone96` reuses the proven 96 kHz duplex probe and its restoration

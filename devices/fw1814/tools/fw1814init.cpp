@@ -267,10 +267,12 @@ bool validateInfo(IOFireWireLibDeviceRef device, UInt32 generation,
 
 void usage(const char* argv0) {
     std::cout << "usage: " << argv0
-              << " [44100|48000|88200|96000] [--execute]"
-                 " [--experimental-high-rate] [--raw]\n"
-              << "88.2/96 kHz execution requires --experimental-high-rate,"
-                 " an idle FW1814 service, and restores the prior 44.1/48 kHz rate.\n";
+              << " [44100|48000|88200|96000|176400] [--execute]"
+                 " [--experimental-high-rate] [--experimental-quad-rate] [--raw]\n"
+              << "High-rate execution requires --experimental-high-rate,"
+                 " an idle FW1814 service, and restores the prior 44.1/48 kHz rate.\n"
+              << "176.4 kHz also requires --experimental-quad-rate;"
+                 " this checks CONTROL/readback only, not audio streaming.\n";
 }
 
 } // namespace
@@ -280,6 +282,7 @@ int main(int argc, char** argv) {
     bool execute = false;
     bool raw = false;
     bool experimentalHighRate = false;
+    bool experimentalQuadRate = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -287,8 +290,10 @@ int main(int argc, char** argv) {
         else if (arg == "48000") targetRate = 48000;
         else if (arg == "88200") targetRate = 88200;
         else if (arg == "96000") targetRate = 96000;
+        else if (arg == "176400") targetRate = 176400;
         else if (arg == "--execute") execute = true;
         else if (arg == "--experimental-high-rate") experimentalHighRate = true;
+        else if (arg == "--experimental-quad-rate") experimentalQuadRate = true;
         else if (arg == "--raw") raw = true;
         else if (arg == "--help" || arg == "-h") {
             usage(argv[0]);
@@ -299,9 +304,14 @@ int main(int argc, char** argv) {
         }
     }
 
-    const bool highRate = targetRate == 88200 || targetRate == 96000;
+    const bool quadRate = targetRate == 176400;
+    const bool highRate = targetRate == 88200 || targetRate == 96000 || quadRate;
     if (execute && highRate && !experimentalHighRate) {
         std::cerr << "high-rate CONTROL requires --experimental-high-rate\n";
+        return 64;
+    }
+    if (execute && quadRate && !experimentalQuadRate) {
+        std::cerr << "176.4 kHz CONTROL also requires --experimental-quad-rate\n";
         return 64;
     }
     if (execute && highRate &&
@@ -487,9 +497,13 @@ int main(int argc, char** argv) {
         }
 
         std::cout << "Linux reference S/PDIF stream formation at "
-                  << (highRate ? "88.2/96" : "44.1/48") << " kHz:\n"
-                  << "    device -> host capture:  10 PCM + 1 MIDI\n"
-                  << "    host -> device playback: 6 PCM + 1 MIDI\n";
+                  << (quadRate ? "176.4" : highRate ? "88.2/96" : "44.1/48")
+                  << " kHz:\n"
+                  << (quadRate
+                      ? "    device -> host capture:  2 PCM + 1 MIDI\n"
+                        "    host -> device playback: 4 PCM + 1 MIDI\n"
+                      : "    device -> host capture:  10 PCM + 1 MIDI\n"
+                        "    host -> device playback: 6 PCM + 1 MIDI\n");
 
         (*responseSpace)->TurnOffNotification(responseSpace);
         (*responseSpace)->Release(responseSpace);
