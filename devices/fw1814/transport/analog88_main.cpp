@@ -317,6 +317,10 @@ bool run() {
                               << " nodata=" << rxStats.noDataPackets
                               << " dbc-gap=" << rxStats.dbcDiscontinuities
                               << " duplicates=" << rxStats.duplicateSlots
+                              << " incomplete=" << rxStats.incompleteGroups
+                              << " recovered=" << rxStats.recoveredGroups
+                              << " overwritten=" << rxStats.overwrittenGroups
+                              << " first-incomplete-slot=" << rxStats.firstIncompleteSlot
                               << " ts-regress=" << rxStats.timestampRegressions
                               << " metadata-swaps=" << rxStats.metadataByteSwaps
                               << " reorder=" << rxStats.reorderedPackets

@@ -29,6 +29,10 @@ public:
         std::uint64_t noDataPackets = 0;
         std::uint64_t metadataByteSwaps = 0;
         std::uint64_t duplicateSlots = 0;
+        std::uint64_t incompleteGroups = 0;
+        std::uint64_t recoveredGroups = 0;
+        std::uint64_t overwrittenGroups = 0;
+        std::size_t firstIncompleteSlot = 0;
     };
 
     std::size_t service(const macfw::AmdtpReceiveRing& rx,
@@ -54,6 +58,14 @@ public:
                 terminal.timestamp == lastChunkTimestamp_[chunk])
                 continue;
 
+            if (terminal.timestamp != observedChunkTimestamp_[chunk]) {
+                if (incompletePending_[chunk] &&
+                    lastChunkTimestamp_[chunk] != observedChunkTimestamp_[chunk])
+                    ++stats_.overwrittenGroups;
+                observedChunkTimestamp_[chunk] = terminal.timestamp;
+                incompletePending_[chunk] = false;
+            }
+
             // The terminal header can change before the group is published.
             // Waiting for every slot's timestamp to advance prevents a
             // partial group from being decoded as a new 32-cycle capture.
@@ -63,10 +75,20 @@ public:
                 if (slot.timestamp == 0 ||
                     slot.timestamp == lastSlotTimestamp_[slotIndex]) {
                     complete = false;
+                    if (!incompletePending_[chunk]) {
+                        ++stats_.incompleteGroups;
+                        stats_.firstIncompleteSlot = slotIndex;
+                        incompletePending_[chunk] = true;
+                    }
                     break;
                 }
             }
             if (!complete) continue;
+
+            if (incompletePending_[chunk]) {
+                ++stats_.recoveredGroups;
+                incompletePending_[chunk] = false;
+            }
 
             ready[readyCount++] = {chunk, terminal.timestamp};
         }
@@ -246,6 +268,8 @@ private:
     }
 
     std::array<std::uint32_t, 8> lastChunkTimestamp_{};
+    std::array<std::uint32_t, 8> observedChunkTimestamp_{};
+    std::array<bool, 8> incompletePending_{};
     std::array<std::uint32_t, 256> lastSlotTimestamp_{};
     Stats stats_{};
     std::array<float, macfw::fw1814::hal::capture::kInputChannels> meterPeaks_{};
