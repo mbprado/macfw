@@ -317,6 +317,8 @@ bool run() {
                               << " nodata=" << rxStats.noDataPackets
                               << " dbc-gap=" << rxStats.dbcDiscontinuities
                               << " duplicates=" << rxStats.duplicateSlots
+                              << " ts-regress=" << rxStats.timestampRegressions
+                              << " metadata-swaps=" << rxStats.metadataByteSwaps
                               << " reorder=" << rxStats.reorderedPackets
                               << " stale=" << rxStats.stalePackets << '\n';
                     lastCaptureFrames = captureFrames;

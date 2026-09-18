@@ -39,6 +39,13 @@ public:
         std::size_t totalFrames = 0;
         const std::size_t chunkCount =
             (rx.packetCount() + kChunkSlots - 1) / kChunkSlots;
+        struct ReadyChunk {
+            std::size_t index = 0;
+            std::uint32_t timestamp = 0;
+            std::uint64_t signature = 0;
+        };
+        std::array<ReadyChunk, 8> ready{};
+        std::size_t readyCount = 0;
         for (std::size_t chunk = 0; chunk < chunkCount; ++chunk) {
             const std::size_t begin = chunk * kChunkSlots;
             const std::size_t end = std::min(rx.packetCount(), begin + kChunkSlots);
@@ -50,9 +57,25 @@ public:
                 signature == lastChunkSignature_[chunk])
                 continue;
 
-            lastChunkSignature_[chunk] = signature;
+            ready[readyCount++] = {chunk, terminal.timestamp, signature};
+        }
+
+        // The ring's index zero is not a time origin. In particular, when
+        // publication spans the last and first chunks, processing index zero
+        // first can make valid earlier packets look stale by DBC. All ready
+        // chunks fit within one RX rotation (32 ms), so signed subtraction
+        // handles a wrap in the 32-bit FireWire timestamp as well.
+        std::sort(ready.begin(), ready.begin() + readyCount,
+                  [](const ReadyChunk& a, const ReadyChunk& b) {
+                      return static_cast<std::int32_t>(a.timestamp - b.timestamp) < 0;
+                  });
+        for (std::size_t i = 0; i < readyCount; ++i) {
+            const auto chunk = ready[i].index;
+            lastChunkSignature_[chunk] = ready[i].signature;
             ++stats_.completedChunks;
-            totalFrames += processChunk(rx, begin, end, out);
+            const std::size_t begin = chunk * kChunkSlots;
+            totalFrames += processChunk(
+                rx, begin, std::min(rx.packetCount(), begin + kChunkSlots), out);
         }
         return totalFrames;
     }
@@ -150,7 +173,6 @@ private:
         }
 
         while (emitted < count) {
-            ++stats_.dbcDiscontinuities;
             const std::size_t next = oldestUnused(candidates, count);
             if (next == count) break;
             const std::uint8_t delta =
