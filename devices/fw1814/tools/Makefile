@@ -194,7 +194,7 @@ duplex96-raw: duplex96-tool
 # 96 kHz probe, it is excluded from the default build and installed service.
 duplex88-tool: $(DUPLEX88_TOOL)
 
-$(DUPLEX88_TOOL): fw1814capture88_duplex_nodata.cpp ../transport/blocking_pcm_tx88.h $(LIBMACFW)
+$(DUPLEX88_TOOL): fw1814capture88_duplex_nodata.cpp fw1814_capture88_pump.h ../transport/blocking_pcm_tx88.h $(LIBMACFW)
 	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814capture88_duplex_nodata.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
 
 duplex88-check: duplex88-tool

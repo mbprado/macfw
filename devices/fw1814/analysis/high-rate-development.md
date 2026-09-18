@@ -9,7 +9,7 @@ also has one MIDI position, which macfw does not currently expose.
 | Rate | Device to host | Host to device | Status |
 |---|---:|---:|---|
 | 44.1/48 kHz | 10 PCM | 6 PCM | macfw analog audio validated |
-| 88.2 kHz | 10 PCM | 6 PCM | Rate CONTROL/readback validated; streaming untested |
+| 88.2 kHz | 10 PCM | 6 PCM | Duplex packets and 440-Hz playback validated in the 1280-slot probe; continuous capture testing pending |
 | 96 kHz | 10 PCM | 6 PCM | Duplex silent packet capture validated; audio mapping untested |
 | 176.4/192 kHz | 2 PCM | 4 PCM | Linux reference; macfw hardware untested |
 
@@ -186,6 +186,19 @@ devices/fw1814/tools/fw1814capture88_duplex_blocking \
 The comparison tests whether the shorter refill window contributes to the
 distortion. Even a clean result would still require a sustained capture and
 playback validation before enabling 88.2 kHz in the installed driver.
+
+The 1280/640 run sounded clear on the test FW1814, with a 44-data/20-NODATA
+capture snapshot. The probe now defaults to that longer TX ring; the previous
+640/320 ring remains selectable using `--short-tx-ring` for comparison.
+The clear playback result does not by itself validate sustained capture.
+
+The next diagnostic continuously decodes the RX ring while streaming, prints
+half-second capture-rate windows and analog input peaks, and freezes RX DMA
+before taking the final 64-packet snapshot. The existing guarded tone command
+also performs this check. To validate Analog Input 1, inject a known 440-Hz
+signal into its physical input during the tone run and compare its peak with
+the other inputs. The packet counts and steady windows should approach
+88,200 decoded frames per second, with no malformed packets or DBC gaps.
 
 ## First 96 kHz listening test
 

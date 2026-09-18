@@ -1,5 +1,6 @@
 #include "../transport/blocking_pcm_tx88.h"
 #include "../transport/realtime_service.h"
+#include "fw1814_capture88_pump.h"
 #include "macfw/pcm_ring_buffer.h"
 #include "macfw/amdtp_receive_ring.h"
 #include "macfw/cmp.h"
@@ -19,6 +20,8 @@
 #include <cstring>
 #include <iomanip>
 #include <iostream>
+#include <limits>
+#include <memory>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -48,6 +51,13 @@ constexpr UInt32 kTxCycleLead = 4096;
 constexpr std::size_t kToneStartFrames = 132300; // 1.5 s of silent startup.
 constexpr std::size_t kToneFrames = 264600; // 3 s at 88.2 kHz.
 constexpr std::size_t kPreloadFrames = 485100; // 5.5 s including silent tail.
+
+struct CaptureWindow {
+    double elapsed = 0;
+    std::uint64_t frames = 0;
+    std::uint64_t dataPackets = 0;
+    std::uint64_t noDataPackets = 0;
+};
 
 struct ResponseContext {
     UInt16 expectedNode = 0;
@@ -425,16 +435,15 @@ bool run(bool execute, bool raw, bool tone, unsigned position,
             std::cout << "GetCycleTime failed\n";
             goto cleanup;
         }
-        const UInt32 currentCycle = (cycleTime >> 12) & 0x1fffu;
-        const UInt32 firstTxCycle = (currentCycle + kTxCycleLead) % kCyclesPerSecond;
-
         auto receiveRing = macfw::AmdtpReceiveRing::create(
             device, kCapturePackets, kCaptureMaxPayload);
+        auto captureStore =
+            std::make_unique<macfw::fw1814::hal::capture::SharedCaptureRing>();
+        macfw::fw1814::hal::capture::initialize(*captureStore, 88200);
+        macfw::fw1814::experimental::CapturePump88200 captureDecoder;
         const std::size_t txPackets = extendedTxRing ? 1280 : kTxPackets;
         std::cout << "TX ring: " << txPackets << " packets / "
                   << txPackets / 2 << "-packet refill halves\n";
-        auto transmitRing = macfw::fw1814::transport::BlockingPcmTransmitRing88200::create(
-            device, firstTxCycle, txPackets);
         macfw::PcmRingBuffer silentPcm(524288, kPlaybackPcmChannels);
         const std::size_t preloadFrames = tone ? kPreloadFrames : 4 * 88200;
         std::vector<std::int32_t> preload(
@@ -452,11 +461,23 @@ bool run(bool execute, bool raw, bool tone, unsigned position,
         }
         const std::size_t preloadWritten = silentPcm.write(
             preload.data(), preloadFrames);
+        // Begin the TX lead after constructing the PCM preload; that work can
+        // otherwise consume part of the 4096-cycle lead before ISO starts.
+        const bool cycleReady = (*native)->GetCycleTime(native, &cycleTime) ==
+            kIOReturnSuccess;
+        const UInt32 currentCycle = (cycleTime >> 12) & 0x1fffu;
+        const UInt32 firstTxCycle = (currentCycle + kTxCycleLead) % kCyclesPerSecond;
+        auto transmitRing = macfw::fw1814::transport::BlockingPcmTransmitRing88200::create(
+            device, firstTxCycle, txPackets);
         macfw::fw1814::transport::BlockingPcmStream88200 streamer(
             transmitRing, silentPcm, currentCycle, firstTxCycle, txPackets / 2);
         std::atomic<bool> stopTx{false};
         std::atomic<bool> txHealthy{true};
         std::thread txWorker;
+        std::array<CaptureWindow, 12> captureWindows{};
+        std::size_t captureWindowCount = 0;
+        const CFAbsoluteTime captureStart = CFAbsoluteTimeGetCurrent();
+        bool observationReady = false;
         auto capture = macfw::IsochAllocation::create(
             device, macfw::IsochAllocation::Direction::DeviceToHost,
             kCaptureMaxPayload);
@@ -466,7 +487,7 @@ bool run(bool execute, bool raw, bool tone, unsigned position,
         IOFireWireLibIsochChannelRef captureChannel = nullptr;
         IOFireWireLibIsochChannelRef playbackChannel = nullptr;
 
-        if (!receiveRing || !transmitRing || !capture || !playback ||
+        if (!cycleReady || !receiveRing || !transmitRing || !capture || !playback ||
             !streamer.valid() || preloadWritten != preloadFrames || !streamer.prime()) {
             std::cout << "ISO resource creation failed\n";
             goto cleanup_stream;
@@ -587,6 +608,19 @@ bool run(bool execute, bool raw, bool tone, unsigned position,
                     return;
                 }
                 streamer.service((serviceTime >> 12) & 0x1fffu);
+                captureDecoder.service(receiveRing, *captureStore);
+                captureStore->readFrame.store(
+                    captureStore->writeFrame.load(std::memory_order_acquire),
+                    std::memory_order_release);
+                const double elapsed = CFAbsoluteTimeGetCurrent() - captureStart;
+                if (captureWindowCount < captureWindows.size() &&
+                    elapsed >= (captureWindowCount + 1) * 0.5) {
+                    captureWindows[captureWindowCount++] = {
+                        elapsed,
+                        captureStore->decodedFrames.load(std::memory_order_relaxed),
+                        captureStore->decodedPackets.load(std::memory_order_relaxed),
+                        captureDecoder.stats().noDataPackets};
+                }
                 std::this_thread::sleep_for(std::chrono::microseconds(250));
             }
         });
@@ -604,14 +638,7 @@ bool run(bool execute, bool raw, bool tone, unsigned position,
         std::cout << "capture: waiting up to " << (tone ? 4 : 2)
                   << " s for packets" << (tone ? " and tone playback" : "") << '\n';
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, tone ? 4.0 : 2.0, false);
-        {
-            const bool captureOk = dumpReceive(receiveRing, raw);
-            success = txHealthy.load(std::memory_order_acquire) && captureOk;
-        }
-
-        std::cout << (tone ? "duplex-blocking-tone" : "duplex-blocking-silence")
-                  << " experiment: "
-                  << (success ? "88.2 kHz PACKETS RECEIVED" : "NO VALID 88.2 kHz PACKETS") << '\n';
+        observationReady = true;
 
 cleanup_stream:
         stopTx.store(true, std::memory_order_release);
@@ -633,6 +660,53 @@ cleanup_stream:
         if (playbackStarted && playbackChannel) {
             (*playbackChannel)->Stop(playbackChannel);
             playbackStarted = false;
+        }
+        if (observationReady) {
+            success = dumpReceive(receiveRing, raw) &&
+                txHealthy.load(std::memory_order_acquire) &&
+                txStats.framesSilenced == 0 &&
+                (!tone || txStats.nonzeroFrames > 0);
+            captureDecoder.service(receiveRing, *captureStore);
+            const CaptureWindow end{
+                CFAbsoluteTimeGetCurrent() - captureStart,
+                captureStore->decodedFrames.load(std::memory_order_relaxed),
+                captureStore->decodedPackets.load(std::memory_order_relaxed),
+                captureDecoder.stats().noDataPackets};
+            std::cout << "continuous 88.2 capture: frames=" << end.frames
+                      << " data=" << end.dataPackets
+                      << " NODATA=" << end.noDataPackets
+                      << " dbcGaps=" << captureDecoder.stats().dbcDiscontinuities
+                      << " malformed=" << captureStore->malformedPackets.load(std::memory_order_relaxed)
+                      << " invalid=" << captureStore->invalidLabels.load(std::memory_order_relaxed)
+                      << " dropped=" << captureStore->droppedFrames.load(std::memory_order_relaxed)
+                      << '\n';
+            std::cout << "capture windows (seconds, effective Hz):\n";
+            CaptureWindow previous{};
+            for (std::size_t i = 0; i <= captureWindowCount; ++i) {
+                const CaptureWindow& current = i == captureWindowCount
+                    ? end : captureWindows[i];
+                const double interval = current.elapsed - previous.elapsed;
+                if (interval >= 0.01)
+                    std::cout << "    " << previous.elapsed << '-'
+                              << current.elapsed << ": "
+                              << static_cast<unsigned>(
+                                  (current.frames - previous.frames) / interval + 0.5)
+                              << " Hz (data=" << current.dataPackets - previous.dataPackets
+                              << " NODATA=" << current.noDataPackets - previous.noDataPackets
+                              << ")\n";
+                previous = current;
+            }
+            std::cout << "capture input peaks (dBFS):";
+            for (std::size_t ch = 0; ch < captureDecoder.meterPeaks().size(); ++ch) {
+                const float peak = captureDecoder.meterPeaks()[ch];
+                std::cout << " Analog" << ch + 1 << '='
+                          << (peak > 0 ? 20.0 * std::log10(peak) :
+                              -std::numeric_limits<double>::infinity());
+            }
+            std::cout << '\n';
+            std::cout << (tone ? "duplex-blocking-tone" : "duplex-blocking-silence")
+                      << " experiment: "
+                      << (success ? "88.2 kHz PACKETS RECEIVED" : "NO VALID 88.2 kHz PACKETS") << '\n';
         }
 
         UInt32 cleanupGeneration = 0;
@@ -738,7 +812,8 @@ cleanup:
 void usage(const char* argv0) {
     std::cout << "usage: " << argv0
               << " [--execute --experimental-high-rate] [--raw]"
-                 " [--tone-440 --position 0..5] [--extended-tx-ring]\n";
+                 " [--tone-440 --position 0..5]"
+                 " [--extended-tx-ring|--short-tx-ring]\n";
 }
 
 } // namespace
@@ -748,7 +823,7 @@ int main(int argc, char** argv) {
     bool raw = false;
     bool experimentalHighRate = false;
     bool tone = false;
-    bool extendedTxRing = false;
+    bool extendedTxRing = true;
     unsigned position = 2;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -757,6 +832,7 @@ int main(int argc, char** argv) {
         else if (arg == "--raw") raw = true;
         else if (arg == "--tone-440") tone = true;
         else if (arg == "--extended-tx-ring") extendedTxRing = true;
+        else if (arg == "--short-tx-ring") extendedTxRing = false;
         else if (arg == "--position" && i + 1 < argc) {
             const std::string value = argv[++i];
             if (value.size() != 1 || value[0] < '0' || value[0] > '5') {
