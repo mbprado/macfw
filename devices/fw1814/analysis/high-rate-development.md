@@ -357,7 +357,7 @@ length pattern and DBC steps; it does not touch the device:
 make -C devices/fw1814/tools schedule-quad-check
 ```
 
-The schedule check passed on the FW1814 test Mac. A separate **silent-only**
+The schedule check passed on the FW1814 test Mac. A separate guarded
 176.4-kHz duplex probe now builds on the 88.2-kHz live-refilled TX ring. It
 uses 1280 TX packets (640-packet refill halves), reserves 648 playback and
 392 capture bytes, sends 32-event silent packets with DBS=5/FDF=0x05, and
@@ -368,11 +368,12 @@ connections. Both `--experimental-high-rate` and
 checks its 64-slot RX snapshot and transmit underruns, disconnects both
 PCRs, and restores OUTPUT and INPUT to 48 kHz. It refuses execution when
 the installed FW1814 control socket is active and skips stale PCR/rate
-writes after a bus-generation change. It does not produce a tone, enable a
-HAL format, or modify the installed transport.
+writes after a bus-generation change. The default mode sends silence; an
+optional bounded 440-Hz tone targets one of the four playback PCM positions.
+It does not enable a HAL format or modify the installed transport.
 
-On the Mac, inspect the read-only preflight before executing the first
-176.4-kHz duplex attempt:
+On the Mac, inspect the read-only preflight before executing the silent
+176.4-kHz duplex test:
 
 ```sh
 git pull --ff-only
@@ -383,13 +384,32 @@ devices/fw1814/tools/fw1814capture176_duplex_blocking \
   --execute --experimental-high-rate --experimental-quad-rate --raw
 ```
 
-If the preflight reports the service still owns the device, stop it and
-repeat the dry run before execution. Report the complete result, including
-CONTROL replies, packet lengths, TX underruns, bus generation and final
-PCR/48-kHz restoration. A matching snapshot would establish the first
-silent duplex exchange, not PCM channel mapping or audible playback. The
-192-kHz duplex stream remains untested; its schedule and 32-event packet
-sizes alone do not validate its hardware startup.
+The first hardware run passed at bus generation 244. OUTPUT and INPUT
+176400-Hz CONTROL commands were accepted. The receive snapshot contained
+64/64 touched slots: 44 matching 392-byte 32-event packets with DBS=3 and
+FDF=0x05, 20 NODATA packets, and zero others. TX refilled 30 halves and
+423360 frames with zero underruns; the bus generation stayed unchanged.
+Both PCRs were restored and the authoritative INPUT readback returned to
+48000 Hz after disconnect. This establishes a silent duplex exchange,
+not PCM output mapping or sustained capture.
+
+The next test preloads 1.5 seconds of silence followed by a three-second
+440-Hz tone at -24 dBFS on playback PCM position 2. The tone is bounded;
+all other positions remain silent. Confirm the transport service is stopped,
+start with a low output/monitor level, and run:
+
+```sh
+git pull --ff-only
+make -C devices/fw1814/tools duplex176-tool
+devices/fw1814/tools/fw1814capture176_duplex_blocking \
+  --tone-440 --position 2 --execute --experimental-high-rate --experimental-quad-rate
+```
+
+Report whether the tone is clear and which physical output plays it, along
+with TX nonzero/underrun counts and final PCR/48-kHz restoration. Playback
+position 2 reached Analog Output 1 at lower rates, but its 176.4-kHz route
+has not yet been verified. The 192-kHz duplex stream remains untested; its
+schedule and 32-event packet sizes alone do not validate its hardware startup.
 
 ## First 96 kHz listening test
 

@@ -13,6 +13,7 @@
 #include <atomic>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <iomanip>
@@ -43,6 +44,8 @@ constexpr std::size_t kCapturePackets = 64;
 constexpr std::size_t kTxPackets = 1280;
 constexpr UInt32 kCyclesPerSecond = 8000;
 constexpr UInt32 kTxCycleLead = 4096;
+constexpr std::size_t kToneStartFrames = 264600; // 1.5 seconds at 176.4 kHz.
+constexpr std::size_t kToneFrames = 529200;      // Three seconds.
 
 struct ResponseContext {
     UInt16 expectedNode = 0;
@@ -297,7 +300,7 @@ bool dumpReceive(const macfw::AmdtpReceiveRing& ring, bool raw) {
     return matchingData > 0;
 }
 
-bool run(bool execute, bool raw) {
+bool run(bool execute, bool raw, bool tone, unsigned position) {
     if (execute && access("/tmp/macfw-fw1814-control.sock", F_OK) == 0) {
         std::cout << "stop the FW1814 transport service before this diagnostic\n";
         return false;
@@ -423,12 +426,23 @@ bool run(bool execute, bool raw) {
 
         auto receiveRing = macfw::AmdtpReceiveRing::create(
             device, kCapturePackets, kCaptureMaxPayload);
-        // Silence only. Preload more than the 512-ms TX lead, 100-ms rate
-        // separation and two-second observation so no refill runs dry.
-        constexpr std::size_t kPreloadFrames = 4 * 176400;
+        // Preload past the TX lead, rate kick and observation window so the
+        // DMA refill never relies on CoreAudio or a dynamic PCM producer.
+        constexpr std::size_t kPreloadFrames = 970200; // 5.5 seconds.
         macfw::PcmRingBuffer silentPcm(1048576, kPlaybackPcmChannels);
         std::vector<std::int32_t> silence(
             kPreloadFrames * kPlaybackPcmChannels, 0);
+        if (tone) {
+            constexpr double kTwoPi = 6.2831853071795864769;
+            constexpr double kPeak = 529285.0; // -24 dBFS of 24-bit PCM.
+            for (std::size_t frame = 0; frame < kToneFrames; ++frame) {
+                const double phase = kTwoPi * 440.0 * frame / 176400.0;
+                silence[(kToneStartFrames + frame) * kPlaybackPcmChannels + position] =
+                    static_cast<std::int32_t>(std::lround(kPeak * std::sin(phase)));
+            }
+            std::cout << "tone: 440 Hz at -24 dBFS, PCM position " << position
+                      << ", after 1.5 s silence for 3 s\n";
+        }
         const std::size_t preloadWritten = silentPcm.write(
             silence.data(), kPreloadFrames);
         auto transmitRing = macfw::fw1814::transport::BlockingPcmTransmitRing176400::create(
@@ -583,11 +597,13 @@ bool run(bool execute, bool raw) {
             goto cleanup_stream;
         }
 
-        std::cout << "capture: waiting up to 2 s for packets\n";
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 2.0, false);
+        std::cout << "capture: waiting up to " << (tone ? 4 : 2)
+                  << " s for packets" << (tone ? " and tone playback" : "") << '\n';
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, tone ? 4.0 : 2.0, false);
         success = dumpReceive(receiveRing, raw);
 
-        std::cout << "duplex-blocking-silence experiment: "
+        std::cout << (tone ? "duplex-blocking-tone" : "duplex-blocking-silence")
+                  << " experiment: "
                   << (success ? "176.4 kHz PACKETS RECEIVED" : "NO VALID 176.4 kHz PACKETS") << '\n';
 
 cleanup_stream:
@@ -596,10 +612,12 @@ cleanup_stream:
         const auto& txStats = streamer.stats();
         std::cout << "176.4 TX: halves=" << txStats.halvesRefilled
                   << " frames=" << txStats.framesFromBuffer
+                  << " nonzero=" << txStats.nonzeroFrames
                   << " underrun=" << txStats.framesSilenced
                   << " late=" << txStats.lateCyclePolls << '\n';
         success = success && txHealthy.load(std::memory_order_acquire) &&
-            txStats.halvesRefilled > 0 && txStats.framesSilenced == 0;
+            txStats.halvesRefilled > 0 && txStats.framesSilenced == 0 &&
+            (!tone || txStats.nonzeroFrames > 0);
         if (captureStarted && captureChannel) {
             (*captureChannel)->Stop(captureChannel);
             captureStarted = false;
@@ -711,7 +729,8 @@ cleanup:
 
 void usage(const char* argv0) {
     std::cout << "usage: " << argv0
-              << " [--execute --experimental-high-rate --experimental-quad-rate] [--raw]\n";
+              << " [--execute --experimental-high-rate --experimental-quad-rate] [--raw]"
+                 " [--tone-440 --position 0..3]\n";
 }
 
 } // namespace
@@ -721,11 +740,22 @@ int main(int argc, char** argv) {
     bool raw = false;
     bool experimentalHighRate = false;
     bool experimentalQuadRate = false;
+    bool tone = false;
+    unsigned position = 2;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--execute") execute = true;
         else if (arg == "--experimental-high-rate") experimentalHighRate = true;
         else if (arg == "--experimental-quad-rate") experimentalQuadRate = true;
+        else if (arg == "--tone-440") tone = true;
+        else if (arg == "--position" && i + 1 < argc) {
+            const std::string value = argv[++i];
+            if (value.size() != 1 || value[0] < '0' || value[0] > '3') {
+                usage(argv[0]);
+                return 64;
+            }
+            position = static_cast<unsigned>(value[0] - '0');
+        }
         else if (arg == "--raw") raw = true;
         else if (arg == "--help" || arg == "-h") {
             usage(argv[0]);
@@ -742,6 +772,6 @@ int main(int argc, char** argv) {
         return 64;
     }
 
-    std::cout << "macfw fw1814capture176-duplex-blocking — experimental quad-rate silent duplex diagnostic\n\n";
-    return run(execute, raw) ? 0 : 1;
+    std::cout << "macfw fw1814capture176-duplex-blocking — experimental quad-rate duplex diagnostic\n\n";
+    return run(execute, raw, tone, position) ? 0 : 1;
 }

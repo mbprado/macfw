@@ -24,8 +24,12 @@ experimental pending further testing; detailed evidence is in
 
 Guarded CONTROL-only tests subsequently confirmed both 176.4 and 192 kHz:
 each accepted OUTPUT then INPUT, returned the requested INPUT STATUS, and
-restored the original 48-kHz rate. Neither rate has a tested ISO stream or
-CoreAudio engine. An offline 32-event packet-schedule check is the next gate.
+restored the original 48-kHz rate. The offline 32-event packet schedule
+passed on the test Mac. The first silent 176.4-kHz duplex test then received
+44 matching data packets and 20 NODATA packets in 64 slots, with no TX
+underruns, unchanged bus generation and successful PCR/rate restoration.
+Audible playback, sustained capture and a CoreAudio engine at 176.4 kHz
+remain unverified; 192-kHz ISO streaming has not yet been tested.
 
 ## 2026-09-16 — Physical headphone encoders in the `0.04.003` release
 
