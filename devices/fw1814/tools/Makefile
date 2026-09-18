@@ -29,7 +29,7 @@ DEVICE_PROBE_TOOL := fw1814deviceprobe
 
 .PHONY: all runtime fingerprint probe boot-tool boot-check boot \
 	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe \
-	init-tool init-check init-48 init-44 init-88-check init-96-check init-176-check \
+	init-tool init-check init-48 init-44 init-88-check init-96-check init-176-check init-192-check \
 	capture48-tool capture48-check capture48 capture48-raw \
 	dualcmp-tool dualcmp-check dualcmp dualcmp-raw \
 	dualcmp-wait-tool dualcmp-wait-check dualcmp-wait dualcmp-wait-raw \
@@ -109,6 +109,10 @@ init-96-check: init-tool
 # Read-only 176.4-kHz identity check; CONTROL requires both explicit opt-ins.
 init-176-check: init-tool
 	./$(INIT_TOOL) 176400
+
+# Read-only 192-kHz identity check; CONTROL requires both explicit opt-ins.
+init-192-check: init-tool
+	./$(INIT_TOOL) 192000
 
 $(LIBMACFW):
 	$(MAKE) -C ../../fw410/lib libmacfw.a

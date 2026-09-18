@@ -297,19 +297,18 @@ late TX polls. These counters prevent a claim of bit-perfect continuity, but
 the recording sounded clean in this test. Retain the diagnostics and explicit
 opt-in while checking future runs for an increase in skips or audible artifacts.
 
-### Next guarded rate check: 176.4 kHz CONTROL
+### Guarded rate checks: 176.4 and 192 kHz CONTROL
 
 The Linux S/PDIF formation changes to 2 capture PCM positions and 4 playback
 PCM positions at 176.4/192 kHz. This requires a separate packet schedule,
-channel mapping and stream validation. The first 176.4-kHz gate extends the
-existing `fw1814init` CONTROL-only diagnostic: it requires both
+channel mapping and stream validation. The `fw1814init` CONTROL-only
+diagnostic for these rates requires both
 `--experimental-high-rate` and `--experimental-quad-rate`, an idle FW1814
 transport, and an original 44.1/48-kHz INPUT rate. It applies the documented
 clock/digital baseline, sets OUTPUT then INPUT 100 ms later, checks INPUT
 STATUS and attempts to restore the original rate even if the high-rate
 readback fails. It does not start either ISO direction or expose a new HAL
-rate. Rate 192 kHz remains outside this diagnostic until 176.4-kHz CONTROL
-and restoration have been checked on the test Mac.
+rate.
 
 Build and inspect the dry run first. With the installed FW1814 transport
 stopped and no audio clients, execute the separate guarded test:
@@ -321,9 +320,27 @@ sudo launchctl bootout system/com.mbprado.macfw.fw1814.transport
 devices/fw1814/tools/fw1814init 176400 --execute --experimental-high-rate --experimental-quad-rate --raw
 ```
 
+The 176.4-kHz Mac run passed from a 48-kHz INPUT baseline at bus generation
+242. Both OUTPUT (`00 ff 18 00 90 05 ff ff`) and INPUT
+(`00 ff 19 00 90 05 ff ff`) received matching ACCEPTED responses; INPUT
+STATUS read back 176400 Hz. Both plugs were restored to 48 kHz and INPUT
+STATUS confirmed 48000 Hz (`restore result: PASS`). The launchd transport
+service was then bootstrapped successfully. This proves rate negotiation and
+restoration on the test unit; there was no ISO stream at 176.4 kHz.
+
+The next CONTROL-only gate is 192 kHz. After stopping the FW1814 transport
+again, first check the dry run, then perform the same guarded test:
+
+```sh
+make -C devices/fw1814/tools init-tool
+devices/fw1814/tools/fw1814init 192000
+sudo launchctl bootout system/com.mbprado.macfw.fw1814.transport
+devices/fw1814/tools/fw1814init 192000 --execute --experimental-high-rate --experimental-quad-rate --raw
+```
+
 Check the final OUTPUT/INPUT restoration and authoritative INPUT readback
-before restarting the transport. A matching CONTROL result would only prove
-rate negotiation; it would not establish working 176.4-kHz audio.
+before restarting the transport. A matching CONTROL result would establish
+rate negotiation only, not working 192-kHz audio.
 
 ## First 96 kHz listening test
 
