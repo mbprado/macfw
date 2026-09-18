@@ -1,5 +1,6 @@
 #include "../transport/blocking_pcm_tx176.h"
 #include "../transport/realtime_service.h"
+#include "fw1814_capture176_pump.h"
 #include "macfw/amdtp_receive_ring.h"
 #include "macfw/cmp.h"
 #include "macfw/firewire_device.h"
@@ -18,6 +19,8 @@
 #include <cstring>
 #include <iomanip>
 #include <iostream>
+#include <limits>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -46,6 +49,13 @@ constexpr UInt32 kCyclesPerSecond = 8000;
 constexpr UInt32 kTxCycleLead = 4096;
 constexpr std::size_t kToneStartFrames = 264600; // 1.5 seconds at 176.4 kHz.
 constexpr std::size_t kToneFrames = 529200;      // Three seconds.
+
+struct CaptureWindow {
+    double elapsed = 0;
+    std::uint64_t frames = 0;
+    std::uint64_t dataPackets = 0;
+    std::uint64_t noDataPackets = 0;
+};
 
 struct ResponseContext {
     UInt16 expectedNode = 0;
@@ -419,6 +429,10 @@ bool run(bool execute, bool raw, bool tone, unsigned position) {
         UInt32 cycleTime = 0;
         auto receiveRing = macfw::AmdtpReceiveRing::create(
             device, kCapturePackets, kCaptureMaxPayload);
+        auto captureStore =
+            std::make_unique<macfw::fw1814::hal::capture::SharedCaptureRing>();
+        macfw::fw1814::hal::capture::initialize(*captureStore, 176400);
+        macfw::fw1814::experimental::CapturePump176400 captureDecoder;
         // Preload past the TX lead, rate kick and observation window so the
         // DMA refill never relies on CoreAudio or a dynamic PCM producer.
         constexpr std::size_t kPreloadFrames = 970200; // 5.5 seconds.
@@ -451,6 +465,10 @@ bool run(bool execute, bool raw, bool tone, unsigned position) {
         std::atomic<bool> stopTx{false};
         std::atomic<bool> txHealthy{true};
         std::thread txWorker;
+        std::array<CaptureWindow, 12> captureWindows{};
+        std::size_t captureWindowCount = 0;
+        const CFAbsoluteTime captureStart = CFAbsoluteTimeGetCurrent();
+        bool observationReady = false;
         auto capture = macfw::IsochAllocation::create(
             device, macfw::IsochAllocation::Direction::DeviceToHost,
             kCaptureMaxPayload);
@@ -582,6 +600,19 @@ bool run(bool execute, bool raw, bool tone, unsigned position) {
                     return;
                 }
                 streamer.service((serviceTime >> 12) & 0x1fffu);
+                captureDecoder.service(receiveRing, *captureStore);
+                captureStore->readFrame.store(
+                    captureStore->writeFrame.load(std::memory_order_acquire),
+                    std::memory_order_release);
+                const double elapsed = CFAbsoluteTimeGetCurrent() - captureStart;
+                if (captureWindowCount < captureWindows.size() &&
+                    elapsed >= (captureWindowCount + 1) * 0.5) {
+                    captureWindows[captureWindowCount++] = {
+                        elapsed,
+                        captureStore->decodedFrames.load(std::memory_order_relaxed),
+                        captureStore->decodedPackets.load(std::memory_order_relaxed),
+                        captureDecoder.stats().noDataPackets};
+                }
                 std::this_thread::sleep_for(std::chrono::microseconds(250));
             }
         });
@@ -596,14 +627,11 @@ bool run(bool execute, bool raw, bool tone, unsigned position) {
             goto cleanup_stream;
         }
 
-        std::cout << "capture: waiting up to " << (tone ? 4 : 2)
+        std::cout << "capture: waiting up to 4"
                   << " s for packets" << (tone ? " and tone playback" : "") << '\n';
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode, tone ? 4.0 : 2.0, false);
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 4.0, false);
+        observationReady = true;
         success = dumpReceive(receiveRing, raw);
-
-        std::cout << (tone ? "duplex-blocking-tone" : "duplex-blocking-silence")
-                  << " experiment: "
-                  << (success ? "176.4 kHz PACKETS RECEIVED" : "NO VALID 176.4 kHz PACKETS") << '\n';
 
 cleanup_stream:
         stopTx.store(true, std::memory_order_release);
@@ -624,6 +652,64 @@ cleanup_stream:
         if (playbackStarted && playbackChannel) {
             (*playbackChannel)->Stop(playbackChannel);
             playbackStarted = false;
+        }
+        if (observationReady) {
+            const CaptureWindow end{
+                CFAbsoluteTimeGetCurrent() - captureStart,
+                captureStore->decodedFrames.load(std::memory_order_relaxed),
+                captureStore->decodedPackets.load(std::memory_order_relaxed),
+                captureDecoder.stats().noDataPackets};
+            std::cout << "continuous 176.4 capture: frames=" << end.frames
+                      << " data=" << end.dataPackets
+                      << " NODATA=" << end.noDataPackets
+                      << " dbcGaps=" << captureDecoder.stats().dbcDiscontinuities
+                      << " duplicates=" << captureDecoder.stats().duplicateSlots
+                      << " reordered=" << captureDecoder.stats().reorderedPackets
+                      << " stale=" << captureDecoder.stats().stalePackets
+                      << " incomplete=" << captureDecoder.stats().incompleteGroups
+                      << " recovered=" << captureDecoder.stats().recoveredGroups
+                      << " overwritten=" << captureDecoder.stats().overwrittenGroups
+                      << " salvaged=" << captureDecoder.stats().salvagedGroups
+                      << " metadataSwaps=" << captureDecoder.stats().metadataByteSwaps
+                      << " malformed=" << captureStore->malformedPackets.load(std::memory_order_relaxed)
+                      << " invalid=" << captureStore->invalidLabels.load(std::memory_order_relaxed)
+                      << " dropped=" << captureStore->droppedFrames.load(std::memory_order_relaxed)
+                      << '\n';
+            std::cout << "capture windows (seconds, effective Hz):\n";
+            CaptureWindow previous{};
+            unsigned steadyWindows = 0;
+            for (std::size_t i = 0; i <= captureWindowCount; ++i) {
+                const CaptureWindow& current = i == captureWindowCount
+                    ? end : captureWindows[i];
+                const double interval = current.elapsed - previous.elapsed;
+                if (interval >= 0.01) {
+                    const double effectiveRate =
+                        (current.frames - previous.frames) / interval;
+                    if (previous.elapsed >= 1.5 && interval >= 0.3 &&
+                        effectiveRate >= 160000 && effectiveRate <= 190000)
+                        ++steadyWindows;
+                    std::cout << "    " << previous.elapsed << '-'
+                              << current.elapsed << ": "
+                              << static_cast<unsigned>(effectiveRate + 0.5)
+                              << " Hz (data=" << current.dataPackets - previous.dataPackets
+                              << " NODATA=" << current.noDataPackets - previous.noDataPackets
+                              << ")\n";
+                }
+                previous = current;
+            }
+            std::cout << "176.4 capture steady windows: " << steadyWindows
+                      << " -> " << (steadyWindows >= 2 ? "PASS" : "FAIL") << '\n';
+            success = success && steadyWindows >= 2;
+            std::cout << "capture raw PCM peaks (dBFS):";
+            for (std::size_t ch = 0; ch < 2; ++ch) {
+                const float peak = captureDecoder.meterPeaks()[ch];
+                std::cout << " position" << ch << '='
+                          << (peak > 0 ? 20.0 * std::log10(peak) :
+                              -std::numeric_limits<double>::infinity());
+            }
+            std::cout << '\n';
+            std::cout << (tone ? "duplex-blocking-tone" : "duplex-blocking-silence")
+                      << " experiment: " << (success ? "PASS" : "FAIL") << '\n';
         }
 
         UInt32 cleanupGeneration = 0;

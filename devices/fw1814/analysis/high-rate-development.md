@@ -418,11 +418,29 @@ test preloads three seconds of tone after 1.5 seconds of silence, and neither
 the TX nonzero/underrun counters nor the four-position output map were
 reported. The probe now anchors its 4096-cycle TX lead **after** preparing
 the PCM buffer, matching the tested 96-kHz diagnostic, so buffer preparation
-does not consume the lead. The subsequent position-2 run was audible.
-Its physical output, tone quality and TX counters were not reported, so the
-four-position mapping and sustained audio quality remain open. The receive
-result is still a 64-slot snapshot; the next capture test needs continuous
-RX decoding and frame-rate/continuity checks at 176.4 kHz.
+does not consume the lead. The subsequent position-2 run was clear, and
+the four-position output map was confirmed unchanged at 176.4 kHz:
+position 2 -> Analog Output 1, 3 -> Output 2, 0 -> Output 3, 1 -> Output 4.
+This establishes audible playback routing; long-run quality remains untested.
+
+The receive snapshot cannot establish sustained input. A standalone
+176.4-kHz capture pump now decodes successive 32-cycle groups into two raw
+PCM positions, validates 32-event/DBS=3/FDF=0x05 packets, filters replayed
+slots and orders fresh packets by cycle timestamp. It reports half-second
+frame-rate windows and raw position peaks, requiring two steady windows near
+176400 Hz before returning PASS. The physical input jacks corresponding to
+the raw positions are still unknown. Stop the installed transport, connect
+a low-level known signal to Analog Input 1, then run the silent duplex probe:
+
+```sh
+git pull --ff-only
+make -C devices/fw1814/tools duplex176-tool
+devices/fw1814/tools/fw1814capture176_duplex_blocking --execute --experimental-high-rate --experimental-quad-rate
+```
+
+Report `continuous 176.4 capture`, half-second windows, both raw PCM peaks,
+TX underruns and final PCR/rate restoration. This standalone diagnostic
+does not enable a CoreAudio input format.
 
 ## First 96 kHz listening test
 

@@ -29,9 +29,11 @@ passed on the test Mac. The first silent 176.4-kHz duplex test then received
 44 matching data packets and 20 NODATA packets in 64 slots, with no TX
 underruns, unchanged bus generation and successful PCR/rate restoration.
 After the TX lead was anchored following PCM preload, the position-2 440-Hz
-tone became audible at 176.4 kHz. Its physical output mapping and long-run
-quality remain to be checked. Sustained capture and a CoreAudio engine at
-176.4 kHz remain unverified; 192-kHz ISO streaming has not yet been tested.
+tone became clear at 176.4 kHz. All four playback positions kept their
+lower-rate analog-output mapping (2->1, 3->2, 0->3, 1->4). A standalone
+continuous two-position capture decoder is prepared for hardware testing.
+Sustained capture and a CoreAudio engine at 176.4 kHz remain unverified;
+192-kHz ISO streaming has not yet been tested.
 
 ## 2026-09-16 — Physical headphone encoders in the `0.04.003` release
 

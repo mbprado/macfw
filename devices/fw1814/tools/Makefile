@@ -220,7 +220,7 @@ duplex88-raw: duplex88-tool
 # a second explicit opt-in is required before any ISO or CONTROL writes.
 duplex176-tool: $(DUPLEX176_TOOL)
 
-$(DUPLEX176_TOOL): fw1814capture176_duplex_nodata.cpp ../transport/blocking_pcm_tx176.h $(LIBMACFW)
+$(DUPLEX176_TOOL): fw1814capture176_duplex_nodata.cpp fw1814_capture176_pump.h ../transport/blocking_pcm_tx176.h $(LIBMACFW)
 	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814capture176_duplex_nodata.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
 
 duplex176-check: duplex176-tool
