@@ -11,7 +11,8 @@ also has one MIDI position, which macfw does not currently expose.
 | 44.1/48 kHz | 10 PCM | 6 PCM | macfw analog audio validated |
 | 88.2 kHz | 10 PCM | 6 PCM | Experimental CoreAudio playback, recording and monitoring tested, including an approximately five-minute recording; hardware opt-in required |
 | 96 kHz | 10 PCM | 6 PCM | Experimental CoreAudio playback and analog capture tested; hardware opt-in required |
-| 176.4/192 kHz | 2 PCM | 4 PCM | Linux reference; macfw hardware untested |
+| 176.4 kHz | 2 PCM | 4 PCM | Guarded duplex packets and audible position-2 tone tested; sustained capture and CoreAudio untested |
+| 192 kHz | 2 PCM | 4 PCM | CONTROL/readback tested; ISO streaming untested |
 
 Linux's [FW1814 clock protocol](https://github.com/alsa-project/snd-firewire-ctl-services/blob/master/protocols/bebob/src/maudio/special.rs)
 lists all six rates. This is evidence of a supported rate-control code, not
@@ -417,9 +418,11 @@ test preloads three seconds of tone after 1.5 seconds of silence, and neither
 the TX nonzero/underrun counters nor the four-position output map were
 reported. The probe now anchors its 4096-cycle TX lead **after** preparing
 the PCM buffer, matching the tested 96-kHz diagnostic, so buffer preparation
-does not consume the lead. Repeat position 2 first; if it remains silent
-despite nonzero TX frames, try positions 0, 1 and 3 separately, confirming
-rate/PCR restoration after each run. Audible playback remains unverified.
+does not consume the lead. The subsequent position-2 run was audible.
+Its physical output, tone quality and TX counters were not reported, so the
+four-position mapping and sustained audio quality remain open. The receive
+result is still a 64-slot snapshot; the next capture test needs continuous
+RX decoding and frame-rate/continuity checks at 176.4 kHz.
 
 ## First 96 kHz listening test
 
