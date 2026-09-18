@@ -34,8 +34,10 @@ lower-rate analog-output mapping (2->1, 3->2, 0->3, 1->4). A standalone
 continuous two-position capture decoder then passed on the test Mac: six
 steady half-second windows near 176400 Hz, no DBC gaps, malformed packets
 or dropped frames, and successful PCR/rate restoration. The first raw input
-position carried the stronger test signal; its physical jack needs explicit
-confirmation, as does the second position. Audible capture quality and a
+position carried the stronger test signal. When the source was moved to
+Input 2, *both* raw positions peaked near -31.5 dBFS despite zero continuity
+or format errors. Physical input mapping is unresolved pending a raw packet
+comparison and isolation of the source connection. Audible capture quality and a
 CoreAudio engine at 176.4 kHz remain unverified; 192-kHz ISO streaming has
 not yet been tested.
 

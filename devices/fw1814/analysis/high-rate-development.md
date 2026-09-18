@@ -460,6 +460,24 @@ same run with the source moved to Analog Input 2 to verify position 1
 before assigning physical input names in the CoreAudio engine. The
 standalone probe does not establish audible recording quality or monitoring.
 
+The follow-up run with the source moved to Analog Input 2 again passed six
+steady capture windows (roughly 175087-177676 Hz), with 591744 decoded
+frames, zero DBC gaps, duplicate/reordered/stale packets, malformed labels
+or drops. The two raw positions unexpectedly peaked almost equally:
+position 0 at -31.41 dBFS and position 1 at -31.49 dBFS. Seventeen RX groups
+were briefly incomplete; sixteen recovered, one was safely salvaged, none
+overwritten. Rate and both PCRs restored normally. The capture decoder
+reads distinct quadlets for the two positions; these peak values alone
+cannot distinguish electrical coupling, routing or duplicated sample data.
+Do not assign Input 2 or expose quad-rate CoreAudio capture channels yet.
+
+With only the Analog Input 2 source connected, repeat the standalone run
+with `--raw` and compare the *first two PCM quadlets after the eight-byte CIP
+header* across a couple of 392-byte data packets. This keeps the same
+bounded ISO operation and 48-kHz/PCR restoration. The full run output also
+reports both input peaks. Test the physical plug/generator independently if
+the two raw sequences match.
+
 ## First 96 kHz listening test
 
 `fw1814tone96` reuses the proven 96 kHz duplex probe and its restoration
