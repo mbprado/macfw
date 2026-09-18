@@ -200,6 +200,16 @@ signal into its physical input during the tone run and compare its peak with
 the other inputs. The packet counts and steady windows should approach
 88,200 decoded frames per second, with no malformed packets or DBC gaps.
 
+The first continuous decode found Analog Input 1 at about -25.7 dBFS with no
+malformed packets, invalid labels or frame drops. Its later half-second
+windows reported up to 4,122 total data/NODATA packets, which exceeds the
+4,000 FireWire cycles available in half a second. Reported 89-90 kHz rates
+and 105 DBC gaps therefore cannot yet be treated as actual device capture
+behavior. The standalone 88.2-kHz decoder now deduplicates by each RX slot's
+cycle timestamp, in addition to its chunk completion signature, and prints
+duplicate, reorder, timestamp-regression and metadata-swap counters. Repeat
+the guarded test before drawing conclusions about sustained capture.
+
 ## First 96 kHz listening test
 
 `fw1814tone96` reuses the proven 96 kHz duplex probe and its restoration

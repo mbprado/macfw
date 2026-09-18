@@ -676,6 +676,11 @@ cleanup_stream:
                       << " data=" << end.dataPackets
                       << " NODATA=" << end.noDataPackets
                       << " dbcGaps=" << captureDecoder.stats().dbcDiscontinuities
+                      << " duplicates=" << captureDecoder.stats().duplicateSlots
+                      << " reordered=" << captureDecoder.stats().reorderedPackets
+                      << " stale=" << captureDecoder.stats().stalePackets
+                      << " tsRegress=" << captureDecoder.stats().timestampRegressions
+                      << " metadataSwaps=" << captureDecoder.stats().metadataByteSwaps
                       << " malformed=" << captureStore->malformedPackets.load(std::memory_order_relaxed)
                       << " invalid=" << captureStore->invalidLabels.load(std::memory_order_relaxed)
                       << " dropped=" << captureStore->droppedFrames.load(std::memory_order_relaxed)

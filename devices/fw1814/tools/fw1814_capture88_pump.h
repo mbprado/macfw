@@ -27,6 +27,7 @@ public:
         std::uint64_t completedChunks = 0;
         std::uint64_t noDataPackets = 0;
         std::uint64_t metadataByteSwaps = 0;
+        std::uint64_t duplicateSlots = 0;
     };
 
     std::size_t service(const macfw::AmdtpReceiveRing& rx,
@@ -80,6 +81,18 @@ private:
         for (std::size_t index = begin; index < end; ++index) {
             const auto& slot = rx.slot(index);
             if (!slot.touched()) continue;
+            // A changed terminal DCL is not sufficient proof that every slot
+            // in this chunk contains a new cycle. When a publication races
+            // with inspection, the same completed slot can be seen twice.
+            // A given slot is reused only after a full receive-ring rotation,
+            // so its normalized cycle timestamp must change for new data.
+            if (slot.timestamp != 0 &&
+                slot.timestamp == lastSlotTimestamp_[index]) {
+                ++stats_.duplicateSlots;
+                continue;
+            }
+            if (slot.timestamp != 0)
+                lastSlotTimestamp_[index] = slot.timestamp;
             if (slot.metadataByteSwapped) ++stats_.metadataByteSwaps;
             if (slot.packetLength() > slot.capacity) {
                 out.malformedPackets.fetch_add(1, std::memory_order_relaxed);
@@ -255,6 +268,7 @@ private:
     }
 
     std::array<std::uint64_t, 8> lastChunkSignature_{};
+    std::array<std::uint32_t, 256> lastSlotTimestamp_{};
     Stats stats_{};
     std::array<float, macfw::fw1814::hal::capture::kInputChannels> meterPeaks_{};
     bool haveExpectedDbc_ = false;
