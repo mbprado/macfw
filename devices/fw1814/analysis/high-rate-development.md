@@ -411,6 +411,16 @@ position 2 reached Analog Output 1 at lower rates, but its 176.4-kHz route
 has not yet been verified. The 192-kHz duplex stream remains untested; its
 schedule and 32-event packet sizes alone do not validate its hardware startup.
 
+The first 176.4-kHz tone attempt activated the output but was inaudible on
+position 2. This is not yet evidence that quad-rate playback is absent: the
+test preloads three seconds of tone after 1.5 seconds of silence, and neither
+the TX nonzero/underrun counters nor the four-position output map were
+reported. The probe now anchors its 4096-cycle TX lead **after** preparing
+the PCM buffer, matching the tested 96-kHz diagnostic, so buffer preparation
+does not consume the lead. Repeat position 2 first; if it remains silent
+despite nonzero TX frames, try positions 0, 1 and 3 separately, confirming
+rate/PCR restoration after each run. Audible playback remains unverified.
+
 ## First 96 kHz listening test
 
 `fw1814tone96` reuses the proven 96 kHz duplex probe and its restoration

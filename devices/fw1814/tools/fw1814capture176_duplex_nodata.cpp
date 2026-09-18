@@ -417,13 +417,6 @@ bool run(bool execute, bool raw, bool tone, unsigned position) {
 
     {
         UInt32 cycleTime = 0;
-        if ((*native)->GetCycleTime(native, &cycleTime) != kIOReturnSuccess) {
-            std::cout << "GetCycleTime failed\n";
-            goto cleanup;
-        }
-        const UInt32 currentCycle = (cycleTime >> 12) & 0x1fffu;
-        const UInt32 firstTxCycle = (currentCycle + kTxCycleLead) % kCyclesPerSecond;
-
         auto receiveRing = macfw::AmdtpReceiveRing::create(
             device, kCapturePackets, kCaptureMaxPayload);
         // Preload past the TX lead, rate kick and observation window so the
@@ -445,6 +438,12 @@ bool run(bool execute, bool raw, bool tone, unsigned position) {
         }
         const std::size_t preloadWritten = silentPcm.write(
             silence.data(), kPreloadFrames);
+        // Take the cycle anchor only after the expensive PCM preparation.
+        // Otherwise it consumes the fixed TX lead before ISO can start.
+        const bool cycleReady = (*native)->GetCycleTime(native, &cycleTime) ==
+            kIOReturnSuccess;
+        const UInt32 currentCycle = (cycleTime >> 12) & 0x1fffu;
+        const UInt32 firstTxCycle = (currentCycle + kTxCycleLead) % kCyclesPerSecond;
         auto transmitRing = macfw::fw1814::transport::BlockingPcmTransmitRing176400::create(
             device, firstTxCycle, kTxPackets);
         macfw::fw1814::transport::BlockingPcmStream176400 streamer(
@@ -461,7 +460,7 @@ bool run(bool execute, bool raw, bool tone, unsigned position) {
         IOFireWireLibIsochChannelRef captureChannel = nullptr;
         IOFireWireLibIsochChannelRef playbackChannel = nullptr;
 
-        if (!receiveRing || !transmitRing || !capture || !playback ||
+        if (!cycleReady || !receiveRing || !transmitRing || !capture || !playback ||
             !silentPcm.valid() || preloadWritten != kPreloadFrames ||
             !streamer.valid() || !streamer.prime()) {
             std::cout << "ISO resource creation failed\n";
