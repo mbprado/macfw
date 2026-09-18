@@ -9,7 +9,7 @@ also has one MIDI position, which macfw does not currently expose.
 | Rate | Device to host | Host to device | Status |
 |---|---:|---:|---|
 | 44.1/48 kHz | 10 PCM | 6 PCM | macfw analog audio validated |
-| 88.2 kHz | 10 PCM | 6 PCM | Clear 440-Hz playback with 1280-slot TX; continuous analog capture validated in the guarded probe; CoreAudio trial pending |
+| 88.2 kHz | 10 PCM | 6 PCM | Experimental CoreAudio playback, recording and monitoring tested, including an approximately five-minute recording; hardware opt-in required |
 | 96 kHz | 10 PCM | 6 PCM | Experimental CoreAudio playback and analog capture tested; hardware opt-in required |
 | 176.4/192 kHz | 2 PCM | 4 PCM | Linux reference; macfw hardware untested |
 
@@ -53,7 +53,7 @@ leave the production transport stopped and restore the device to a validated
 rate before continuing. Do not expose the high rate in the HAL merely because
 the CONTROL response succeeds.
 
-## Next evidence gate
+## Early CONTROL evidence gate
 
 On the FW1814 test Mac, both high-rate CONTROL tests passed from an initial
 48 kHz INPUT rate. OUTPUT and INPUT CONTROL accepted 88.2 kHz (rate code
@@ -147,8 +147,9 @@ The explicit execution sends silent 6-PCM/1-MIDI variable-cadence packets,
 attempts the OUTPUT-then-INPUT rate kick with both ISO directions running,
 and checks for 712-byte, 16-event capture packets with FDF `0x03` and
 8-byte NODATA packets. It then stops both streams, restores both PCRs and the
-original 48-kHz rate, and checks the final INPUT readback. Audio playback,
-capture channel mapping, and CoreAudio 88.2-kHz support remain unverified.
+original 48-kHz rate, and checks the final INPUT readback. At this stage,
+audio playback, capture channel mapping and CoreAudio support remained
+unverified; the later sections record those tests.
 
 The first silent run on the test FW1814 passed: 44 full packets and 20
 NODATA packets in the 64-slot snapshot, zero unexpected packet shapes or
@@ -236,8 +237,8 @@ overwritten, while most incomplete groups recovered before the next ring
 rotation. A guarded follow-up waits two milliseconds; if exactly one of the
 32 slots still has its previous timestamp, it decodes the other 31 and
 reports `salvaged` and `skipped-slots`. It never decodes a group with two or
-more missing timestamps. Validate recording quality and these counters on
-the Mac before treating this as an improvement.
+more missing timestamps. The subsequent five-minute Mac run is summarized
+below; a skipped slot cannot be reconstructed from its surviving neighbors.
 
 ## Experimental 88.2 kHz CoreAudio trial
 
@@ -246,9 +247,11 @@ The 88.2 kHz HAL format and supervisor engine are gated by a root-owned
 1280-packet transmit ring with 640-packet refill halves and continuous
 receive-slot deduplication. It starts from a validated 48 kHz baseline, kicks
 OUTPUT and INPUT to 88.2 kHz with both ISO directions active, then restores
-48 kHz when it stops. Its startup silence and monitoring latency have not yet
-been measured with CoreAudio. The standard install does not include this
-engine or enable the rate.
+48 kHz when it stops. Logic Pro playback, analog recording and software
+monitoring have been tested at this rate. Monitoring latency was noticeable
+but acceptable by ear; no physical round-trip latency measurement is
+available. The standard install does not include this engine or enable the
+rate.
 
 On the FW1814 Mac, with the device attached:
 
@@ -265,6 +268,34 @@ rate, TX underruns and capture errors. To return to the normal 44.1/48 kHz
 installation, run `sudo make fw1814-install` after the ordinary build.
 The separate 96 kHz experimental install remains available, and installing
 either experimental engine preserves the other if it was already enabled.
+
+### CoreAudio hardware checkpoint: sustained 88.2 kHz recording
+
+On the FW1814 test Mac, playback-only audio sounded clean, and Logic Pro
+recording and software monitoring continued without cutoffs after the RX
+timestamp-rollover correction. An earlier run had sporadic capture artifacts;
+waiting for complete receive groups substantially improved it. A later
+capture stall after a few seconds was traced to receive timestamp rollover
+and corrected. Following the single-stale-slot salvage change, the user
+recorded and listened to an entire song for about five minutes at 88.2 kHz
+without noticing abnormal audio. Rate changes among 44.1, 48, 88.2 and 96
+kHz also worked in a shorter test. One initial 44.1-kHz start sounded broken
+and recovered after another rate change; it has been rare and is deferred
+until reproducible. The standard installer remains limited to 44.1/48 kHz.
+
+The approximately five-minute transport log contains 148 two-second 88.2-kHz
+status reports with `cap-active=1` and no engine restart. Apart from the
+first partial window and six windows reporting 176752 frames, the other 141
+windows report exactly 176400 captured frames (88200 frames/second). During
+this interval, `cap-drop`, `hal-drop`, `overwritten`, `dbc-gap`, `duplicates`,
+`ts-regress`, `metadata-swaps`, `reorder` and `stale` stayed at zero. The
+receive-group counters increased by 2492 incomplete observations, 2455
+recoveries and 37 salvaged groups with one skipped slot each; no group was
+overwritten. Two HAL input underruns occurred, while playback accumulated 528
+PCM underrun/silent frames (about 6 ms total at 88.2 kHz) and 21 additional
+late TX polls. These counters prevent a claim of bit-perfect continuity, but
+the recording sounded clean in this test. Retain the diagnostics and explicit
+opt-in while checking future runs for an increase in skips or audible artifacts.
 
 ## First 96 kHz listening test
 

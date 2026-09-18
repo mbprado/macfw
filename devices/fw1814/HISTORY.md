@@ -4,6 +4,24 @@ This file records visible project milestones rather than every diagnostic
 experiment. Detailed protocol, transport and routing findings remain under
 `devices/fw1814/analysis/`.
 
+## 2026-09-18 — Experimental 88.2/96 kHz CoreAudio trials
+
+Guarded rate-control and duplex-stream diagnostics established the FW1814's
+high-rate packet formats. Separate opt-in CoreAudio engines were developed for
+88.2 and 96 kHz; the normal installation still exposes 44.1 and 48 kHz.
+At 88.2 kHz, a 1280-packet playback ring made the standalone 440-Hz tone
+clear. Receive-slot completion, FireWire cycle rollover handling and guarded
+salvage of a group with one stale slot stabilized CoreAudio capture.
+
+The test Mac recorded and played an approximately five-minute song at 88.2
+kHz without audible abnormalities. The log showed continuous capture, no
+capture drops or overwritten groups, and 37 salvaged groups, two HAL input
+underruns and 528 playback silence frames. Rate switching among 44.1, 48,
+88.2 and 96 kHz also worked, although a rare first 44.1-kHz start sounded
+broken and recovered on a subsequent switch. High-rate engines remain
+experimental pending further testing; detailed evidence is in
+[`analysis/high-rate-development.md`](analysis/high-rate-development.md).
+
 ## 2026-09-16 — Physical headphone encoders in the `0.04.003` release
 
 The first unified `0.04.000` release included the FW1814 analog CoreAudio

@@ -35,8 +35,11 @@ The released FW1814 analog profile currently provides:
   and reconnect; all four analog input-pair monitor levels also survive a
   transport restart through the same state path.
 
-Higher sample rates remain under development; the first 88.2/96 kHz CONTROL
-and readback diagnostic is described in
+Experimental 88.2 and 96 kHz analog CoreAudio engines are available through
+separate hardware opt-in installation targets. An approximately five-minute
+88.2 kHz recording sounded clean on the FW1814 test Mac; these rates are not
+part of the standard installer or release packages. The validation history,
+remaining caveats and test commands are in
 [`analysis/high-rate-development.md`](analysis/high-rate-development.md).
 S/PDIF, ADAT and MIDI are intentionally deferred until macfw can be compared
 directly with the original FW410 and FW1814 control panels running
