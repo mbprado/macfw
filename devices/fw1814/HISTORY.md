@@ -22,6 +22,11 @@ broken and recovered on a subsequent switch. High-rate engines remain
 experimental pending further testing; detailed evidence is in
 [`analysis/high-rate-development.md`](analysis/high-rate-development.md).
 
+Guarded CONTROL-only tests subsequently confirmed both 176.4 and 192 kHz:
+each accepted OUTPUT then INPUT, returned the requested INPUT STATUS, and
+restored the original 48-kHz rate. Neither rate has a tested ISO stream or
+CoreAudio engine. An offline 32-event packet-schedule check is the next gate.
+
 ## 2026-09-16 — Physical headphone encoders in the `0.04.003` release
 
 The first unified `0.04.000` release included the FW1814 analog CoreAudio

@@ -328,8 +328,8 @@ STATUS confirmed 48000 Hz (`restore result: PASS`). The launchd transport
 service was then bootstrapped successfully. This proves rate negotiation and
 restoration on the test unit; there was no ISO stream at 176.4 kHz.
 
-The next CONTROL-only gate is 192 kHz. After stopping the FW1814 transport
-again, first check the dry run, then perform the same guarded test:
+The second CONTROL-only gate is 192 kHz. After stopping the FW1814 transport,
+the same guarded test was run:
 
 ```sh
 make -C devices/fw1814/tools init-tool
@@ -338,9 +338,28 @@ sudo launchctl bootout system/com.mbprado.macfw.fw1814.transport
 devices/fw1814/tools/fw1814init 192000 --execute --experimental-high-rate --experimental-quad-rate --raw
 ```
 
-Check the final OUTPUT/INPUT restoration and authoritative INPUT readback
-before restarting the transport. A matching CONTROL result would establish
-rate negotiation only, not working 192-kHz audio.
+On the test Mac at bus generation 244, OUTPUT (`00 ff 18 00 90 06 ff ff`)
+and INPUT (`00 ff 19 00 90 06 ff ff`) received matching ACCEPTED responses.
+INPUT STATUS returned 192000 Hz. Both plugs then restored to the original
+48000 Hz, confirmed by INPUT STATUS (`restore result: PASS`). This proves
+rate negotiation and restoration, not working 192-kHz audio.
+
+The next duplex step begins with an offline check of the Linux 32-event
+blocking schedule. In S/PDIF mode, the expected maximum capture packet is
+392 bytes (32 events * 3 positions * 4 bytes + 8-byte CIP header), and the
+playback packet is 648 bytes (32 * 5 * 4 + 8). At 176.4 kHz the 44.1-family
+data/NODATA length pattern repeats every 640 cycles: 441 data packets, each
+with 32 frames. At 192 kHz, three 32-event packets per four bus cycles give
+192000 frames per second. The local offline check verifies the 640/1280-slot
+length pattern and DBC steps; it does not touch the device:
+
+```sh
+make -C devices/fw1814/tools schedule-quad-check
+```
+
+Only after the packet-size and schedule check should a separate guarded
+silent duplex probe be built. The 88.2/96-kHz probe reservations and channel
+mapping do not describe this 176.4/192-kHz stream formation.
 
 ## First 96 kHz listening test
 
