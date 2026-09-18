@@ -24,6 +24,7 @@ constexpr AudioObjectID kOutputStreamID = 3;
 constexpr AudioObjectID kInputStreamID = 4;
 constexpr Float64 kRate44100 = 44100.0;
 constexpr Float64 kRate48000 = 48000.0;
+constexpr Float64 kRate88200 = 88200.0;
 constexpr Float64 kRate96000 = 96000.0;
 constexpr UInt32 kOutputChannels = macfw::fw1814::hal::kOutputChannels;
 constexpr UInt32 kInputChannels = macfw::fw1814::hal::capture::kInputChannels;
@@ -50,11 +51,19 @@ bool IsKnownObject(AudioObjectID id) {
 
 bool IsSupportedRate(std::uint32_t rate) {
     return rate == 44100 || rate == 48000 ||
+           (rate == 88200 && macfw::fw1814::experimental::enabled88()) ||
            (rate == 96000 && macfw::fw1814::experimental::enabled96());
 }
 
 UInt32 AvailableRateCount() {
-    return macfw::fw1814::experimental::enabled96() ? 3 : 2;
+    return 2 + macfw::fw1814::experimental::enabled88() +
+           macfw::fw1814::experimental::enabled96();
+}
+
+Float64 AvailableHighRate(UInt32 index) {
+    if (macfw::fw1814::experimental::enabled88() && index == 2)
+        return kRate88200;
+    return kRate96000;
 }
 
 int OpenStableShm(const char* name, std::size_t bytes) {
@@ -670,7 +679,10 @@ OSStatus STDMETHODCALLTYPE GetPropertyData(AudioServerPlugInDriverRef driver,
                 auto* rates = static_cast<AudioValueRange*>(outData);
                 rates[0] = {kRate44100, kRate44100};
                 rates[1] = {kRate48000, kRate48000};
-                if (count == 3) rates[2] = {kRate96000, kRate96000};
+                for (UInt32 i = 2; i < count; ++i) {
+                    const Float64 rate = AvailableHighRate(i);
+                    rates[i] = {rate, rate};
+                }
                 *outSize = count * sizeof(AudioValueRange);
                 return kAudioHardwareNoError;
             }
@@ -723,10 +735,12 @@ OSStatus STDMETHODCALLTYPE GetPropertyData(AudioServerPlugInDriverRef driver,
                     formats[1] = {
                         OutputFormat(kRate48000), {kRate48000, kRate48000}};
                 }
-                if (count == 3)
-                    formats[2] = isInput
-                        ? AudioStreamRangedDescription{InputFormat(kRate96000), {kRate96000, kRate96000}}
-                        : AudioStreamRangedDescription{OutputFormat(kRate96000), {kRate96000, kRate96000}};
+                for (UInt32 i = 2; i < count; ++i) {
+                    const Float64 highRate = AvailableHighRate(i);
+                    formats[i] = isInput
+                        ? AudioStreamRangedDescription{InputFormat(highRate), {highRate, highRate}}
+                        : AudioStreamRangedDescription{OutputFormat(highRate), {highRate, highRate}};
+                }
                 *outSize = count * sizeof(AudioStreamRangedDescription);
                 return kAudioHardwareNoError;
             }
@@ -757,6 +771,7 @@ OSStatus STDMETHODCALLTYPE SetPropertyData(AudioServerPlugInDriverRef driver,
             return kAudioHardwareBadPropertySizeError;
         const Float64 rate = *static_cast<const Float64*>(inData);
         if (rate != kRate44100 && rate != kRate48000 &&
+            !(rate == kRate88200 && macfw::fw1814::experimental::enabled88()) &&
             !(rate == kRate96000 && macfw::fw1814::experimental::enabled96()))
             return kAudioHardwareIllegalOperationError;
         if (static_cast<std::uint32_t>(rate) ==
@@ -932,7 +947,8 @@ OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef,
             // preserves ~341 ms of stale software-monitor audio forever.
             // A flush makes this callback silent; the engine refills from
             // fresh packets before enabling capture again.
-            const bool stale = gSampleRate.load(std::memory_order_acquire) == 96000 &&
+            const bool stale = (gSampleRate.load(std::memory_order_acquire) == 96000 ||
+                gSampleRate.load(std::memory_order_acquire) == 88200) &&
                 macfw::fw1814::hal::capture::suspendStaleCapture(*gCaptureRing, 4096);
             if (!stale) {
                 got = macfw::fw1814::hal::capture::read(

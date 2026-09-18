@@ -54,6 +54,7 @@ bool requestedSampleRate(std::uint32_t& rate) {
         const std::uint32_t requested =
             ring->sampleRate.load(std::memory_order_acquire);
         ready = requested == 44100 || requested == 48000 ||
+                (requested == 88200 && macfw::fw1814::experimental::enabled88()) ||
                 (requested == 96000 && macfw::fw1814::experimental::enabled96());
         if (ready) rate = requested;
     }
@@ -166,7 +167,7 @@ int runEngine(const std::string& path,
         char fdText[32] = {};
         std::snprintf(fdText, sizeof(fdText), "%d", readyPipe[1]);
         setenv("MACFW_ENGINE_READY_FD", fdText, 1);
-        if (startedRate == 96000)
+        if (startedRate == 96000 || startedRate == 88200)
             execl(path.c_str(), path.c_str(), "--experimental-high-rate",
                   static_cast<char*>(nullptr));
         else
@@ -300,10 +301,11 @@ int main(int argc, char** argv) {
     const std::string engine48Path = here + "/fw1814analog48";
     const std::string engine44Path = here + "/fw1814analog44";
     const std::string engine96Path = here + "/fw1814analog96";
+    const std::string engine88Path = here + "/fw1814analog88";
     const std::string stateHelperPath = here + "/fw1814state";
     const std::string controlHelperPath = here + "/fw1814ctl";
 
-    std::printf("macfw fw1814supervisor — resilient 44.1/48 kHz transport supervisor; guarded 96 kHz\n");
+    std::printf("macfw fw1814supervisor — resilient 44.1/48 kHz transport supervisor; guarded 88.2/96 kHz\n");
     std::printf("automatic reconnect and guarded bootloader recovery: enabled\n");
     std::printf("validated pre-transport FW1814 bus reset: enabled\n");
     std::printf("persistent validated routing-state restore: enabled\n");
@@ -420,7 +422,8 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        const std::string& enginePath = requestedRate == 96000 ? engine96Path :
+        const std::string& enginePath = requestedRate == 88200 ? engine88Path :
+            requestedRate == 96000 ? engine96Path :
             requestedRate == 44100 ? engine44Path : engine48Path;
         if (access(enginePath.c_str(), X_OK) != 0) {
             std::fprintf(stderr, "FW1814 requested engine unavailable: %s\n", enginePath.c_str());
@@ -428,7 +431,9 @@ int main(int argc, char** argv) {
             continue;
         }
         std::printf("FW1814 post-reset init-%s PASS; starting %s\n",
-                    rateArg, requestedRate == 96000
+                    rateArg, requestedRate == 88200
+                        ? "experimental 88.2 kHz analog transport engine"
+                        : requestedRate == 96000
                         ? "experimental 96 kHz analog transport engine"
                         : requestedRate == 44100
                             ? "44.1 kHz analog transport engine"

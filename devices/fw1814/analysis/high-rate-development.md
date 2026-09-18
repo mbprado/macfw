@@ -9,15 +9,15 @@ also has one MIDI position, which macfw does not currently expose.
 | Rate | Device to host | Host to device | Status |
 |---|---:|---:|---|
 | 44.1/48 kHz | 10 PCM | 6 PCM | macfw analog audio validated |
-| 88.2 kHz | 10 PCM | 6 PCM | Duplex packets and 440-Hz playback validated in the 1280-slot probe; continuous capture testing pending |
-| 96 kHz | 10 PCM | 6 PCM | Duplex silent packet capture validated; audio mapping untested |
+| 88.2 kHz | 10 PCM | 6 PCM | Clear 440-Hz playback with 1280-slot TX; continuous analog capture validated in the guarded probe; CoreAudio trial pending |
+| 96 kHz | 10 PCM | 6 PCM | Experimental CoreAudio playback and analog capture tested; hardware opt-in required |
 | 176.4/192 kHz | 2 PCM | 4 PCM | Linux reference; macfw hardware untested |
 
 Linux's [FW1814 clock protocol](https://github.com/alsa-project/snd-firewire-ctl-services/blob/master/protocols/bebob/src/maudio/special.rs)
 lists all six rates. This is evidence of a supported rate-control code, not
 proof that the existing macfw blocking packet cadence, bandwidth, channel map
-or CoreAudio engine works at the higher rates. The released HAL and transport
-continue to expose only 44.1/48 kHz.
+or CoreAudio engine works at the higher rates. The default installation
+exposes only 44.1/48 kHz; higher rates require explicit experimental opt-in.
 
 ## First diagnostic: CONTROL and readback only
 
@@ -209,6 +209,42 @@ behavior. The standalone 88.2-kHz decoder now deduplicates by each RX slot's
 cycle timestamp, in addition to its chunk completion signature, and prints
 duplicate, reorder, timestamp-regression and metadata-swap counters. Repeat
 the guarded test before drawing conclusions about sustained capture.
+
+The repeated run after RX-slot deduplication reported 307488 decoded frames,
+19218 data packets, 13006 NODATA packets and 416 suppressed duplicates, with
+zero DBC gaps, malformed packets, invalid labels, dropped frames, reordered
+packets, timestamp regressions and metadata swaps. Between 1.5 and 4.5
+seconds, successive half-second windows measured 88161, 88195, 88237, 88200,
+88191 and 88168 Hz. Startup windows contain the expected silent settle and
+rate-kick period; the short final window is not a steady-state measurement.
+These results support a guarded CoreAudio trial, not a default release.
+
+## Experimental 88.2 kHz CoreAudio trial
+
+The 88.2 kHz HAL format and supervisor engine are gated by a root-owned
+`enable-88-experimental` file. The engine uses the probe's clear-sounding
+1280-packet transmit ring with 640-packet refill halves and continuous
+receive-slot deduplication. It starts from a validated 48 kHz baseline, kicks
+OUTPUT and INPUT to 88.2 kHz with both ISO directions active, then restores
+48 kHz when it stops. Its startup silence and monitoring latency have not yet
+been measured with CoreAudio. The standard install does not include this
+engine or enable the rate.
+
+On the FW1814 Mac, with the device attached:
+
+```sh
+git pull --ff-only
+make fw1814-experimental88
+sudo make fw1814-install-experimental88
+```
+
+Select 88.2 kHz in Audio MIDI Setup or Logic and test analog output, input 1,
+software monitoring and switching back to 48 kHz. Check
+`/Library/Logs/macfw-fw1814-transport.log` for engine READY, steady capture
+rate, TX underruns and capture errors. To return to the normal 44.1/48 kHz
+installation, run `sudo make fw1814-install` after the ordinary build.
+The separate 96 kHz experimental install remains available, and installing
+either experimental engine preserves the other if it was already enabled.
 
 ## First 96 kHz listening test
 

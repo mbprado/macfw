@@ -34,6 +34,7 @@ public:
         std::size_t framesFromBuffer = 0;
         std::size_t framesSilenced = 0;
         std::size_t nonzeroFrames = 0;
+        std::int32_t peakSample = 0;
     };
 
     BlockingPcmTransmitRing88200() = default;
@@ -189,6 +190,8 @@ public:
                             std::min<std::int32_t>(
                                 8388607, frames[event * kPcmChannels + ch]));
                         nonzero = nonzero || sample != 0;
+                        const auto magnitude = sample < 0 ? -sample : sample;
+                        result.peakSample = std::max(result.peakSample, magnitude);
                         const std::uint32_t word = 0x40000000u |
                             (static_cast<std::uint32_t>(sample) & 0x00ffffffu);
                         const std::size_t off = 8 +
@@ -331,6 +334,7 @@ public:
         std::uint64_t framesFromBuffer = 0;
         std::uint64_t framesSilenced = 0;
         std::uint64_t nonzeroFrames = 0;
+        std::int32_t peakSample = 0;
         std::uint64_t lateCyclePolls = 0;
     };
 
@@ -394,6 +398,7 @@ public:
             stats_.framesFromBuffer += rr.framesFromBuffer;
             stats_.framesSilenced += rr.framesSilenced;
             stats_.nonzeroFrames += rr.nonzeroFrames;
+            stats_.peakSample = std::max(stats_.peakSample, rr.peakSample);
             ++lastHalfNumber_;
         }
     }

@@ -18,6 +18,7 @@ SUPERVISOR="$FW1814_DIR/transport/fw1814supervisor"
 ENGINE48="$FW1814_DIR/transport/fw1814analog48"
 ENGINE44="$FW1814_DIR/transport/fw1814analog44"
 ENGINE96="$FW1814_DIR/transport/fw1814analog96"
+ENGINE88="$FW1814_DIR/transport/fw1814analog88"
 INIT="$FW1814_DIR/tools/fw1814init"
 BOOT="$FW1814_DIR/tools/fwboot1814"
 BUS_RESET="$FW1814_DIR/../../common/tools/firewirebusreset/firewirebusreset"
@@ -26,6 +27,12 @@ STATE_CONTROL="$FW1814_DIR/tools/control/fw1814state/fw1814state"
 DEVICE_PROBE="$FW1814_DIR/tools/fw1814deviceprobe"
 STATE_FILE="$INSTALL_ROOT/control-state.conf"
 ENABLE96="$INSTALL_ROOT/enable-96-experimental"
+ENABLE88="$INSTALL_ROOT/enable-88-experimental"
+
+if [[ "${MACFW_INSTALL_EXPERIMENTAL88:-0}" == 1 && ! -x "$ENGINE88" ]]; then
+    echo "error: experimental FW1814 88.2 kHz engine is missing: $ENGINE88" >&2
+    exit 1
+fi
 
 if [[ "${MACFW_INSTALL_EXPERIMENTAL96:-0}" == 1 && ! -x "$ENGINE96" ]]; then
     echo "error: experimental FW1814 96 kHz engine is missing: $ENGINE96" >&2
@@ -68,16 +75,25 @@ launchctl bootout system/$LABEL >/dev/null 2>&1 || true
 install -d -o root -g wheel -m 0755 "$BIN_DIR"
 had_enable96=0
 [[ -e "$ENABLE96" ]] && had_enable96=1
+had_enable88=0
+[[ -e "$ENABLE88" ]] && had_enable88=1
 install -o root -g wheel -m 0755 "$SUPERVISOR" "$BIN_DIR/fw1814supervisor"
 install -o root -g wheel -m 0755 "$ENGINE48" "$BIN_DIR/fw1814analog48"
 install -o root -g wheel -m 0755 "$ENGINE44" "$BIN_DIR/fw1814analog44"
 if [[ "${MACFW_INSTALL_EXPERIMENTAL96:-0}" == 1 ]]; then
     install -o root -g wheel -m 0755 "$ENGINE96" "$BIN_DIR/fw1814analog96"
     install -o root -g wheel -m 0644 /dev/null "$ENABLE96"
-else
+elif [[ "${MACFW_INSTALL_EXPERIMENTAL88:-0}" != 1 ]]; then
     rm -f "$ENABLE96" "$BIN_DIR/fw1814analog96"
 fi
-if [[ "${MACFW_INSTALL_EXPERIMENTAL96:-0}" == 1 || $had_enable96 == 1 ]]; then
+if [[ "${MACFW_INSTALL_EXPERIMENTAL88:-0}" == 1 ]]; then
+    install -o root -g wheel -m 0755 "$ENGINE88" "$BIN_DIR/fw1814analog88"
+    install -o root -g wheel -m 0644 /dev/null "$ENABLE88"
+elif [[ "${MACFW_INSTALL_EXPERIMENTAL96:-0}" != 1 ]]; then
+    rm -f "$ENABLE88" "$BIN_DIR/fw1814analog88"
+fi
+if [[ "${MACFW_INSTALL_EXPERIMENTAL96:-0}" == 1 || $had_enable96 == 1 ||
+      "${MACFW_INSTALL_EXPERIMENTAL88:-0}" == 1 || $had_enable88 == 1 ]]; then
     # CoreAudio caches available formats; reload after the opt-in gate changes.
     killall coreaudiod >/dev/null 2>&1 || true
 fi

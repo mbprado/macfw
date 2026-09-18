@@ -1,6 +1,6 @@
 PREFIX ?= /Library/Application Support/macfw/fw1814
 
-.PHONY: all clean install-check install install-experimental96 uninstall hal runtime all-tools tools gui
+.PHONY: all clean install-check install install-experimental96 install-experimental88 uninstall hal runtime all-tools tools gui
 
 all: hal runtime gui
 
@@ -54,6 +54,18 @@ install-experimental96: install-check
 	MACFW_INSTALL_EXPERIMENTAL96=1 bash service/install-service.sh --check-only
 	$(MAKE) -C hal install
 	MACFW_INSTALL_EXPERIMENTAL96=1 bash service/install-service.sh
+	$(MAKE) -C control-panel install
+
+install-experimental88: install-check
+	@if [ "$$(id -u)" -ne 0 ]; then \
+		echo "error: experimental FW1814 install must be run as root" >&2; exit 1; \
+	fi
+	@if [ ! -x transport/fw1814analog88 ]; then \
+		echo "error: build the 88.2 kHz engine with 'make fw1814-experimental88' first" >&2; exit 1; \
+	fi
+	MACFW_INSTALL_EXPERIMENTAL88=1 bash service/install-service.sh --check-only
+	$(MAKE) -C hal install
+	MACFW_INSTALL_EXPERIMENTAL88=1 bash service/install-service.sh
 	$(MAKE) -C control-panel install
 
 uninstall:
