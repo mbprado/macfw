@@ -11,7 +11,7 @@ also has one MIDI position, which macfw does not currently expose.
 | 44.1/48 kHz | 10 PCM | 6 PCM | macfw analog audio validated |
 | 88.2 kHz | 10 PCM | 6 PCM | Experimental CoreAudio playback, recording and monitoring tested, including an approximately five-minute recording; hardware opt-in required |
 | 96 kHz | 10 PCM | 6 PCM | Experimental CoreAudio playback and analog capture tested; hardware opt-in required |
-| 176.4 kHz | 2 PCM | 4 PCM | Guarded duplex packets and audible position-2 tone tested; sustained capture and CoreAudio untested |
+| 176.4 kHz | 2 PCM | 4 PCM | Clear tone and four-output routing verified; continuous capture probe passed six steady windows; CoreAudio untested |
 | 192 kHz | 2 PCM | 4 PCM | CONTROL/readback tested; ISO streaming untested |
 
 Linux's [FW1814 clock protocol](https://github.com/alsa-project/snd-firewire-ctl-services/blob/master/protocols/bebob/src/maudio/special.rs)
@@ -441,6 +441,24 @@ devices/fw1814/tools/fw1814capture176_duplex_blocking --execute --experimental-h
 Report `continuous 176.4 capture`, half-second windows, both raw PCM peaks,
 TX underruns and final PCR/rate restoration. This standalone diagnostic
 does not enable a CoreAudio input format.
+
+The first sustained capture run passed at bus generation 271. The 64-slot
+snapshot had 44 valid 392-byte data packets and 20 NODATA packets. Over the
+entire run, the decoder produced 591584 frames from 18487 data packets, with
+six consecutive half-second steady windows between 176317 and 176489 Hz.
+There were zero DBC gaps, duplicate/reordered/stale packets, metadata swaps,
+malformed packets, invalid labels and dropped frames. Four groups were
+temporarily incomplete; three completed later, one was safely salvaged,
+and none were overwritten. TX reported 733824 silent frames with zero
+underruns. The bus generation remained unchanged, both PCRs restored, and
+the authoritative INPUT readback returned to 48000 Hz.
+
+Raw PCM position 0 peaked at -29.95 dBFS, while position 1 measured
+-77.85 dBFS. If the known source was connected to Analog Input 1 as in
+the test instructions, this identifies position 0 as Input 1. Repeat the
+same run with the source moved to Analog Input 2 to verify position 1
+before assigning physical input names in the CoreAudio engine. The
+standalone probe does not establish audible recording quality or monitoring.
 
 ## First 96 kHz listening test
 
