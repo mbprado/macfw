@@ -219,6 +219,17 @@ seconds, successive half-second windows measured 88161, 88195, 88237, 88200,
 rate-kick period; the short final window is not a steady-state measurement.
 These results support a guarded CoreAudio trial, not a default release.
 
+During the CoreAudio trial, waiting for all 32 RX-slot timestamps to advance
+removed duplicate slots and made most steady two-second windows decode exactly
+176400 frames. The following timestamp-ordered decoder recorded clean audio
+until capture stopped: RX groups still completed at about 500 per two seconds,
+but every subsequent data packet was marked stale. The receive timestamp's
+seconds field rolls over independently of a 32-bit integer comparison. The
+88.2-kHz decoder now orders and filters packets using the modulo-8000
+FireWire cycle field (bits 12..24), which remains unambiguous across the
+32-ms RX ring. Continuous recording across that rollover requires another
+Mac test; playback and the completed-group check are unchanged.
+
 ## Experimental 88.2 kHz CoreAudio trial
 
 The 88.2 kHz HAL format and supervisor engine are gated by a root-owned

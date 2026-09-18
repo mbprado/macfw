@@ -2,6 +2,7 @@
 
 #include "../channel_map.h"
 #include "../hal/include/macfw_fw1814_capture_shm.h"
+#include "fw1814_receive_cycle.h"
 #include "macfw/am824.h"
 #include "macfw/amdtp_receive_ring.h"
 
@@ -73,11 +74,11 @@ public:
         // The ring's index zero is not a time origin. In particular, when
         // publication spans the last and first chunks, processing index zero
         // first can make valid earlier packets look stale by DBC. All ready
-        // chunks fit within one RX rotation (32 ms), so signed subtraction
-        // handles a wrap in the 32-bit FireWire timestamp as well.
+        // chunks fit within one RX rotation (32 ms). Compare the cycle field
+        // so a seconds-field rollover does not reverse the ordering.
         std::sort(ready.begin(), ready.begin() + readyCount,
                   [](const ReadyChunk& a, const ReadyChunk& b) {
-                      return static_cast<std::int32_t>(a.timestamp - b.timestamp) < 0;
+                      return receiveTimestampAfter(b.timestamp, a.timestamp);
                   });
         for (std::size_t i = 0; i < readyCount; ++i) {
             const auto chunk = ready[i].index;
@@ -169,12 +170,12 @@ private:
         // actual cycle; check DBC only after arranging packets in time.
         std::sort(candidates.begin(), candidates.begin() + count,
                   [](const Candidate& a, const Candidate& b) {
-                      return static_cast<std::int32_t>(a.timestamp - b.timestamp) < 0;
+                      return receiveTimestampAfter(b.timestamp, a.timestamp);
                   });
         for (std::size_t i = 0; i < count; ++i) {
             const auto& candidate = candidates[i];
             if (haveTimestamp_ &&
-                static_cast<std::int32_t>(candidate.timestamp - lastTimestamp_) <= 0) {
+                !receiveTimestampAfter(candidate.timestamp, lastTimestamp_)) {
                 ++stats_.stalePackets;
                 continue;
             }
@@ -195,7 +196,7 @@ private:
         haveExpectedDbc_ = true;
 
         if (haveTimestamp_ &&
-            static_cast<std::int32_t>(candidate.timestamp - lastTimestamp_) <= 0) {
+            !receiveTimestampAfter(candidate.timestamp, lastTimestamp_)) {
             if (stats_.timestampRegressions == 0) {
                 stats_.firstRegressionPreviousTimestamp = lastTimestamp_;
                 stats_.firstRegressionCurrentTimestamp = candidate.timestamp;

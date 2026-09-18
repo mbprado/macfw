@@ -55,7 +55,8 @@ analog96-experimental:
 	$(MAKE) $(ANALOG96)
 
 $(ANALOG88): analog88_main.cpp blocking_pcm_tx88.h \
-	../tools/fw1814_capture88_pump.h duplex_lifecycle.h engine_ready.h \
+	../tools/fw1814_capture88_pump.h ../tools/fw1814_receive_cycle.h \
+	duplex_lifecycle.h engine_ready.h \
 	fw1814_control_server.h playback_pump.h realtime_service.h shared_io.h \
 	../channel_map.h ../fcp_control.h ../special_mixer.h ../special_mixer_model.h \
 	../hal/include/macfw_fw1814_hal_shm.h \

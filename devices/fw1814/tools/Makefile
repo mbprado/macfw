@@ -35,7 +35,7 @@ DEVICE_PROBE_TOOL := fw1814deviceprobe
 	dualcmp-wait-tool dualcmp-wait-check dualcmp-wait dualcmp-wait-raw \
 	duplex-blocking-tool duplex-blocking-check duplex-blocking duplex-blocking-raw \
 	duplex96-tool duplex96-check duplex96 duplex96-raw \
-	duplex88-tool duplex88-check duplex88 duplex88-raw schedule88-check \
+	duplex88-tool duplex88-check duplex88 duplex88-raw schedule88-check receive88-cycle-check \
 	tone96-tool tone96-check tone96 tone96-raw \
 	tone96-live-tool tone96-live-check tone96-live \
 	output-watch-tool output-watch-check output-watch output-watch-raw \
@@ -211,6 +211,10 @@ duplex88-raw: duplex88-tool
 schedule88-check: test_88200_schedule.cpp
 	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) $< -o /tmp/macfw-fw1814-schedule88-check
 	/tmp/macfw-fw1814-schedule88-check
+
+receive88-cycle-check: test_receive_cycle88.cpp fw1814_receive_cycle.h
+	$(CXX) $(CXXFLAGS) $< -o /tmp/macfw-fw1814-receive88-cycle-check
+	/tmp/macfw-fw1814-receive88-cycle-check
 
 # Experimental 96 kHz, phase-aligned 500 Hz tone in one playback position.
 # Uses the proven duplex probe's FCP reply matching and restore checks.
