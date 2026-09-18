@@ -15,6 +15,7 @@ DUALCMP_WAIT_TOOL := fw1814capture48_dualcmp_wait
 DUPLEX_BLOCKING_TOOL := fw1814capture48_duplex_blocking
 DUPLEX96_TOOL := fw1814capture96_duplex_blocking
 DUPLEX88_TOOL := fw1814capture88_duplex_blocking
+DUPLEX176_TOOL := fw1814capture176_duplex_blocking
 TONE96_TOOL := fw1814tone96
 TONE96_LIVE_TOOL := fw1814tone96_live
 OUTPUT_WATCH_TOOL := fw1814capture48_output_watch
@@ -35,7 +36,8 @@ DEVICE_PROBE_TOOL := fw1814deviceprobe
 	dualcmp-wait-tool dualcmp-wait-check dualcmp-wait dualcmp-wait-raw \
 	duplex-blocking-tool duplex-blocking-check duplex-blocking duplex-blocking-raw \
 	duplex96-tool duplex96-check duplex96 duplex96-raw \
-	duplex88-tool duplex88-check duplex88 duplex88-raw schedule88-check schedule-quad-check receive88-cycle-check \
+	duplex88-tool duplex88-check duplex88 duplex88-raw \
+	duplex176-tool duplex176-check duplex176 duplex176-raw schedule88-check schedule-quad-check receive88-cycle-check \
 	tone96-tool tone96-check tone96 tone96-raw \
 	tone96-live-tool tone96-live-check tone96-live \
 	output-watch-tool output-watch-check output-watch output-watch-raw \
@@ -213,6 +215,22 @@ duplex88: duplex88-tool
 
 duplex88-raw: duplex88-tool
 	./$(DUPLEX88_TOOL) --execute --experimental-high-rate --raw
+
+# Silent 176.4-kHz packet probe. Separate from normal builds and services;
+# a second explicit opt-in is required before any ISO or CONTROL writes.
+duplex176-tool: $(DUPLEX176_TOOL)
+
+$(DUPLEX176_TOOL): fw1814capture176_duplex_nodata.cpp ../transport/blocking_pcm_tx176.h $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814capture176_duplex_nodata.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+duplex176-check: duplex176-tool
+	./$(DUPLEX176_TOOL)
+
+duplex176: duplex176-tool
+	./$(DUPLEX176_TOOL) --execute --experimental-high-rate --experimental-quad-rate
+
+duplex176-raw: duplex176-tool
+	./$(DUPLEX176_TOOL) --execute --experimental-high-rate --experimental-quad-rate --raw
 
 # Offline proof that all immutable NuDCL send lengths match through the full
 # base-44.1 scheduler phase and that DBC continues through ring reuse.

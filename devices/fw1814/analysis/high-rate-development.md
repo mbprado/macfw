@@ -357,9 +357,39 @@ length pattern and DBC steps; it does not touch the device:
 make -C devices/fw1814/tools schedule-quad-check
 ```
 
-Only after the packet-size and schedule check should a separate guarded
-silent duplex probe be built. The 88.2/96-kHz probe reservations and channel
-mapping do not describe this 176.4/192-kHz stream formation.
+The schedule check passed on the FW1814 test Mac. A separate **silent-only**
+176.4-kHz duplex probe now builds on the 88.2-kHz live-refilled TX ring. It
+uses 1280 TX packets (640-packet refill halves), reserves 648 playback and
+392 capture bytes, sends 32-event silent packets with DBS=5/FDF=0x05, and
+expects DBS=3/FDF=0x05 on 32-event capture packets. It requires an
+operational interface with an authoritative 48-kHz INPUT rate and free PCR0
+connections. Both `--experimental-high-rate` and
+`--experimental-quad-rate` must be supplied for execution. The diagnostic
+checks its 64-slot RX snapshot and transmit underruns, disconnects both
+PCRs, and restores OUTPUT and INPUT to 48 kHz. It refuses execution when
+the installed FW1814 control socket is active and skips stale PCR/rate
+writes after a bus-generation change. It does not produce a tone, enable a
+HAL format, or modify the installed transport.
+
+On the Mac, inspect the read-only preflight before executing the first
+176.4-kHz duplex attempt:
+
+```sh
+git pull --ff-only
+make -C devices/fw1814/tools duplex176-tool
+sudo launchctl bootout system/com.mbprado.macfw.fw1814.transport
+devices/fw1814/tools/fw1814capture176_duplex_blocking
+devices/fw1814/tools/fw1814capture176_duplex_blocking \
+  --execute --experimental-high-rate --experimental-quad-rate --raw
+```
+
+If the preflight reports the service still owns the device, stop it and
+repeat the dry run before execution. Report the complete result, including
+CONTROL replies, packet lengths, TX underruns, bus generation and final
+PCR/48-kHz restoration. A matching snapshot would establish the first
+silent duplex exchange, not PCM channel mapping or audible playback. The
+192-kHz duplex stream remains untested; its schedule and 32-event packet
+sizes alone do not validate its hardware startup.
 
 ## First 96 kHz listening test
 
