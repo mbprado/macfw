@@ -98,9 +98,8 @@ private:
     struct Candidate {
         macfw::amdtp::PacketView packet{};
         std::uint32_t timestamp = 0;
-        std::uint8_t dbc = 0;
         std::size_t events = 0;
-        bool used = false;
+        std::size_t originalOrder = 0;
     };
 
     std::size_t processChunk(
@@ -158,86 +157,32 @@ private:
                 out.malformedPackets.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
-            candidates[count++] = Candidate{packet, slot.timestamp, h.dbc, events, false};
+            candidates[count] = Candidate{packet, slot.timestamp, events, count};
+            ++count;
         }
 
         if (count == 0) return 0;
         std::size_t frames = 0;
-        std::size_t emitted = 0;
-
-        if (!haveExpectedDbc_) {
-            const std::size_t first = oldestUnused(candidates, count);
-            frames += decode(candidates[first], out);
-            candidates[first].used = true;
-            ++emitted;
-        }
-
-        while (emitted < count) {
-            const std::size_t match = findExpected(candidates, count);
-            if (match == count) break;
-            if (match != firstUnused(candidates, count))
-                ++stats_.reorderedPackets;
-            frames += decode(candidates[match], out);
-            candidates[match].used = true;
-            ++emitted;
-        }
-
-        while (emitted < count) {
-            const std::size_t next = oldestUnused(candidates, count);
-            if (next == count) break;
-            const std::uint8_t delta =
-                static_cast<std::uint8_t>(candidates[next].dbc - expectedDbc_);
-            if (delta > 128) {
-                candidates[next].used = true;
-                ++emitted;
+        // A full 32-cycle group can contain 22 data packets. DBC advances
+        // by 16 per packet and repeats after 16 packets, so it cannot order
+        // all candidates in this group. Receive timestamps identify the
+        // actual cycle; check DBC only after arranging packets in time.
+        std::sort(candidates.begin(), candidates.begin() + count,
+                  [](const Candidate& a, const Candidate& b) {
+                      return static_cast<std::int32_t>(a.timestamp - b.timestamp) < 0;
+                  });
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto& candidate = candidates[i];
+            if (haveTimestamp_ &&
+                static_cast<std::int32_t>(candidate.timestamp - lastTimestamp_) <= 0) {
                 ++stats_.stalePackets;
                 continue;
             }
-
-            frames += decode(candidates[next], out);
-            candidates[next].used = true;
-            ++emitted;
-
-            while (emitted < count) {
-                const std::size_t match = findExpected(candidates, count);
-                if (match == count) break;
-                if (match != firstUnused(candidates, count))
-                    ++stats_.reorderedPackets;
-                frames += decode(candidates[match], out);
-                candidates[match].used = true;
-                ++emitted;
-            }
+            if (candidate.originalOrder != i)
+                ++stats_.reorderedPackets;
+            frames += decode(candidate, out);
         }
         return frames;
-    }
-
-    template <std::size_t N>
-    std::size_t findExpected(const std::array<Candidate, N>& c,
-                             std::size_t count) const {
-        for (std::size_t i = 0; i < count; ++i)
-            if (!c[i].used && c[i].dbc == expectedDbc_) return i;
-        return count;
-    }
-
-    template <std::size_t N>
-    static std::size_t firstUnused(const std::array<Candidate, N>& c,
-                                   std::size_t count) {
-        for (std::size_t i = 0; i < count; ++i)
-            if (!c[i].used) return i;
-        return count;
-    }
-
-    template <std::size_t N>
-    static std::size_t oldestUnused(const std::array<Candidate, N>& c,
-                                    std::size_t count) {
-        std::size_t oldest = count;
-        for (std::size_t i = 0; i < count; ++i) {
-            if (c[i].used) continue;
-            if (oldest == count ||
-                static_cast<std::int32_t>(c[i].timestamp - c[oldest].timestamp) < 0)
-                oldest = i;
-        }
-        return oldest;
     }
 
     std::size_t decode(
