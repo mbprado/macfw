@@ -84,4 +84,62 @@ inline void drainPlayback(
     }
 }
 
+inline std::size_t pumpPlaybackQuad(
+    macfw::fw1814::hal::SharedPlaybackRing& shared,
+    macfw::PcmRingBuffer& pcm,
+    std::vector<float>& audio,
+    std::vector<std::int32_t>& mapped,
+    PlaybackPumpStats* stats = nullptr) {
+    constexpr std::size_t kQuadPcmPositions = 4;
+    const std::size_t frames = std::min<std::size_t>({
+        pcm.freeFrames(),
+        macfw::fw1814::hal::availableFrames(shared),
+        audio.size() / macfw::fw1814::hal::kOutputChannels
+    });
+    if (frames == 0) return 0;
+
+    const std::size_t got =
+        macfw::fw1814::hal::read(shared, audio.data(), frames);
+    if (stats) stats->framesRead += got;
+
+    for (std::size_t frame = 0; frame < got; ++frame) {
+        const std::size_t outBase = frame * kQuadPcmPositions;
+        std::fill_n(mapped.data() + outBase, kQuadPcmPositions, 0);
+        for (std::size_t physical = 0;
+             physical < macfw::fw1814::hal::kOutputChannels;
+             ++physical) {
+            double raw = static_cast<double>(
+                audio[frame * macfw::fw1814::hal::kOutputChannels + physical]);
+            if (stats) {
+                ++stats->samplesSeen;
+                if (!std::isfinite(raw)) {
+                    ++stats->nonFiniteSamples;
+                } else {
+                    stats->peakAbs = std::max(stats->peakAbs, std::fabs(raw));
+                    if (raw < -1.0 || raw > 1.0) ++stats->clippedSamples;
+                }
+            }
+            if (!std::isfinite(raw)) raw = 0.0;
+            const double sample = std::max(-1.0, std::min(1.0, raw));
+            const std::size_t position =
+                kPlaybackPositionForAnalogOutput[physical];
+            mapped[outBase + position] =
+                static_cast<std::int32_t>(sample * 8388607.0);
+        }
+    }
+    return pcm.write(mapped.data(), got);
+}
+
+inline void drainPlaybackQuad(
+    macfw::fw1814::hal::SharedPlaybackRing& shared,
+    macfw::PcmRingBuffer& pcm,
+    std::vector<float>& audio,
+    std::vector<std::int32_t>& mapped,
+    PlaybackPumpStats* stats = nullptr) {
+    while (macfw::fw1814::hal::availableFrames(shared) != 0 &&
+           pcm.freeFrames() != 0) {
+        if (pumpPlaybackQuad(shared, pcm, audio, mapped, stats) == 0) break;
+    }
+}
+
 } // namespace macfw::fw1814::transport

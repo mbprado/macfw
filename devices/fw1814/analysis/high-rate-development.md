@@ -497,6 +497,44 @@ capture transport is therefore ready to be adapted into an opt-in CoreAudio
 engine with four outputs and two inputs. Audible CoreAudio recording and
 monitoring remain to be tested after that integration.
 
+### Opt-in 176.4 kHz CoreAudio trial
+
+The first 176.4-kHz CoreAudio integration is deliberately separate from the
+normal build and install. `make fw1814-experimental176` builds a dedicated
+`fw1814analog176` engine from the hardware-validated 1280/640-packet TX
+schedule and sustained capture decoder. The opt-in install creates a
+root-owned `enable-176-experimental` marker; without that marker, neither the
+HAL nor supervisor accepts or advertises 176.4 kHz.
+
+At 176.4 kHz the HAL advertises four output channels and two input channels.
+Playback keeps the verified mapping (CoreAudio Analog Outputs 1-4 to raw PCM
+positions 2, 3, 0, 1), and capture compacts raw positions 0/1 to Analog Inputs
+1/2. The persistent capture shared-memory ABI remains eight-channel so the
+released 44.1/48-kHz and experimental 88.2/96-kHz engines remain compatible.
+The normal install still removes every experimental marker and engine.
+
+Build and install the guarded trial with the FW1814 connected:
+
+```sh
+git pull --ff-only
+make fw1814-experimental176
+sudo make fw1814-install-experimental176
+```
+
+Then select 176.4 kHz in Audio MIDI Setup or Logic. Test all four analog
+outputs, record Analog Inputs 1 and 2 separately, enable software monitoring,
+and switch back to 48 kHz. The service log should report
+`FW1814 176.4 kHz analog engine ONLINE`; steady two-second lines should show
+roughly 352800 playback/capture frames with no growing TX underrun, capture
+DBC-gap, malformed, invalid or stale counters. This CoreAudio path is
+untested until those checks pass on the FW1814 Mac.
+
+To roll back, close audio clients and run the ordinary install:
+
+```sh
+sudo make fw1814-install
+```
+
 ## First 96 kHz listening test
 
 `fw1814tone96` reuses the proven 96 kHz duplex probe and its restoration

@@ -26,8 +26,10 @@ constexpr Float64 kRate44100 = 44100.0;
 constexpr Float64 kRate48000 = 48000.0;
 constexpr Float64 kRate88200 = 88200.0;
 constexpr Float64 kRate96000 = 96000.0;
+constexpr Float64 kRate176400 = 176400.0;
 constexpr UInt32 kOutputChannels = macfw::fw1814::hal::kOutputChannels;
 constexpr UInt32 kInputChannels = macfw::fw1814::hal::capture::kInputChannels;
+constexpr UInt32 kQuadRateInputChannels = 2;
 
 AudioServerPlugInHostRef gHost = nullptr;
 std::atomic<UInt32> gRefCount{1};
@@ -52,18 +54,29 @@ bool IsKnownObject(AudioObjectID id) {
 bool IsSupportedRate(std::uint32_t rate) {
     return rate == 44100 || rate == 48000 ||
            (rate == 88200 && macfw::fw1814::experimental::enabled88()) ||
-           (rate == 96000 && macfw::fw1814::experimental::enabled96());
+           (rate == 96000 && macfw::fw1814::experimental::enabled96()) ||
+           (rate == 176400 && macfw::fw1814::experimental::enabled176());
 }
 
 UInt32 AvailableRateCount() {
     return 2 + macfw::fw1814::experimental::enabled88() +
-           macfw::fw1814::experimental::enabled96();
+           macfw::fw1814::experimental::enabled96() +
+           macfw::fw1814::experimental::enabled176();
 }
 
 Float64 AvailableHighRate(UInt32 index) {
-    if (macfw::fw1814::experimental::enabled88() && index == 2)
-        return kRate88200;
-    return kRate96000;
+    UInt32 current = 2;
+    if (macfw::fw1814::experimental::enabled88()) {
+        if (index == current) return kRate88200;
+        ++current;
+    }
+    if (macfw::fw1814::experimental::enabled96()) {
+        if (index == current) return kRate96000;
+        ++current;
+    }
+    if (macfw::fw1814::experimental::enabled176() && index == current)
+        return kRate176400;
+    return 0.0;
 }
 
 int OpenStableShm(const char* name, std::size_t bytes) {
@@ -214,7 +227,8 @@ AudioStreamBasicDescription OutputFormat(Float64 rate) {
 }
 
 AudioStreamBasicDescription InputFormat(Float64 rate) {
-    return Format(rate, kInputChannels);
+    return Format(rate, rate == kRate176400
+        ? kQuadRateInputChannels : kInputChannels);
 }
 
 bool ScopeIsOutput(AudioObjectPropertyScope scope) {
@@ -351,6 +365,7 @@ OSStatus STDMETHODCALLTYPE PerformDeviceConfigurationChange(AudioServerPlugInDri
     Notify(kOutputStreamID, kAudioStreamPropertyPhysicalFormat);
     Notify(kInputStreamID, kAudioStreamPropertyVirtualFormat);
     Notify(kInputStreamID, kAudioStreamPropertyPhysicalFormat);
+    Notify(kInputStreamID, kAudioObjectPropertyName);
     return kAudioHardwareNoError;
 }
 
@@ -554,7 +569,8 @@ OSStatus GetCommon(AudioObjectID object,
             object == kAudioObjectPlugInObject ? CFSTR("macfw FW1814 HAL") :
             object == kDeviceID ? CFSTR("M-Audio FireWire 1814") :
             object == kOutputStreamID ? CFSTR("Analog Outputs 1-4") :
-                                        CFSTR("Analog Inputs 1-8");
+            gSampleRate.load(std::memory_order_acquire) == 176400
+                ? CFSTR("Analog Inputs 1-2") : CFSTR("Analog Inputs 1-8");
         return CopyString(inSize, outSize, outData, value);
     }
 
@@ -772,7 +788,8 @@ OSStatus STDMETHODCALLTYPE SetPropertyData(AudioServerPlugInDriverRef driver,
         const Float64 rate = *static_cast<const Float64*>(inData);
         if (rate != kRate44100 && rate != kRate48000 &&
             !(rate == kRate88200 && macfw::fw1814::experimental::enabled88()) &&
-            !(rate == kRate96000 && macfw::fw1814::experimental::enabled96()))
+            !(rate == kRate96000 && macfw::fw1814::experimental::enabled96()) &&
+            !(rate == kRate176400 && macfw::fw1814::experimental::enabled176()))
             return kAudioHardwareIllegalOperationError;
         if (static_cast<std::uint32_t>(rate) ==
             gSampleRate.load(std::memory_order_acquire))
@@ -922,12 +939,16 @@ OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef,
     if (stream == kInputStreamID &&
         operation == kAudioServerPlugInIOOperationReadInput) {
         auto* out = static_cast<Float32*>(mainBuffer);
+        const auto currentRate =
+            gSampleRate.load(std::memory_order_acquire);
+        const UInt32 inputChannels = currentRate == 176400
+            ? kQuadRateInputChannels : kInputChannels;
 
         if (!gCaptureRing ||
             !macfw::fw1814::hal::capture::valid(*gCaptureRing)) {
             std::memset(out, 0,
                         static_cast<std::size_t>(frames) *
-                        kInputChannels * sizeof(Float32));
+                        inputChannels * sizeof(Float32));
             return kAudioHardwareNoError;
         }
 
@@ -947,21 +968,24 @@ OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef,
             // preserves ~341 ms of stale software-monitor audio forever.
             // A flush makes this callback silent; the engine refills from
             // fresh packets before enabling capture again.
-            const bool stale = (gSampleRate.load(std::memory_order_acquire) == 96000 ||
-                gSampleRate.load(std::memory_order_acquire) == 88200) &&
+            const bool stale = (currentRate == 96000 || currentRate == 88200 ||
+                currentRate == 176400) &&
                 macfw::fw1814::hal::capture::suspendStaleCapture(*gCaptureRing, 4096);
             if (!stale) {
-                got = macfw::fw1814::hal::capture::read(
-                    *gCaptureRing, out, frames);
+                got = currentRate == 176400
+                    ? macfw::fw1814::hal::capture::readFirstChannels(
+                          *gCaptureRing, out, frames, kQuadRateInputChannels)
+                    : macfw::fw1814::hal::capture::read(
+                          *gCaptureRing, out, frames);
                 gCaptureRing->halFramesFromRing.fetch_add(got,
                                                           std::memory_order_relaxed);
             }
         }
 
         if (got < frames) {
-            std::memset(out + got * kInputChannels, 0,
+            std::memset(out + got * inputChannels, 0,
                         (static_cast<std::size_t>(frames) - got) *
-                        kInputChannels * sizeof(Float32));
+                        inputChannels * sizeof(Float32));
             gCaptureRing->halZeroFilledFrames.fetch_add(
                 frames - got, std::memory_order_relaxed);
         }

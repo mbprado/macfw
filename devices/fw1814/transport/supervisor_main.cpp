@@ -55,7 +55,8 @@ bool requestedSampleRate(std::uint32_t& rate) {
             ring->sampleRate.load(std::memory_order_acquire);
         ready = requested == 44100 || requested == 48000 ||
                 (requested == 88200 && macfw::fw1814::experimental::enabled88()) ||
-                (requested == 96000 && macfw::fw1814::experimental::enabled96());
+                (requested == 96000 && macfw::fw1814::experimental::enabled96()) ||
+                (requested == 176400 && macfw::fw1814::experimental::enabled176());
         if (ready) rate = requested;
     }
     munmap(p, sizeof(*ring));
@@ -167,7 +168,10 @@ int runEngine(const std::string& path,
         char fdText[32] = {};
         std::snprintf(fdText, sizeof(fdText), "%d", readyPipe[1]);
         setenv("MACFW_ENGINE_READY_FD", fdText, 1);
-        if (startedRate == 96000 || startedRate == 88200)
+        if (startedRate == 176400)
+            execl(path.c_str(), path.c_str(), "--experimental-high-rate",
+                  "--experimental-quad-rate", static_cast<char*>(nullptr));
+        else if (startedRate == 96000 || startedRate == 88200)
             execl(path.c_str(), path.c_str(), "--experimental-high-rate",
                   static_cast<char*>(nullptr));
         else
@@ -302,10 +306,11 @@ int main(int argc, char** argv) {
     const std::string engine44Path = here + "/fw1814analog44";
     const std::string engine96Path = here + "/fw1814analog96";
     const std::string engine88Path = here + "/fw1814analog88";
+    const std::string engine176Path = here + "/fw1814analog176";
     const std::string stateHelperPath = here + "/fw1814state";
     const std::string controlHelperPath = here + "/fw1814ctl";
 
-    std::printf("macfw fw1814supervisor — resilient 44.1/48 kHz transport supervisor; guarded 88.2/96 kHz\n");
+    std::printf("macfw fw1814supervisor — resilient 44.1/48 kHz transport supervisor; guarded 88.2/96/176.4 kHz\n");
     std::printf("automatic reconnect and guarded bootloader recovery: enabled\n");
     std::printf("validated pre-transport FW1814 bus reset: enabled\n");
     std::printf("persistent validated routing-state restore: enabled\n");
@@ -422,7 +427,8 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        const std::string& enginePath = requestedRate == 88200 ? engine88Path :
+        const std::string& enginePath = requestedRate == 176400 ? engine176Path :
+            requestedRate == 88200 ? engine88Path :
             requestedRate == 96000 ? engine96Path :
             requestedRate == 44100 ? engine44Path : engine48Path;
         if (access(enginePath.c_str(), X_OK) != 0) {
@@ -431,7 +437,9 @@ int main(int argc, char** argv) {
             continue;
         }
         std::printf("FW1814 post-reset init-%s PASS; starting %s\n",
-                    rateArg, requestedRate == 88200
+                    rateArg, requestedRate == 176400
+                        ? "experimental 176.4 kHz analog transport engine"
+                        : requestedRate == 88200
                         ? "experimental 88.2 kHz analog transport engine"
                         : requestedRate == 96000
                         ? "experimental 96 kHz analog transport engine"
