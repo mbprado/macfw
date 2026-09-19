@@ -478,6 +478,25 @@ bounded ISO operation and 48-kHz/PCR restoration. The full run output also
 reports both input peaks. Test the physical plug/generator independently if
 the two raw sequences match.
 
+The earlier ambiguous result was caused by a generator fault. After fixing
+the generator and feeding only Analog Input 2, the raw run conclusively
+identified the mapping: raw position 0 stayed at -78.34 dBFS while raw
+position 1 reached -29.66 dBFS. The packet dump also showed distinct MBLA
+sample words in both positions. Together with the Input 1 run, the verified
+176.4-kHz capture map is:
+
+- Analog Input 1 -> raw PCM position 0;
+- Analog Input 2 -> raw PCM position 1.
+
+The corrected run decoded 594592 frames and passed six steady windows near
+176400 Hz. It recorded zero DBC gaps, duplicate/reordered/stale packets,
+malformed packets, invalid labels or dropped frames; four briefly incomplete
+groups all recovered. TX had zero underruns, the bus generation was stable,
+and PCR/rate restoration passed. The standalone 176.4-kHz playback and
+capture transport is therefore ready to be adapted into an opt-in CoreAudio
+engine with four outputs and two inputs. Audible CoreAudio recording and
+monitoring remain to be tested after that integration.
+
 ## First 96 kHz listening test
 
 `fw1814tone96` reuses the proven 96 kHz duplex probe and its restoration
