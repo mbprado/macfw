@@ -320,6 +320,7 @@ int main(int argc, char** argv) {
     constexpr std::chrono::milliseconds kReenumerationDelay(1000);
     constexpr std::chrono::milliseconds kPostEngineExitDelay(800);
     constexpr std::chrono::milliseconds kCleanBusResetSettleDelay(3000);
+    constexpr std::chrono::milliseconds kQuadRatePostInitQuiescence(2000);
 
     // A physical disconnect/re-enumeration can leave the FW1814 playback side
     // in a bad device-local stream state even though init-48 and all host-side
@@ -435,6 +436,17 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "FW1814 requested engine unavailable: %s\n", enginePath.c_str());
             sleepInterruptibly(retryDelay);
             continue;
+        }
+        if (requestedRate == 176400) {
+            std::printf("FW1814 post-reset init-48000 PASS; quiescing device for 2000 ms before 176.4 kHz transport\n");
+            sleepInterruptibly(kQuadRatePostInitQuiescence);
+            if (gStopRequested) break;
+
+            std::uint32_t settledRate = 0;
+            if (!requestedSampleRate(settledRate) || settledRate != requestedRate) {
+                std::printf("FW1814 rate request changed during 176.4 kHz quiescence; restarting selection\n");
+                continue;
+            }
         }
         std::printf("FW1814 post-reset init-%s PASS; starting %s\n",
                     rateArg, requestedRate == 176400

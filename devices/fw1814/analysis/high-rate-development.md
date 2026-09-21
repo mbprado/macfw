@@ -1173,3 +1173,14 @@ therefore now reports transport readiness but continues silent TX until the
 existing final `CONTROL READY` handshake. It then restores the four-half silent
 reserve and releases CoreAudio playback. Standalone engine execution has no
 pending restore and remains immediate.
+
+The handshake substantially reduced artifacts but did not eliminate them on a
+176.4 -> 48 -> 176.4 transition. The returning engine had the full guarded
+reserve, no PCM underruns, healthy TX scheduling and exact steady throughput.
+The clean cold start could even tolerate a larger scheduler gap, so host-side
+buffer service is not the remaining discriminator. Power/restart recovery
+instead points to device-local state surviving the controlled handoff and bus
+reset. The next guarded supervisor trial adds a 2-second device-quiescence
+interval after the fresh post-reset init-48000 and before launching only the
+176.4-kHz engine. It rechecks the requested rate after the wait; no stream,
+ring or FCP kick timing is changed.
