@@ -35,7 +35,8 @@ The table is cumulative across development releases; not every operating-system 
 |MacBook Pro 12,1 | FW410 | Thunderbolt 2 | A1463 | O | O | O | O | X | X | Stock/OpenCore LP |
 |MacBook Pro 12,1 | FW1814 | Thunderbolt 2 | A1463 | O | O | O | O | X | X | Stock/OpenCore LP |
 |MacPro 6,1 | FW410 | Thunderbolt 2 | A1463 | O | O | O | O | X | X | Stock/OpenCore LP |
-|MacPro 6,1 | FW1814 | Thunderbolt 2 | A1463 | O | O | O | O | X | X | Stock/OpenCore LP |  
+|MacPro 6,1 | FW1814 | Thunderbolt 2 | A1463 | O | O | O | O | X | X | Stock/OpenCore LP | 
+|MacBook Pro 16,1| --- | Thunderbolt 4 | A1790 + A1463 | ? | ? | ? | ? | X | X | Stock | 
   
 
 The native control panel and transport/control architecture have been exercised on the validated development systems. The control-path rule is common across releases: the GUI/CLI use the active transport's Unix-socket IPC rather than opening FireWire independently.
