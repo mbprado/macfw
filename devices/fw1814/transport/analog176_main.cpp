@@ -377,9 +377,8 @@ bool run() {
         if (startupOk) {
             if (!control.start(device, kRate))
                 std::cerr << "warning: FW1814 control socket unavailable\n";
-            // Only the audio thread reads this ring. Before releasing its HAL
-            // producer, top up a short silence reserve if a slow FCP exchange
-            // consumed more of the startup preload than expected.
+            // Only the audio thread reads this ring. Establish the guarded
+            // reserve before notifying the supervisor that transport is ready.
             const auto queued = pcm.availableFrames();
             if (queued < kMinReadySilenceFrames) {
                 const auto topUpFrames = kMinReadySilenceFrames - queued;
@@ -398,8 +397,38 @@ bool run() {
                       << " frames\n";
         }
         if (startupOk) {
-            releasePlayback.store(true, std::memory_order_release);
             signalEngineReady();
+            // The supervisor now restores the saved mixer state through the
+            // control socket. Keep transmitting silence until its final
+            // CONTROL READY handshake so live CoreAudio cannot overlap the
+            // register-write sequence at quad rate.
+            while (!control.controlStateReady() && !gStopRequested &&
+                   !audioFinished.load(std::memory_order_acquire)) {
+                control.service();
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+            }
+            startupOk = !gStopRequested &&
+                !audioFinished.load(std::memory_order_acquire) &&
+                lifecycle.generationStillValid();
+        }
+        if (startupOk) {
+            const auto queued = pcm.availableFrames();
+            if (queued < kMinReadySilenceFrames) {
+                const auto topUpFrames = kMinReadySilenceFrames - queued;
+                if (pcm.write(silence.data(), topUpFrames) != topUpFrames) {
+                    std::cerr << "FW1814 176.4 kHz playback-release silence top-up failed\n";
+                    startupOk = false;
+                } else {
+                    std::cout << "FW1814 176.4 kHz playback-release silence top-up: "
+                              << topUpFrames << " frames\n";
+                }
+            }
+        }
+        if (startupOk) {
+            std::cout << "FW1814 176.4 kHz playback release reserve: "
+                      << pcm.availableFrames() << " frames ("
+                      << pcm.availableFrames() * 1000 / kRate << " ms)\n";
+            releasePlayback.store(true, std::memory_order_release);
             playbackShared.ring()->active.store(1, std::memory_order_release);
             playbackActive = true;
             std::cout << "FW1814 176.4 kHz analog engine ONLINE\n";

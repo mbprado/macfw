@@ -170,6 +170,8 @@ public:
         }
     }
 
+    bool controlStateReady() const { return !restoringControlState_; }
+
 private:
     bool auxRoutingAvailable() const {
         return sampleRate_ != 176400 && sampleRate_ != 192000;

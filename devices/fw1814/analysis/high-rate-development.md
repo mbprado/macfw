@@ -1163,3 +1163,13 @@ underruns and healthy scheduler diagnostics, and CoreAudio playback is not
 released until after this measurement. The next guarded trial therefore tops
 the silent READY reserve up to four complete TX halves without changing the
 rate-kick timing, TX schedule, ring size or steady-state buffering.
+
+That deterministic READY reserve did not by itself prevent the intermittent
+failure. A further comparison showed the clean start had no CoreAudio playback
+during saved mixer-state restoration (`pb-read=0`, `tx-nonzero=0`), while the
+broken start accepted live playback immediately and transmitted nonzero audio
+before the supervisor completed its 22 control writes. The 176.4-kHz engine
+therefore now reports transport readiness but continues silent TX until the
+existing final `CONTROL READY` handshake. It then restores the four-half silent
+reserve and releases CoreAudio playback. Standalone engine execution has no
+pending restore and remains immediate.
