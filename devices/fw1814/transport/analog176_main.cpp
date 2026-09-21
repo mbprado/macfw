@@ -54,7 +54,9 @@ constexpr std::uint64_t kAudioServicePeriodNs = 250000;
 // follows the 96-kHz prototype; hardware testing must validate its latency.
 constexpr std::size_t kSilentStartupFrames = 8 * kRate / 5;
 constexpr std::size_t kReadySilenceFrames = 4 * kFramesPerTxHalf;
-constexpr std::size_t kReleaseSilenceFrames = 2 * kFramesPerTxHalf;
+// Match the roughly 43-46 ms live-release reserve used by the stable
+// 88.2/96 kHz engines without changing the validated 1280/640 TX geometry.
+constexpr std::size_t kReleaseSilenceFrames = 8192;
 constexpr std::chrono::milliseconds kHalPlaybackPrearmTimeout(1000);
 
 volatile std::sig_atomic_t gStopRequested = 0;
