@@ -290,6 +290,43 @@ int runBusReset(const std::string& path) {
     return 1;
 }
 
+
+int runFirmwareReboot(const std::string& resetPath,
+                      const std::string& bootPath) {
+    const int resetStatus =
+        runChild(resetPath, "--execute", "--experimental-firmware-reset");
+    if (resetStatus != 0) return resetStatus;
+    if (gStopRequested) return 130;
+
+    std::printf("FW1814 firmware reset accepted; waiting for bootloader personality\n");
+    const auto deadline = Clock::now() + std::chrono::seconds(10);
+    sleepInterruptibly(std::chrono::milliseconds(500));
+
+    while (!gStopRequested && Clock::now() < deadline) {
+        const int bootStatus = runChild(bootPath, "--execute");
+        if (bootStatus == 0) {
+            std::printf("FW1814 guarded boot-from-flash cue issued; "
+                        "waiting for operational personality\n");
+            sleepInterruptibly(std::chrono::milliseconds(1000));
+            return gStopRequested ? 130 : 0;
+        }
+
+        if (bootStatus != kBootNoBootloader) {
+            std::fprintf(stderr,
+                         "FW1814 guarded boot-from-flash failed with status %d\n",
+                         bootStatus);
+            return bootStatus;
+        }
+
+        sleepInterruptibly(std::chrono::milliseconds(250));
+    }
+
+    if (gStopRequested) return 130;
+    std::fprintf(stderr,
+                 "FW1814 bootloader personality did not appear within 10 seconds\n");
+    return 124;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -301,6 +338,7 @@ int main(int argc, char** argv) {
     const std::string here = executableDirectory(argc > 0 ? argv[0] : nullptr);
     const std::string initPath = here + "/fw1814init";
     const std::string bootPath = here + "/fwboot1814";
+    const std::string firmwareResetPath = here + "/fw1814firmwarereset";
     const std::string busResetPath = here + "/firewirebusreset";
     const std::string engine48Path = here + "/fw1814analog48";
     const std::string engine44Path = here + "/fw1814analog44";
@@ -312,7 +350,7 @@ int main(int argc, char** argv) {
 
     std::printf("macfw fw1814supervisor — resilient 44.1/48 kHz transport supervisor; guarded 88.2/96/176.4 kHz\n");
     std::printf("automatic reconnect and guarded bootloader recovery: enabled\n");
-    std::printf("validated pre-transport FW1814 bus reset: enabled\n");
+    std::printf("validated pre-transport recovery: bus reset at lower rates; firmware reboot at 176.4 kHz\n");
     std::printf("persistent validated routing-state restore: enabled\n");
 
     std::chrono::milliseconds retryDelay(250);
@@ -322,15 +360,15 @@ int main(int argc, char** argv) {
     constexpr std::chrono::milliseconds kCleanBusResetSettleDelay(3000);
     constexpr std::chrono::milliseconds kQuadRatePostInitQuiescence(2000);
 
-    // A physical disconnect/re-enumeration can leave the FW1814 playback side
-    // in a bad device-local stream state even though init-48 and all host-side
-    // transport diagnostics pass. Hardware testing showed that one guarded,
-    // product-scoped bus reset while the operational personality is confirmed,
-    // followed by a settle delay and a fresh init-48, reliably clears it.
+    // Every fresh transport start passes through a guarded device recovery.
+    // Lower rates retain the validated product-scoped FireWire bus reset.
+    // At 176.4 kHz, this experiment replaces the ineffective bus reset with
+    // the documented BeBoB application-to-bootloader reset followed by
+    // boot-from-flash, the closest software equivalent to a power cycle.
     //
-    // This flag is consumed before the reset is issued so the generation change
-    // caused by our own reset cannot recursively request another reset.
-    bool cleanBusResetRequired = true;
+    // The flag is consumed before issuing either recovery so the resulting
+    // re-enumeration cannot recursively request another recovery.
+    bool deviceRecoveryRequired = true;
 
     while (!gStopRequested) {
         std::uint32_t requestedRate = 0;
@@ -400,18 +438,39 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        if (cleanBusResetRequired) {
-            std::printf("FW1814 operational init PASS; performing validated clean bus reset before transport\n");
+        if (deviceRecoveryRequired) {
+            // Consume the request before issuing a reset. Either recovery
+            // changes device/bus state and must not schedule itself recursively.
+            deviceRecoveryRequired = false;
 
-            // Consume the request before issuing BusReset(). Our own reset will
-            // change the FireWire generation; that generation change must not
-            // schedule another reset recursively.
-            cleanBusResetRequired = false;
+            if (requestedRate == 176400) {
+                std::printf("FW1814 operational init PASS; performing guarded firmware reboot before 176.4 kHz transport\n");
+                const int recoveryStatus =
+                    runFirmwareReboot(firmwareResetPath, bootPath);
+                if (gStopRequested) break;
+
+                if (recoveryStatus != 0) {
+                    deviceRecoveryRequired = true;
+                    std::fprintf(stderr,
+                                 "FW1814 guarded firmware reboot failed with status %d; "
+                                 "not starting transport; retrying in %lld ms\n",
+                                 recoveryStatus,
+                                 static_cast<long long>(retryDelay.count()));
+                    sleepInterruptibly(retryDelay);
+                    retryDelay = std::min(retryDelay * 2, kMaxRetryDelay);
+                    continue;
+                }
+
+                std::printf("FW1814 guarded firmware reboot PASS; applying fresh init-48000 after re-enumeration\n");
+                continue;
+            }
+
+            std::printf("FW1814 operational init PASS; performing validated clean bus reset before transport\n");
             const int resetStatus = runBusReset(busResetPath);
             if (gStopRequested) break;
 
             if (resetStatus != 0) {
-                cleanBusResetRequired = true;
+                deviceRecoveryRequired = true;
                 std::fprintf(stderr,
                              "FW1814 guarded bus reset failed with status %d; "
                              "not starting transport; retrying in %lld ms\n",
@@ -466,15 +525,15 @@ int main(int argc, char** argv) {
         if (gStopRequested) break;
 
         // Any engine exit outside supervisor shutdown means the next transport
-        // start must pass through the validated clean bus-reset sequence again.
-        cleanBusResetRequired = true;
+        // start must pass through the rate-appropriate recovery again.
+        deviceRecoveryRequired = true;
         if (rateChangeRequested) {
             std::printf("FW1814 controlled rate handoff requested; "
-                        "clean bus reset required before next transport start\n");
+                        "device recovery required before next transport start\n");
         } else {
             std::fprintf(stderr,
                          "FW1814 analog transport engine exited with status %d; "
-                         "clean bus reset required before next transport start\n",
+                         "device recovery required before next transport start\n",
                          engineStatus);
         }
         sleepInterruptibly(kPostEngineExitDelay);

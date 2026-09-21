@@ -22,6 +22,7 @@ ENGINE88="$FW1814_DIR/transport/fw1814analog88"
 ENGINE176="$FW1814_DIR/transport/fw1814analog176"
 INIT="$FW1814_DIR/tools/fw1814init"
 BOOT="$FW1814_DIR/tools/fwboot1814"
+FIRMWARE_RESET="$FW1814_DIR/tools/fw1814firmwarereset"
 BUS_RESET="$FW1814_DIR/../../common/tools/firewirebusreset/firewirebusreset"
 CONTROL="$FW1814_DIR/tools/control/fw1814ctl/fw1814ctl"
 STATE_CONTROL="$FW1814_DIR/tools/control/fw1814state/fw1814state"
@@ -46,7 +47,7 @@ if [[ "${MACFW_INSTALL_EXPERIMENTAL96:-0}" == 1 && ! -x "$ENGINE96" ]]; then
     exit 1
 fi
 
-for file in "$SUPERVISOR" "$ENGINE48" "$ENGINE44" "$INIT" "$BOOT" "$BUS_RESET" "$CONTROL" "$STATE_CONTROL" "$DEVICE_PROBE"; do
+for file in "$SUPERVISOR" "$ENGINE48" "$ENGINE44" "$INIT" "$BOOT" "$FIRMWARE_RESET" "$BUS_RESET" "$CONTROL" "$STATE_CONTROL" "$DEVICE_PROBE"; do
     if [[ ! -x "$file" ]]; then
         echo "error: required FW1814 runtime binary is missing or not executable: $file" >&2
         echo "build with:" >&2
@@ -118,6 +119,7 @@ if [[ "${MACFW_INSTALL_EXPERIMENTAL96:-0}" == 1 || $had_enable96 == 1 ||
 fi
 install -o root -g wheel -m 0755 "$INIT" "$BIN_DIR/fw1814init"
 install -o root -g wheel -m 0755 "$BOOT" "$BIN_DIR/fwboot1814"
+install -o root -g wheel -m 0755 "$FIRMWARE_RESET" "$BIN_DIR/fw1814firmwarereset"
 install -o root -g wheel -m 0755 "$BUS_RESET" "$BIN_DIR/firewirebusreset"
 install -o root -g wheel -m 0755 "$CONTROL" "$BIN_DIR/fw1814ctl"
 install -o root -g wheel -m 0755 "$STATE_CONTROL" "$BIN_DIR/fw1814state"
@@ -153,6 +155,6 @@ echo "runtime build: $runtime_version build $runtime_build"
 echo "loaded launchd service: $LABEL"
 echo "automatic reconnect + guarded bootloader recovery: enabled"
 echo "automatic 44.1/48 kHz transport selection: enabled"
-echo "validated clean bus reset before transport recovery: enabled"
+echo "rate-aware transport recovery: bus reset at lower rates; guarded firmware reboot at 176.4 kHz"
 echo "persistent validated routing state: $STATE_FILE"
 echo "log: $LOG"

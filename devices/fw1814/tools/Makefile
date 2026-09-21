@@ -54,7 +54,7 @@ all: probe bebob-probe bus-reset-tool boot-tool init-tool capture48-tool dualcmp
 	client-close-watch-tool stream-client-close-watch-tool playback-map-tool \
 	route-analog-tool control-tool control-state-tool
 
-runtime: boot-tool init-tool bus-reset-tool control-tool control-state-tool device-probe-tool
+runtime: boot-tool firmware-reset-tool init-tool bus-reset-tool control-tool control-state-tool device-probe-tool
 
 probe:
 	$(MAKE) -C $(PROBE_DIR)
@@ -73,9 +73,8 @@ boot-check: boot-tool
 boot: boot-tool
 	./$(BOOT_TOOL) --execute
 
-# Standalone diagnostic only. This is intentionally excluded from `all` and
-# `runtime`; it must never become an automatic supervisor recovery path until
-# hardware testing proves what device-local state it resets.
+# Built into the installed runtime for the supervisor's guarded 176.4-kHz
+# recovery path. Direct execution still requires both explicit safety options.
 firmware-reset-tool: $(FIRMWARE_RESET_TOOL)
 
 $(FIRMWARE_RESET_TOOL): fw1814firmwarereset.cpp

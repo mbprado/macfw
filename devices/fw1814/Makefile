@@ -24,6 +24,7 @@ install-check:
 	    [ ! -x transport/fw1814analog44 ] || \
 	    [ ! -x tools/fw1814init ] || \
 	    [ ! -x tools/fwboot1814 ] || \
+	    [ ! -x tools/fw1814firmwarereset ] || \
 	    [ ! -x tools/fw1814deviceprobe ] || \
 	    [ ! -x ../../common/tools/firewirebusreset/firewirebusreset ] || \
 	    [ ! -x tools/control/fw1814ctl/fw1814ctl ] || \
