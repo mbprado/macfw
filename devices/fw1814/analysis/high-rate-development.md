@@ -1184,3 +1184,60 @@ reset. The next guarded supervisor trial adds a 2-second device-quiescence
 interval after the fresh post-reset init-48000 and before launching only the
 176.4-kHz engine. It rechecks the requested rate after the wait; no stream,
 ring or FCP kick timing is changed.
+
+## Device-local reset research and guarded probe
+
+The 2-second post-init quiescence did not eliminate the intermittent
+176.4-kHz artifacts. A physical interface reset remains reliable while the
+ordinary IEEE 1394 bus reset does not. Current Linux `snd-bebob` and FFADO
+sources contain no AV/C UNIT or SUBUNIT reset for the FW1814. Their operational
+paths break/rebuild both CMP connections, set OUTPUT then INPUT signal format,
+and reassert the current rate after streaming begins. That behavior is already
+represented in macfw and does not provide a stronger device reset.
+
+Both projects warn that the FW1814's M-Audio special firmware can freeze on
+commands it does not understand. An exploratory AV/C reset opcode is therefore
+not justified. FFADO does, however, document a separate BridgeCo BeBoB
+bootloader protocol at `0xffffc8021000`. Its protocol-v1 command `0x02` resets
+the running application into start mode `0x01` (bootloader). FFADO uses this
+exact transition before firmware maintenance. It neither downloads an image
+nor initializes persistent configuration. The existing guarded `fwboot1814`
+tool already uses the separately documented boot-from-flash command to return
+the confirmed bootloader personality to the operational application.
+
+Authoritative source paths reviewed:
+
+- Linux: `sound/firewire/bebob/bebob_maudio.c` and `bebob_stream.c`.
+- FFADO operational driver: `libffado/src/bebob/maudio/special_avdevice.*`.
+- FFADO bootloader protocol: `libffado/src/bebob/bebob_dl_codes.*` and
+  `bebob_dl_mgr.cpp`.
+
+`fw1814firmwarereset` reproduces only that documented reset-to-bootloader
+transition as a standalone diagnostic. It is excluded from normal builds,
+installation and supervisor recovery. Execution requires both `--execute` and
+`--experimental-firmware-reset`, the exact FW1814 operational registry identity
+and BeBoB fingerprint, an absent transport control socket, and online but
+disconnected oPCR[0]/iPCR[0]. The default invocation is read-only.
+
+Mac test sequence, with the installed supervisor stopped:
+
+```sh
+cd devices/fw1814/tools
+make firmware-reset-tool
+./fw1814init 48000 --execute
+./fw1814firmwarereset
+./fw1814firmwarereset --execute --experimental-firmware-reset
+# Wait until "FW 1814 Bootloader" enumerates.
+./fwboot1814 --execute
+# Wait until "FW 1814" enumerates again.
+./fw1814init 48000 --execute
+```
+
+Afterward, start the 176.4-kHz transport without an intervening physical power
+cycle and compare it with the known bad rate-transition case. Record both
+registry personalities, FireWire generations, every command result, and the
+first transport statistics. Do not integrate this reset into the supervisor
+unless repeated testing shows that it reliably clears the artifact and always
+returns the device to the same operational fingerprint. A failed return to the
+operational personality should be recovered only with the already validated
+`fwboot1814` path or a physical power cycle.

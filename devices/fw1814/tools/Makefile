@@ -8,6 +8,7 @@ BUS_RESET_DIR := ../../../common/tools/firewirebusreset
 LIBMACFW := ../../fw410/lib/libmacfw.a
 LIBMACFW_INCLUDE := ../../fw410/lib/include
 BOOT_TOOL := fwboot1814
+FIRMWARE_RESET_TOOL := fw1814firmwarereset
 INIT_TOOL := fw1814init
 CAPTURE48_TOOL := fw1814capture48
 DUALCMP_TOOL := fw1814capture48_dualcmp
@@ -29,6 +30,7 @@ STATE_CONTROL_DIR := control/fw1814state
 DEVICE_PROBE_TOOL := fw1814deviceprobe
 
 .PHONY: all runtime fingerprint probe boot-tool boot-check boot \
+	firmware-reset-tool firmware-reset-check firmware-reset \
 	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe \
 	init-tool init-check init-48 init-44 init-88-check init-96-check init-176-check init-192-check \
 	capture48-tool capture48-check capture48 capture48-raw \
@@ -70,6 +72,20 @@ boot-check: boot-tool
 
 boot: boot-tool
 	./$(BOOT_TOOL) --execute
+
+# Standalone diagnostic only. This is intentionally excluded from `all` and
+# `runtime`; it must never become an automatic supervisor recovery path until
+# hardware testing proves what device-local state it resets.
+firmware-reset-tool: $(FIRMWARE_RESET_TOOL)
+
+$(FIRMWARE_RESET_TOOL): fw1814firmwarereset.cpp
+	$(CXX) $(CXXFLAGS) $< $(FRAMEWORKS) -o $@
+
+firmware-reset-check: firmware-reset-tool
+	./$(FIRMWARE_RESET_TOOL)
+
+firmware-reset: firmware-reset-tool
+	./$(FIRMWARE_RESET_TOOL) --execute --experimental-firmware-reset
 
 bebob-probe:
 	$(MAKE) -C $(BEBOB_PROBE_DIR)
@@ -395,4 +411,4 @@ clean:
 	$(MAKE) -C $(BUS_RESET_DIR) clean
 	$(MAKE) -C $(CONTROL_DIR) clean
 	$(MAKE) -C $(STATE_CONTROL_DIR) clean
-	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(DEVICE_PROBE_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(DUPLEX96_TOOL) $(TONE96_TOOL) $(TONE96_LIVE_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) $(PLAYBACK_MAP_TOOL) $(ROUTE_ANALOG_TOOL) fw1814capture48_duplex_nodata
+	rm -f $(BOOT_TOOL) $(FIRMWARE_RESET_TOOL) $(INIT_TOOL) $(DEVICE_PROBE_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(DUPLEX96_TOOL) $(TONE96_TOOL) $(TONE96_LIVE_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) $(PLAYBACK_MAP_TOOL) $(ROUTE_ANALOG_TOOL) fw1814capture48_duplex_nodata
