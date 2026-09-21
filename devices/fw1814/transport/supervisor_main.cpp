@@ -306,8 +306,7 @@ int runFirmwareReboot(const std::string& resetPath,
         const int bootStatus = runChild(bootPath, "--execute");
         if (bootStatus == 0) {
             std::printf("FW1814 guarded boot-from-flash cue issued; "
-                        "waiting for operational personality\n");
-            sleepInterruptibly(std::chrono::milliseconds(1000));
+                        "operational personality will be polled by the supervisor\n");
             return gStopRequested ? 130 : 0;
         }
 
@@ -358,7 +357,6 @@ int main(int argc, char** argv) {
     constexpr std::chrono::milliseconds kReenumerationDelay(1000);
     constexpr std::chrono::milliseconds kPostEngineExitDelay(800);
     constexpr std::chrono::milliseconds kCleanBusResetSettleDelay(3000);
-    constexpr std::chrono::milliseconds kQuadRatePostInitQuiescence(2000);
 
     // Every fresh transport start passes through a guarded device recovery.
     // Lower rates retain the validated product-scoped FireWire bus reset.
@@ -369,6 +367,8 @@ int main(int argc, char** argv) {
     // The flag is consumed before issuing either recovery so the resulting
     // re-enumeration cannot recursively request another recovery.
     bool deviceRecoveryRequired = true;
+    bool operationalEnumerationPending = false;
+    Clock::time_point operationalEnumerationDeadline = Clock::time_point::min();
 
     while (!gStopRequested) {
         std::uint32_t requestedRate = 0;
@@ -388,6 +388,23 @@ int main(int argc, char** argv) {
         if (gStopRequested) break;
 
         if (initStatus != 0) {
+            if (operationalEnumerationPending) {
+                if (Clock::now() < operationalEnumerationDeadline) {
+                    std::printf("FW1814 operational personality not ready after "
+                                "boot-from-flash; polling again in 250 ms\n");
+                    sleepInterruptibly(std::chrono::milliseconds(250));
+                    continue;
+                }
+
+                operationalEnumerationPending = false;
+                deviceRecoveryRequired = true;
+                std::fprintf(stderr,
+                             "FW1814 operational personality did not return "
+                             "within 10 seconds; guarded recovery will retry\n");
+                sleepInterruptibly(retryDelay);
+                continue;
+            }
+
             std::fprintf(stderr,
                          "FW1814 init-%s unavailable/failed with status %d; "
                          "checking guarded bootloader personality\n",
@@ -431,6 +448,16 @@ int main(int argc, char** argv) {
         }
 
         retryDelay = std::chrono::milliseconds(250);
+        if (operationalEnumerationPending) {
+            const auto enumerationMs = std::chrono::duration_cast<
+                std::chrono::milliseconds>(
+                Clock::now() -
+                (operationalEnumerationDeadline - std::chrono::seconds(10)))
+                                           .count();
+            std::printf("FW1814 operational personality ready after %lld ms\n",
+                        static_cast<long long>(enumerationMs));
+            operationalEnumerationPending = false;
+        }
 
         std::uint32_t latestRate = 0;
         if (!requestedSampleRate(latestRate) || latestRate != requestedRate) {
@@ -461,7 +488,11 @@ int main(int argc, char** argv) {
                     continue;
                 }
 
-                std::printf("FW1814 guarded firmware reboot PASS; applying fresh init-48000 after re-enumeration\n");
+                operationalEnumerationPending = true;
+                operationalEnumerationDeadline =
+                    Clock::now() + std::chrono::seconds(10);
+                std::printf("FW1814 guarded firmware reboot PASS; polling for "
+                            "fresh operational init-48000\n");
                 continue;
             }
 
@@ -495,17 +526,6 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "FW1814 requested engine unavailable: %s\n", enginePath.c_str());
             sleepInterruptibly(retryDelay);
             continue;
-        }
-        if (requestedRate == 176400) {
-            std::printf("FW1814 post-reset init-48000 PASS; quiescing device for 2000 ms before 176.4 kHz transport\n");
-            sleepInterruptibly(kQuadRatePostInitQuiescence);
-            if (gStopRequested) break;
-
-            std::uint32_t settledRate = 0;
-            if (!requestedSampleRate(settledRate) || settledRate != requestedRate) {
-                std::printf("FW1814 rate request changed during 176.4 kHz quiescence; restarting selection\n");
-                continue;
-            }
         }
         std::printf("FW1814 post-reset init-%s PASS; starting %s\n",
                     rateArg, requestedRate == 176400
