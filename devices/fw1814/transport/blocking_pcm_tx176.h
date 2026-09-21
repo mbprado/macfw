@@ -336,6 +336,9 @@ public:
         std::uint64_t nonzeroFrames = 0;
         std::int32_t peakSample = 0;
         std::uint64_t lateCyclePolls = 0;
+        std::uint64_t dangerousCyclePolls = 0;
+        UInt32 maxCycleDelta = 0;
+        std::uint64_t maxHalvesBehind = 0;
     };
 
     BlockingPcmStream176400(BlockingPcmTransmitRing176400& tx,
@@ -377,6 +380,8 @@ public:
         const UInt32 delta = cycleDelta(currentCycle, lastCycle_);
         lastCycle_ = currentCycle;
         if (delta > 32) ++stats_.lateCyclePolls;
+        if (delta >= halfPackets_) ++stats_.dangerousCyclePolls;
+        stats_.maxCycleDelta = std::max(stats_.maxCycleDelta, delta);
         cyclesObserved_ += delta;
 
         if (!streamReached_) {
@@ -386,6 +391,8 @@ public:
 
         const std::uint64_t sinceStart = cyclesObserved_ - leadCycles_;
         const std::uint64_t halfNumber = sinceStart / halfPackets_;
+        stats_.maxHalvesBehind = std::max(
+            stats_.maxHalvesBehind, halfNumber - lastHalfNumber_);
         while (lastHalfNumber_ < halfNumber) {
             const std::size_t consumedHalf =
                 static_cast<std::size_t>(lastHalfNumber_ & 1u);

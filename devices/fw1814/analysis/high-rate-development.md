@@ -1141,3 +1141,14 @@ saved AUX selection normally. Interactive attempts to select AUX at a quad
 rate are rejected rather than displayed as active. The 192-kHz limitation is
 inferred from the shared quad-rate stream topology and should be confirmed
 during 192-kHz ISO validation.
+
+An intermittent 96 -> 176.4-kHz transition later produced broken playback
+despite a stable PCM reserve and exact 352800-frame two-second TX/HAL deltas.
+The failed run had no PCM underruns, transmitted silence or HAL drops, but
+its `tx-late` count grew more quickly. Its ISO setup took 37.8 ms. The engine
+previously began a fixed 550-ms wait only after that variable setup, moving
+the rate kick relative to the scheduled first TX cycle. The next guarded
+trial anchors OUTPUT CONTROL to 50 ms after that scheduled cycle instead.
+It also reports `tx-max-gap`, `tx-danger` and `tx-max-behind` so an audible
+failure can be distinguished from harmless polling gaps without changing
+the validated ring, preload or steady PCM reserve.
