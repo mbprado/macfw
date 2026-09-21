@@ -1154,3 +1154,12 @@ previous fixed 550-ms wait. The added `tx-max-gap`, `tx-danger` and
 `tx-max-behind` diagnostics remain so future audible failures can be separated
 from dangerous scheduler gaps without changing the validated ring, preload or
 steady PCM reserve.
+
+A later clean/broken comparison isolated a TX-half-quantized READY-reserve
+difference. The clean 176.4-kHz start retained 56448 silent PCM frames, exactly
+four 14112-frame TX halves (320 ms), while the broken 96 -> 176.4-kHz handoff
+retained only 28224 frames, exactly two halves (160 ms). Both had zero pre-READY
+underruns and healthy scheduler diagnostics, and CoreAudio playback is not
+released until after this measurement. The next guarded trial therefore tops
+the silent READY reserve up to four complete TX halves without changing the
+rate-kick timing, TX schedule, ring size or steady-state buffering.

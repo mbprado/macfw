@@ -40,6 +40,10 @@ constexpr std::size_t kCaptureSlots = 256;
 // broken audio with 640/320. Retain the hardware-validated TX ring here.
 constexpr std::size_t kTxPackets = 1280;
 constexpr std::size_t kTxHalfPackets = 640;
+// At 176.4 kHz each 640-cycle half contains 441 data packets with 32 PCM
+// frames each. A clean hardware transition retained four complete halves of
+// silence at READY; broken transitions retained only two.
+constexpr std::size_t kFramesPerTxHalf = 441 * 32;
 constexpr std::size_t kPcmCapacityFrames = 524288;
 constexpr std::size_t kCapturePrefillFrames = 512;
 constexpr std::size_t kQuadPlaybackPcmPositions = 4;
@@ -49,7 +53,7 @@ constexpr std::uint64_t kAudioServicePeriodNs = 250000;
 // Start with silent PCM through the duplex rate kick. This initial reserve
 // follows the 96-kHz prototype; hardware testing must validate its latency.
 constexpr std::size_t kSilentStartupFrames = 8 * kRate / 5;
-constexpr std::size_t kMinReadySilenceFrames = 4096;
+constexpr std::size_t kMinReadySilenceFrames = 4 * kFramesPerTxHalf;
 
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
@@ -377,11 +381,15 @@ bool run() {
             // producer, top up a short silence reserve if a slow FCP exchange
             // consumed more of the startup preload than expected.
             const auto queued = pcm.availableFrames();
-            if (queued < kMinReadySilenceFrames &&
-                pcm.write(silence.data(), kMinReadySilenceFrames - queued) !=
-                    kMinReadySilenceFrames - queued) {
-                std::cerr << "FW1814 176.4 kHz ready silence top-up failed\n";
-                startupOk = false;
+            if (queued < kMinReadySilenceFrames) {
+                const auto topUpFrames = kMinReadySilenceFrames - queued;
+                if (pcm.write(silence.data(), topUpFrames) != topUpFrames) {
+                    std::cerr << "FW1814 176.4 kHz ready silence top-up failed\n";
+                    startupOk = false;
+                } else {
+                    std::cout << "FW1814 176.4 kHz ready silence top-up: "
+                              << topUpFrames << " frames\n";
+                }
             }
             std::cout << "FW1814 176.4 kHz playback reserve at READY: "
                       << pcm.availableFrames() << " frames ("
