@@ -43,6 +43,14 @@ standalone transport is ready for opt-in CoreAudio integration. Audible
 CoreAudio capture/monitoring remain unverified; 192-kHz ISO streaming has
 not yet been tested.
 
+Hardware routing tests also identified a quad-rate AUX boundary. The AUX bus
+remained audible at 88.2/96 kHz but was silent through both headphone and
+analog-output AUX selections at 176.4 kHz while mixer routing remained
+functional. macfw now reports AUX routing as unavailable at quad rates,
+rejects interactive AUX source selection and applies a Mixer 1/2 runtime
+fallback without overwriting the saved lower-rate AUX preference. The control
+panel disables the unavailable AUX choices and controls at 176.4/192 kHz.
+
 ## 2026-09-16 — Physical headphone encoders in the `0.04.003` release
 
 The first unified `0.04.000` release included the FW1814 analog CoreAudio

@@ -1120,3 +1120,24 @@ output, or another device-side condition; do not alter the 48-kHz transport
 based only on its steady counters. On a repeat, compare the control-panel
 routing and whether both the direct and software-return paths are affected,
 and preserve the complete log from the rate transition.
+
+## Quad-rate AUX limitation
+
+Hardware testing established a rate-family boundary in the FW1814's internal
+AUX bus. AUX routing remains functional at 88.2 and 96 kHz, despite the
+original control-panel documentation describing reduced high-rate controls.
+At 176.4 kHz, however, routing the same isolated AUX signal to either a
+headphone output or Analog Outputs 3/4 produced silence. Mixer-sourced output
+continued to work. This distinguishes a disabled quad-rate AUX bus from a
+headphone-selector or macfw playback-position fault.
+
+The control registers are write-only and still accept the same values, so a
+cached `SRC_HP_OUT` or `SRC_ANA_OUT` AUX selection is not evidence that the
+device applied it. The production control surface must therefore treat AUX
+routing as unavailable at 176.4/192 kHz. On quad-rate engine startup, saved
+AUX source selections are retained in persistent state but the active engine
+uses Mixer 1/2 as its safe fallback. Returning to 96 kHz or below replays the
+saved AUX selection normally. Interactive attempts to select AUX at a quad
+rate are rejected rather than displayed as active. The 192-kHz limitation is
+inferred from the shared quad-rate stream topology and should be confirmed
+during 192-kHz ISO validation.

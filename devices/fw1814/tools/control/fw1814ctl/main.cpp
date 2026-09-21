@@ -399,6 +399,8 @@ int routingGet() {
               << "  MIX_ANA_DIG_IN: " << inputMixerText << '\n'
               << "  hardware readback: unavailable (" << stateSource
               << ")\n";
+    if (rate == 176400 || rate == 192000)
+        std::cout << "  AUX bus: unavailable at quad rate; Mixer routing is active\n";
     return 0;
 }
 

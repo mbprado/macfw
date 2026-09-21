@@ -68,6 +68,7 @@ static AudioObjectID FindDevice(void){
 @property(nonatomic,strong) NSTextView *diagnostics;
 @property(nonatomic,strong) NSSegmentedControl *rate;
 @property(nonatomic,strong) NSTextField *deviceStatus;
+@property(nonatomic,strong) NSTextField *auxNote;
 @property(nonatomic,assign) BOOL refreshing;
 @property(nonatomic,strong) NSMutableArray<NSButton*> *routes;
 @property(nonatomic,strong) NSMutableArray<NSPopUpButton*> *outputSources;
@@ -161,7 +162,7 @@ static AudioObjectID FindDevice(void){
         NSPopUpButton *p=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(18,y+3,130,27) pullsDown:NO];[p addItemsWithTitles:@[@"Mixer 1/2",@"Mixer 3/4",@"AUX"]];p.tag=i;p.target=self;p.action=@selector(hpSource:);[v addSubview:p];[self.hpSources addObject:p];y-=115;}
 }
 - (void)buildAux{
-    NSView *v=[self scroll:[self tab:@"AUX" id:@"aux"] height:720];[v addSubview:Lbl(@"Independent stereo AUX sends. Select AUX on an output or headphone to hear this bus.",NSMakeRect(18,684,880,20))];CGFloat y=590;
+    NSView *v=[self scroll:[self tab:@"AUX" id:@"aux"] height:720];self.auxNote=Lbl(@"Independent stereo AUX sends. Select AUX on an output or headphone to hear this bus.",NSMakeRect(18,684,880,20));[v addSubview:self.auxNote];CGFloat y=590;
     for(NSInteger i=0;i<6;++i){[self stereo:v y:y title:[NSString stringWithFormat:@"%@ send",TITLE()[i]] index:i action:@selector(auxLevel:) mute:@selector(auxMute:) store:self.auxRows];y-=82;}
     [self stereo:v y:12 title:@"AUX master" index:0 action:@selector(auxMasterLevel:) mute:@selector(auxMasterMute:) store:self.auxMasterRows];
 }
@@ -210,12 +211,23 @@ static AudioObjectID FindDevice(void){
     for(NSInteger i=0;i<4;++i){NSDictionary *r=[self ctl:@[@"input-monitor-pan",@"get",ANA()[i]]];int16_t l=0,q=0;if([r[@"status"] integerValue]||!RawPan(r[@"output"],&l,&q))continue;
         NSInteger lv=lround(-100.0*l/32768.0),rv=lround(-100.0*q/32768.0);NSDictionary *row=self.panRows[i];[row[@"left"] setIntegerValue:lv];[row[@"right"] setIntegerValue:rv];[self panLabel:row[@"leftValue"] value:lv];[self panLabel:row[@"rightValue"] value:rv];}
 }
+- (void)setAuxAvailable:(BOOL)available{
+    for(NSPopUpButton *p in self.outputSources)[p itemAtIndex:1].enabled=available;
+    for(NSPopUpButton *p in self.hpSources)[p itemAtIndex:2].enabled=available;
+    for(NSDictionary *row in self.auxRows)for(NSString *key in @[@"left",@"right",@"link",@"mute"])[row[key] setEnabled:available];
+    for(NSDictionary *row in self.auxMasterRows)for(NSString *key in @[@"left",@"right",@"link",@"mute"])[row[key] setEnabled:available];
+    self.auxNote.stringValue=available
+        ? @"Independent stereo AUX sends. Select AUX on an output or headphone to hear this bus."
+        : @"The FW1814 disables its AUX bus at 176.4/192 kHz. Saved AUX settings are retained for lower rates.";
+    self.auxNote.textColor=available?NSColor.labelColor:NSColor.systemOrangeColor;
+}
 - (void)refreshDevice{
     AudioObjectID d=FindDevice();if(d==kAudioObjectUnknown){self.deviceStatus.stringValue=@"CoreAudio device: unavailable";self.rate.enabled=NO;self.rate.selectedSegment=-1;return;}
     AudioObjectPropertyAddress a{kAudioDevicePropertyNominalSampleRate,kAudioObjectPropertyScopeGlobal,kAudioObjectPropertyElementMain};Float64 rate=0;UInt32 n=sizeof(rate);
     if(AudioObjectGetPropertyData(d,&a,0,nullptr,&n,&rate)!=noErr){self.deviceStatus.stringValue=@"CoreAudio device: rate unavailable";self.rate.enabled=NO;return;}
     self.deviceStatus.stringValue=[NSString stringWithFormat:@"CoreAudio device: connected • %.0f Hz",rate];self.rate.enabled=YES;
     self.rate.selectedSegment=std::fabs(rate-44100.0)<1?0:(std::fabs(rate-48000.0)<1?1:-1);
+    [self setAuxAvailable:rate<176400.0];
 }
 - (void)refreshDiagnostics{
     NSMutableString *s=[NSMutableString stringWithFormat:@"macfw FW1814 Control %s build %s\n%@\n\n",macfw::fw1814::build::kVersion,macfw::fw1814::build::kGitSha,[NSDate date]];
@@ -235,8 +247,8 @@ static AudioObjectID FindDevice(void){
     NSArray *a=i<2?@[@"mixer-route",@"set",SW()[i],PAIR()[b],state]:@[@"input-mixer-route",@"set",ANA()[i-2],PAIR()[b],state];
     NSDictionary *r=[self ctl:a];[self report:r ok:@"Routing updated and saved"];if([r[@"status"] integerValue])s.state=s.state==NSControlStateValueOn?NSControlStateValueOff:NSControlStateValueOn;
 }
-- (void)outputSource:(NSPopUpButton*)s{NSDictionary *r=[self ctl:@[@"output-source",@"set",PAIR()[s.tag],s.indexOfSelectedItem?@"aux":@"mixer"]];[self report:r ok:@"Analog output source updated and saved"];}
-- (void)hpSource:(NSPopUpButton*)s{NSArray *a=@[@"mixer1/2",@"mixer3/4",@"aux"];NSDictionary *r=[self ctl:@[@"headphone-source",@"set",HP()[s.tag],a[s.indexOfSelectedItem]]];[self report:r ok:@"Headphone source updated and saved"];}
+- (void)outputSource:(NSPopUpButton*)s{NSDictionary *r=[self ctl:@[@"output-source",@"set",PAIR()[s.tag],s.indexOfSelectedItem?@"aux":@"mixer"]];[self report:r ok:@"Analog output source updated and saved"];if([r[@"status"] integerValue])[self refreshSources];}
+- (void)hpSource:(NSPopUpButton*)s{NSArray *a=@[@"mixer1/2",@"mixer3/4",@"aux"];NSDictionary *r=[self ctl:@[@"headphone-source",@"set",HP()[s.tag],a[s.indexOfSelectedItem]]];[self report:r ok:@"Headphone source updated and saved"];if([r[@"status"] integerValue])[self refreshSources];}
 - (NSString*)db:(NSInteger)v{return [NSString stringWithFormat:@"%ld",(long)v];}
 - (void)commitLevel:(NSControl*)c rows:(NSMutableArray*)rows command:(NSString*)cmd args:(NSArray*)args{
     NSInteger i=c.tag/2,ch=c.tag%2;if(i>=(NSInteger)rows.count)return;NSDictionary *row=rows[i];NSSlider *l=row[@"left"],*r=row[@"right"];

@@ -171,6 +171,10 @@ public:
     }
 
 private:
+    bool auxRoutingAvailable() const {
+        return sampleRate_ != 176400 && sampleRate_ != 192000;
+    }
+
     void saveHeadphoneVolume(unsigned output, std::uint32_t word) {
         constexpr const char* helper =
             "/Library/Application Support/macfw/fw1814/bin/fw1814state";
@@ -429,7 +433,7 @@ private:
               " " + hex32(routing_.mixAnalogDigitalIn()) + "\n");
     }
 
-    void handleOutput(const std::string& command) {
+    void handleOutput(const std::string& command, bool restoreCommand) {
         using Model = macfw::fw1814::SpecialMixerRoutingModel;
         if (command == "OUTPUT GET") {
             std::string output = "OK";
@@ -474,6 +478,15 @@ private:
             return;
         }
 
+        if (source == 1 && !auxRoutingAvailable()) {
+            if (restoreCommand) {
+                reply("OK " + std::to_string(pair) + " 0\n");
+            } else {
+                reply("ERR aux-routing-unavailable-at-quad-rate\n");
+            }
+            return;
+        }
+
         Model desired = routing_;
         desired.setAnalogOutputSource(
             pairId, source == 0 ? Model::OutputSource::Mixer
@@ -491,7 +504,7 @@ private:
               std::to_string(source) + "\n");
     }
 
-    void handleHeadphone(const std::string& command) {
+    void handleHeadphone(const std::string& command, bool restoreCommand) {
         using Model = macfw::fw1814::SpecialMixerRoutingModel;
         using Source = macfw::fw1814::HeadphoneSource;
         const auto sourceIndex = [](Source source) {
@@ -540,6 +553,17 @@ private:
                       std::to_string(sourceIndex(
                           routing_.headphoneSource(outputId))) + " " +
                       hex32(routing_.srcHeadphoneOut()) + "\n");
+                return;
+            }
+
+
+            if (source == 2 && !auxRoutingAvailable()) {
+                if (restoreCommand) {
+                    reply("OK " + std::to_string(output) + " 0 " +
+                          hex32(routing_.srcHeadphoneOut()) + "\n");
+                } else {
+                    reply("ERR aux-routing-unavailable-at-quad-rate\n");
+                }
                 return;
             }
 
@@ -1254,6 +1278,10 @@ private:
             reply("OK routing-state=1 runtime-routing-set=1 "
                   "stream-mixer=1 analog-output-source=1 "
                   "headphone-source=all-persistent "
+                  "aux-routing=" +
+                  std::string(auxRoutingAvailable() ? "available" :
+                                                     "unavailable-quad-rate") +
+                  " "
                   "register-readback=0 state-cache=authoritative "
                   "analog-input-mixer=1 digital=deferred "
                   "analog-input-monitor-level=all-analog-persistent "
@@ -1320,11 +1348,11 @@ private:
             return;
         }
         if (command.rfind("OUTPUT ", 0) == 0) {
-            handleOutput(command);
+            handleOutput(command, restoreCommand);
             return;
         }
         if (command.rfind("HEADPHONE ", 0) == 0) {
-            handleHeadphone(command);
+            handleHeadphone(command, restoreCommand);
             return;
         }
         reply("ERR unknown-command\n");
