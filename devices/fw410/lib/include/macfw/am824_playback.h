@@ -33,6 +33,17 @@ struct Playback48kState {
     std::uint8_t phase = 0;
 };
 
+struct Playback192kState {
+    std::uint8_t dbc = 0;
+    std::uint8_t phase = 0;
+};
+
+struct Playback192kCycle {
+    bool dataBearing = false;
+    std::uint8_t dbc = 0;
+    std::uint32_t sytOffset = kTicksPerCycle;
+};
+
 struct Playback48kPacket {
     std::array<std::uint8_t, kPlayback48kDataPacketBytes> bytes{};
     std::uint32_t length = 0;
@@ -81,6 +92,21 @@ inline std::uint16_t computePlayback48kSyt(std::uint32_t cycle,
                                            std::uint32_t sytOffsetTicks) {
     return computePlaybackSyt(cycle, sytOffsetTicks,
                               kPlayback48kTransferDelayTicks);
+}
+
+// A 32-frame 192-kHz blocking packet spans the same 4096 ticks as an
+// eight-frame 48-kHz packet. Three packets occupy offsets 0, 1024 and 2048;
+// the fourth bus cycle is NODATA.
+inline Playback192kCycle nextPlayback192kCycle(Playback192kState& state) {
+    Playback192kCycle cycle;
+    cycle.dataBearing = state.phase != 3u;
+    cycle.dbc = state.dbc;
+    if (cycle.dataBearing) {
+        cycle.sytOffset = static_cast<std::uint32_t>(state.phase) * 1024u;
+        state.dbc = static_cast<std::uint8_t>(state.dbc + 32u);
+    }
+    state.phase = static_cast<std::uint8_t>((state.phase + 1u) & 3u);
+    return cycle;
 }
 
 inline Playback48kPacket buildPlayback48kSilence(

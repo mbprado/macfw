@@ -1,4 +1,4 @@
-#include "../transport/blocking_pcm_tx176.h"
+#include "../transport/blocking_pcm_tx192.h"
 #include "../transport/realtime_service.h"
 #include "fw1814_capture_quad_pump.h"
 #include "macfw/amdtp_receive_ring.h"
@@ -37,7 +37,7 @@ constexpr UInt32 kFcpResponseSize = 0x200;
 constexpr double kFcpTimeoutSeconds = 1.0;
 
 constexpr unsigned kBaselineRate = 48000;
-// BeBoB CIP_BLOCKING at 176.4 kHz uses 32 events and the Linux S/PDIF
+// BeBoB CIP_BLOCKING at 192 kHz uses 32 events and the Linux S/PDIF
 // formation changes to two capture PCM and four playback PCM positions.
 constexpr UInt32 kCaptureMaxPayload = 392;  // 8 + 32 * (2 PCM + 1 MIDI) * 4.
 constexpr UInt32 kPlaybackMaxPayload = 648; // 8 + 32 * (4 PCM + 1 MIDI) * 4.
@@ -47,8 +47,11 @@ constexpr std::size_t kCapturePackets = 64;
 constexpr std::size_t kTxPackets = 1280;
 constexpr UInt32 kCyclesPerSecond = 8000;
 constexpr UInt32 kTxCycleLead = 4096;
-constexpr std::size_t kToneStartFrames = 264600; // 1.5 seconds at 176.4 kHz.
-constexpr std::size_t kToneFrames = 529200;      // Three seconds.
+constexpr std::size_t kToneStartFrames = 288000; // 1.5 seconds at 192 kHz.
+constexpr std::size_t kToneFrames = 576000;      // Three seconds.
+constexpr std::size_t kToneGapFrames = 192000;   // One second.
+constexpr std::size_t kToneTailFrames = 96000;   // Half a second.
+constexpr unsigned kToneRepeats = 4;
 
 struct CaptureWindow {
     double elapsed = 0;
@@ -240,16 +243,16 @@ bool specialStreamKick(macfw::FireWireDevice& device,
                        ResponseContext& ctx,
                        bool raw) {
     std::cout << "FW1814 special stream kick with BOTH ISO directions running:\n";
-    std::cout << "    set OUTPUT 176400 Hz...\n";
-    const bool outputOk = setSignalRate(device, ctx, 0x18, 0x05, raw);
+    std::cout << "    set OUTPUT 192000 Hz...\n";
+    const bool outputOk = setSignalRate(device, ctx, 0x18, 0x06, raw);
     std::cout << "        result: " << (outputOk ? "PASS" : "FAIL") << '\n';
     if (!outputOk) return false;
 
     std::cout << "    waiting 100 ms before INPUT rate CONTROL...\n";
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    std::cout << "    set INPUT 176400 Hz...\n";
-    const bool inputOk = setSignalRate(device, ctx, 0x19, 0x05, raw);
+    std::cout << "    set INPUT 192000 Hz...\n";
+    const bool inputOk = setSignalRate(device, ctx, 0x19, 0x06, raw);
     std::cout << "        result: " << (inputOk ? "PASS" : "FAIL") << '\n';
     if (!inputOk) return false;
 
@@ -269,14 +272,14 @@ bool dumpReceive(const macfw::AmdtpReceiveRing& ring, bool raw) {
         if (!packet.hasCip()) { ++other; continue; }
         const auto h = packet.cip();
         if (packet.isNoData()) ++noData;
-        else if (h.dbs == 3 && h.fmt == 0x10 && h.fdf == 0x05 &&
+        else if (h.dbs == 3 && h.fmt == 0x10 && h.fdf == 0x06 &&
                  packet.dataLength() == 32 * 3 * 4) ++matchingData;
         else ++other;
     }
     std::cout << "capture result:\n"
               << "    touched slots: " << touched
               << " / " << ring.packetCount() << '\n'
-              << "    176.4 kHz 32-event packets: " << matchingData << '\n'
+              << "    192 kHz 32-event packets: " << matchingData << '\n'
               << "    NODATA packets: " << noData << '\n'
               << "    other packets: " << other << '\n';
 
@@ -425,47 +428,83 @@ bool run(bool execute, bool raw, bool tone, unsigned position) {
         goto cleanup;
     }
 
+    // Linux BeBoB configures the requested rate before establishing CMP/ISO,
+    // waits for the device transition, then reasserts it once both streams
+    // are running. Starting FDF=0x06 packets while the FW1814 still expects
+    // 48 kHz can leave the playback path muted even though the later CONTROL
+    // commands are accepted and capture changes rate successfully.
+    rateAttempted = true;
+    std::cout << "pre-arming device OUTPUT and INPUT at 192000 Hz before ISO:\n";
+    {
+        const bool outputOk = setSignalRate(device, ctx, 0x18, 0x06, raw);
+        std::cout << "    OUTPUT result: " << (outputOk ? "PASS" : "FAIL") << '\n';
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        const bool inputOk = setSignalRate(device, ctx, 0x19, 0x06, raw);
+        std::cout << "    INPUT result: " << (inputOk ? "PASS" : "FAIL") << '\n';
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        unsigned armedRate = 0;
+        const bool readOk = readInputRate(device, ctx, armedRate, raw);
+        std::cout << "    INPUT readback: "
+                  << (readOk ? std::to_string(armedRate) + " Hz" : "unavailable")
+                  << '\n';
+        if (!outputOk || !inputOk || !readOk || armedRate != 192000)
+            goto cleanup;
+    }
+
     {
         UInt32 cycleTime = 0;
         auto receiveRing = macfw::AmdtpReceiveRing::create(
             device, kCapturePackets, kCaptureMaxPayload);
         auto captureStore =
             std::make_unique<macfw::fw1814::hal::capture::SharedCaptureRing>();
-        macfw::fw1814::hal::capture::initialize(*captureStore, 176400);
-        macfw::fw1814::experimental::CapturePump176400 captureDecoder;
+        macfw::fw1814::hal::capture::initialize(*captureStore, 192000);
+        macfw::fw1814::experimental::CapturePump192000 captureDecoder;
         // Preload past the TX lead, rate kick and observation window so the
         // DMA refill never relies on CoreAudio or a dynamic PCM producer.
-        constexpr std::size_t kPreloadFrames = 970200; // 5.5 seconds.
-        macfw::PcmRingBuffer silentPcm(1048576, kPlaybackPcmChannels);
+        constexpr std::size_t kSilentPreloadFrames = 1056000; // 5.5 seconds.
+        constexpr std::size_t kRepeatedToneFrames =
+            kToneStartFrames + kToneRepeats * kToneFrames +
+            (kToneRepeats - 1) * kToneGapFrames + kToneTailFrames;
+        const std::size_t preloadFrames = tone
+            ? kRepeatedToneFrames : kSilentPreloadFrames;
+        const std::size_t pcmCapacity = tone ? 4194304 : 2097152;
+        macfw::PcmRingBuffer silentPcm(pcmCapacity, kPlaybackPcmChannels);
         std::vector<std::int32_t> silence(
-            kPreloadFrames * kPlaybackPcmChannels, 0);
+            preloadFrames * kPlaybackPcmChannels, 0);
         if (tone) {
             constexpr double kTwoPi = 6.2831853071795864769;
             constexpr double kPeak = 529285.0; // -24 dBFS of 24-bit PCM.
-            for (std::size_t frame = 0; frame < kToneFrames; ++frame) {
-                const double phase = kTwoPi * 440.0 * frame / 176400.0;
-                silence[(kToneStartFrames + frame) * kPlaybackPcmChannels + position] =
-                    static_cast<std::int32_t>(std::lround(kPeak * std::sin(phase)));
+            for (unsigned repeat = 0; repeat < kToneRepeats; ++repeat) {
+                const std::size_t start = kToneStartFrames +
+                    repeat * (kToneFrames + kToneGapFrames);
+                for (std::size_t frame = 0; frame < kToneFrames; ++frame) {
+                    const double phase = kTwoPi * 440.0 * frame / 192000.0;
+                    silence[(start + frame) * kPlaybackPcmChannels + position] =
+                        static_cast<std::int32_t>(
+                            std::lround(kPeak * std::sin(phase)));
+                }
             }
             std::cout << "tone: 440 Hz at -24 dBFS, PCM position " << position
-                      << ", after 1.5 s silence for 3 s\n";
+                      << ", " << kToneRepeats
+                      << " passes of 3 s after 1.5 s warmup, with 1 s gaps\n";
         }
         const std::size_t preloadWritten = silentPcm.write(
-            silence.data(), kPreloadFrames);
+            silence.data(), preloadFrames);
         // Take the cycle anchor only after the expensive PCM preparation.
         // Otherwise it consumes the fixed TX lead before ISO can start.
         const bool cycleReady = (*native)->GetCycleTime(native, &cycleTime) ==
             kIOReturnSuccess;
+        const auto txAnchorTime = std::chrono::steady_clock::now();
         const UInt32 currentCycle = (cycleTime >> 12) & 0x1fffu;
         const UInt32 firstTxCycle = (currentCycle + kTxCycleLead) % kCyclesPerSecond;
-        auto transmitRing = macfw::fw1814::transport::BlockingPcmTransmitRing176400::create(
+        auto transmitRing = macfw::fw1814::transport::BlockingPcmTransmitRing192000::create(
             device, firstTxCycle, kTxPackets);
-        macfw::fw1814::transport::BlockingPcmStream176400 streamer(
+        macfw::fw1814::transport::BlockingPcmStream192000 streamer(
             transmitRing, silentPcm, currentCycle, firstTxCycle, kTxPackets / 2);
         std::atomic<bool> stopTx{false};
         std::atomic<bool> txHealthy{true};
         std::thread txWorker;
-        std::array<CaptureWindow, 12> captureWindows{};
+        std::array<CaptureWindow, 40> captureWindows{};
         std::size_t captureWindowCount = 0;
         const CFAbsoluteTime captureStart = CFAbsoluteTimeGetCurrent();
         bool observationReady = false;
@@ -479,7 +518,7 @@ bool run(bool execute, bool raw, bool tone, unsigned position) {
         IOFireWireLibIsochChannelRef playbackChannel = nullptr;
 
         if (!cycleReady || !receiveRing || !transmitRing || !capture || !playback ||
-            !silentPcm.valid() || preloadWritten != kPreloadFrames ||
+            !silentPcm.valid() || preloadWritten != preloadFrames ||
             !streamer.valid() || !streamer.prime()) {
             std::cout << "ISO resource creation failed\n";
             goto cleanup_stream;
@@ -591,7 +630,7 @@ bool run(bool execute, bool raw, bool tone, unsigned position) {
 
         txWorker = std::thread([&] {
             macfw::fw1814::transport::requestInteractiveQos(
-                "FW1814 176.4 TX service thread");
+                "FW1814 192 TX service thread");
             macfw::fw1814::transport::requestAudioTimeConstraint();
             while (!stopTx.load(std::memory_order_acquire)) {
                 UInt32 serviceTime = 0;
@@ -620,16 +659,40 @@ bool run(bool execute, bool raw, bool tone, unsigned position) {
         std::cout << "ISO settle: 550 ms through scheduled TX start\n";
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.55, false);
 
-        rateAttempted = true;
         kickOk = specialStreamKick(device, ctx, raw);
         if (!kickOk) {
             std::cout << "status: FAIL - special stream kick CONTROL failed\n";
             goto cleanup_stream;
         }
 
-        std::cout << "capture: waiting up to 4"
-                  << " s for packets" << (tone ? " and tone playback" : "") << '\n';
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 4.0, false);
+        if (tone) {
+            const auto firstToneTime = txAnchorTime +
+                std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                    std::chrono::duration<double>(
+                        static_cast<double>(kTxCycleLead) / kCyclesPerSecond +
+                        static_cast<double>(kToneStartFrames) / 192000.0));
+            const auto now = std::chrono::steady_clock::now();
+            if (now < firstToneTime) {
+                const double waitSeconds =
+                    std::chrono::duration<double>(firstToneTime - now).count();
+                std::cout << "tone warmup: " << waitSeconds
+                          << " s until first pass\n";
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, waitSeconds, false);
+            }
+            for (unsigned repeat = 0; repeat < kToneRepeats; ++repeat) {
+                std::cout << "tone pass " << (repeat + 1) << '/'
+                          << kToneRepeats << ": PLAYING (3 seconds)" << std::endl;
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 3.0, false);
+                if (repeat + 1 < kToneRepeats) {
+                    std::cout << "tone gap: 1 second" << std::endl;
+                    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.0, false);
+                }
+            }
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.5, false);
+        } else {
+            std::cout << "capture: waiting up to 4 s for packets\n";
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 4.0, false);
+        }
         observationReady = true;
         success = dumpReceive(receiveRing, raw);
 
@@ -637,7 +700,7 @@ cleanup_stream:
         stopTx.store(true, std::memory_order_release);
         if (txWorker.joinable()) txWorker.join();
         const auto& txStats = streamer.stats();
-        std::cout << "176.4 TX: halves=" << txStats.halvesRefilled
+        std::cout << "192 TX: halves=" << txStats.halvesRefilled
                   << " frames=" << txStats.framesFromBuffer
                   << " nonzero=" << txStats.nonzeroFrames
                   << " underrun=" << txStats.framesSilenced
@@ -659,7 +722,7 @@ cleanup_stream:
                 captureStore->decodedFrames.load(std::memory_order_relaxed),
                 captureStore->decodedPackets.load(std::memory_order_relaxed),
                 captureDecoder.stats().noDataPackets};
-            std::cout << "continuous 176.4 capture: frames=" << end.frames
+            std::cout << "continuous 192 capture: frames=" << end.frames
                       << " data=" << end.dataPackets
                       << " NODATA=" << end.noDataPackets
                       << " dbcGaps=" << captureDecoder.stats().dbcDiscontinuities
@@ -686,7 +749,7 @@ cleanup_stream:
                     const double effectiveRate =
                         (current.frames - previous.frames) / interval;
                     if (previous.elapsed >= 1.5 && interval >= 0.3 &&
-                        effectiveRate >= 160000 && effectiveRate <= 190000)
+                        effectiveRate >= 175000 && effectiveRate <= 205000)
                         ++steadyWindows;
                     std::cout << "    " << previous.elapsed << '-'
                               << current.elapsed << ": "
@@ -697,7 +760,7 @@ cleanup_stream:
                 }
                 previous = current;
             }
-            std::cout << "176.4 capture steady windows: " << steadyWindows
+            std::cout << "192 capture steady windows: " << steadyWindows
                       << " -> " << (steadyWindows >= 2 ? "PASS" : "FAIL") << '\n';
             success = success && steadyWindows >= 2;
             std::cout << "capture raw PCM peaks (dBFS):";
@@ -852,11 +915,11 @@ int main(int argc, char** argv) {
     }
 
     if (execute && (!experimentalHighRate || !experimentalQuadRate)) {
-        std::cerr << "176.4 kHz duplex execution requires both --experimental-high-rate"
+        std::cerr << "192 kHz duplex execution requires both --experimental-high-rate"
                      " and --experimental-quad-rate\n";
         return 64;
     }
 
-    std::cout << "macfw fw1814capture176-duplex-blocking — experimental quad-rate duplex diagnostic\n\n";
+    std::cout << "macfw fw1814capture192-duplex-blocking — experimental quad-rate duplex diagnostic\n\n";
     return run(execute, raw, tone, position) ? 0 : 1;
 }

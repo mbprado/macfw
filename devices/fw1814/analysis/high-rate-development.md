@@ -12,7 +12,7 @@ also has one MIDI position, which macfw does not currently expose.
 | 88.2 kHz | 10 PCM | 6 PCM | Experimental CoreAudio playback, recording and monitoring tested, including an approximately five-minute recording; hardware opt-in required |
 | 96 kHz | 10 PCM | 6 PCM | Experimental CoreAudio playback and analog capture tested; hardware opt-in required |
 | 176.4 kHz | 2 PCM | 4 PCM | Clear tone and four-output routing verified; continuous capture probe passed six steady windows; CoreAudio untested |
-| 192 kHz | 2 PCM | 4 PCM | CONTROL/readback tested; ISO streaming untested |
+| 192 kHz | 2 PCM | 4 PCM | Guarded silent duplex and bounded-tone transport tested; CoreAudio untested |
 
 Linux's [FW1814 clock protocol](https://github.com/alsa-project/snd-firewire-ctl-services/blob/master/protocols/bebob/src/maudio/special.rs)
 lists all six rates. This is evidence of a supported rate-control code, not
@@ -1274,3 +1274,73 @@ showed intermittent invalid-label counts even though the two-second TX/HAL
 deltas were exactly 352800 frames and DBC gaps remained zero. Treat this as a
 hardware checkpoint rather than a final resolution of the occasional startup
 artifact.
+
+## First 192-kHz live ISO validation
+
+The standalone `fw1814capture192_duplex_blocking` probe extends the guarded
+quad-rate diagnostic without changing the installed HAL, supervisor or
+176.4-kHz engine. Its base-48 blocking schedule sends three 32-event packets
+followed by one NODATA packet, uses DBS=5/FDF=0x06 for playback, and expects
+DBS=3/FDF=0x06 from capture. Both 640- and 1280-cycle TX rings preserve their
+immutable NuDCL lengths. The shared offline test also verifies the production
+schedule's 0/1024/2048-tick SYT offsets and 32-frame DBC steps.
+
+The first silent hardware run started from an authoritative 48-kHz baseline
+at bus generation 338. Both 192-kHz CONTROL commands passed. Every slot in the
+64-cycle receive snapshot matched the expected pattern: 48 392-byte data
+packets and 16 NODATA packets, with no other packet type. Six steady capture
+windows measured approximately 192000 frames/second. TX moved 798720 frames
+with no underrun; capture reported no DBC gaps, duplicates, reordered or stale
+packets, malformed packets or dropped frames. It did report 72 invalid sample
+labels, consistent with the intermittent quad-rate startup-label observation.
+The bus generation remained unchanged, both PCRs were restored, and INPUT
+readback returned to 48000 Hz.
+
+A second run sent a bounded 440-Hz, -24-dBFS tone on PCM position 2 after 1.5
+seconds of silence. TX reported 541214 nonzero frames and no underrun. Capture
+again produced six steady windows near 192 kHz with no DBC gaps, malformed
+packets, invalid labels or dropped frames. The bus generation and all cleanup
+checks passed, including the final 48-kHz readback. This establishes working
+192-kHz duplex transport and nonzero playback packet delivery. Audible tone
+quality and physical output routing still require listener confirmation before
+any CoreAudio integration.
+
+Listener testing did not hear that tone and did not observe the output channel
+activate. The probe had established CMP and started FDF=0x06 transmission while
+the device was still configured for 48 kHz, then changed the rate with the
+running-stream kick. Linux BeBoB instead configures the target rate before CMP
+and ISO startup, waits 300 ms for the transition, starts both streams, and then
+reasserts the rate for M-Audio special firmware. The next guarded trial follows
+that ordering while retaining the final running-stream kick and all 48-kHz/PCR
+cleanup checks.
+
+Build and inspect the read-only preflight with the installed service stopped:
+
+```sh
+make -C devices/fw1814/tools duplex192-tool
+sudo devices/fw1814/tools/fw1814capture192_duplex_blocking
+```
+
+Execution retains both high-rate opt-ins and restores the 48-kHz baseline:
+
+```sh
+sudo devices/fw1814/tools/fw1814capture192_duplex_blocking \
+  --execute --experimental-high-rate --experimental-quad-rate
+```
+
+The corrected startup sequence audibly switched the output clocking, but the
+first listener runs still produced no tone or output-channel activity. Extending
+the preload to four numbered three-second tone passes with one-second silent
+gaps ruled out insufficient warmup. Explicitly writing the documented straight
+mixer routing also made no difference. The fault was in the new 192-kHz TX
+refill: unlike the validated 176.4-kHz transmitter, it did not publish each
+refilled DMA half with a release fence. Software counters therefore observed
+the nonzero PCM writes while the interface continued to receive the original
+silent ring contents.
+
+After adding the same DMA publication fence used at 176.4 kHz, all four 440-Hz
+passes on raw playback position 2 were audible and the output activity became
+visible. This validates sustained nonzero host-to-device playback at 192 kHz in
+addition to the previously validated capture cadence, rate restoration and PCR
+cleanup. The result remains a standalone guarded diagnostic; 192-kHz CoreAudio
+exposure and long-running program-audio playback are not implemented.

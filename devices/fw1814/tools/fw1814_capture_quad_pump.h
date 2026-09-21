@@ -14,9 +14,10 @@
 
 namespace macfw::fw1814::experimental {
 
-// Experimental 176.4-kHz decoder; captures 32-event blocking packets.
+// Experimental quad-rate decoder; captures 32-event blocking packets.
 // Keep separate from the released 48-kHz capture path until hardware checks.
-class CapturePump176400 {
+template <std::uint8_t ExpectedFdf>
+class CapturePumpQuadRate {
     static constexpr std::size_t kQuadCapturePcmPositions = 2;
     static constexpr std::size_t kQuadCaptureStreamPositions = 3;
 public:
@@ -189,7 +190,7 @@ private:
             // assuming which physical analog inputs they represent.
             constexpr std::size_t kEventBytes = kQuadCaptureStreamPositions * 4;
             if (h.dbs != kQuadCaptureStreamPositions || h.fmt != 0x10 ||
-                h.fdf != 0x05 || packet.dataLength() == 0 ||
+                h.fdf != ExpectedFdf || packet.dataLength() == 0 ||
                 packet.dataLength() % kEventBytes != 0) {
                 out.malformedPackets.fetch_add(1, std::memory_order_relaxed);
                 continue;
@@ -298,5 +299,8 @@ private:
     bool haveTimestamp_ = false;
     std::uint32_t lastTimestamp_ = 0;
 };
+
+using CapturePump176400 = CapturePumpQuadRate<0x05>;
+using CapturePump192000 = CapturePumpQuadRate<0x06>;
 
 } // namespace macfw::fw1814::experimental

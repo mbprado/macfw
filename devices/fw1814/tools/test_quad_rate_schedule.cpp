@@ -45,22 +45,28 @@ bool check176400() {
 
 bool check192000() {
     // 192 kHz / 32 events yields exactly three data packets and one NODATA
-    // packet per four cycles. Each repeated NuDCL slot retains its length.
+    // packet per four cycles. Verify the production scheduler's DBC and SYT
+    // offset state as well as each repeated NuDCL slot length.
     constexpr std::size_t kPeriod = 8000;
     std::size_t dataCount = 0;
-    std::uint8_t dbc = 0;
+    macfw::am824::Playback192kState state{};
     for (std::size_t cycle = 0; cycle < kPeriod; ++cycle) {
-        const bool data = cycle % 4 != 3;
-        if (data) {
-            ++dataCount;
-            dbc = static_cast<std::uint8_t>(dbc + kEvents);
-        }
-        if (cycle == kRing - 1 && (dataCount != 480 || dbc != 0))
+        const auto scheduled = macfw::am824::nextPlayback192kCycle(state);
+        const std::size_t phase = cycle % 4;
+        if (scheduled.dataBearing != (phase != 3) ||
+            scheduled.dbc != static_cast<std::uint8_t>(dataCount * kEvents) ||
+            scheduled.sytOffset != (phase == 3
+                ? macfw::am824::kTicksPerCycle : phase * 1024u))
             return false;
-        if (cycle == kExtendedRing - 1 && (dataCount != 960 || dbc != 0))
+        if (scheduled.dataBearing)
+            ++dataCount;
+        if (cycle == kRing - 1 && (dataCount != 480 || state.dbc != 0))
+            return false;
+        if (cycle == kExtendedRing - 1 &&
+            (dataCount != 960 || state.dbc != 0))
             return false;
     }
-    return dataCount == 6000 && dbc == 0;
+    return dataCount == 6000 && state.dbc == 0 && state.phase == 0;
 }
 
 } // namespace

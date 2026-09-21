@@ -1,7 +1,7 @@
 #include "../fcp_control.h"
 #include "../special_mixer.h"
 #include "blocking_pcm_tx176.h"
-#include "../tools/fw1814_capture176_pump.h"
+#include "../tools/fw1814_capture_quad_pump.h"
 #include "duplex_lifecycle.h"
 #include "engine_ready.h"
 #include "fw1814_control_server.h"

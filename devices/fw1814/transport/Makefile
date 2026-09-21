@@ -70,7 +70,7 @@ analog88-experimental:
 	$(MAKE) $(ANALOG88)
 
 $(ANALOG176): analog176_main.cpp blocking_pcm_tx176.h \
-	../tools/fw1814_capture176_pump.h ../tools/fw1814_receive_cycle.h \
+	../tools/fw1814_capture_quad_pump.h ../tools/fw1814_receive_cycle.h \
 	duplex_lifecycle.h engine_ready.h \
 	fw1814_control_server.h playback_pump.h realtime_service.h shared_io.h \
 	../channel_map.h ../fcp_control.h ../special_mixer.h ../special_mixer_model.h \
