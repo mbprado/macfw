@@ -485,6 +485,36 @@ bool run() {
                 lifecycle.generationStillValid();
         }
         if (startupOk) {
+            // The four-half READY reserve protects the rate kick and control
+            // restore, but carrying all of it into live playback adds up to
+            // 320 ms before the first CoreAudio frame. Let silent TX consume
+            // the excess now that restore and HAL pre-arm have completed.
+            const auto releaseDrainStart = std::chrono::steady_clock::now();
+            while (pcm.availableFrames() > kReleaseSilenceFrames &&
+                   !gStopRequested &&
+                   !audioFinished.load(std::memory_order_acquire)) {
+                control.service();
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+            }
+            const auto releaseDrainMs = std::chrono::duration_cast<
+                std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - releaseDrainStart).count();
+            std::cout << "FW1814 176.4 kHz playback-release drain: "
+                      << pcm.availableFrames() << " frames after "
+                      << releaseDrainMs << " ms\n";
+            // CoreAudio continues producing while the protected PCM reserve
+            // drains. Those frames belong to the muted startup interval and
+            // would otherwise become a new live-playback latency backlog.
+            const auto staleSharedFrames =
+                macfw::fw1814::hal::availableFrames(*playbackShared.ring());
+            playbackShared.discardBacklog();
+            std::cout << "FW1814 176.4 kHz playback-release shared discard: "
+                      << staleSharedFrames << " frames\n";
+            startupOk = !gStopRequested &&
+                !audioFinished.load(std::memory_order_acquire) &&
+                lifecycle.generationStillValid();
+        }
+        if (startupOk) {
             const auto queued = pcm.availableFrames();
             if (queued < kReleaseSilenceFrames) {
                 const auto topUpFrames = kReleaseSilenceFrames - queued;

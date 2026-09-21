@@ -306,8 +306,7 @@ int runFirmwareReboot(const std::string& resetPath,
         const int bootStatus = runChild(bootPath, "--execute");
         if (bootStatus == 0) {
             std::printf("FW1814 guarded boot-from-flash cue issued; "
-                        "waiting for operational personality\n");
-            sleepInterruptibly(std::chrono::milliseconds(1000));
+                        "operational personality will be polled by the supervisor\n");
             return gStopRequested ? 130 : 0;
         }
 
@@ -369,6 +368,8 @@ int main(int argc, char** argv) {
     // The flag is consumed before issuing either recovery so the resulting
     // re-enumeration cannot recursively request another recovery.
     bool deviceRecoveryRequired = true;
+    bool operationalEnumerationPending = false;
+    Clock::time_point operationalEnumerationDeadline = Clock::time_point::min();
 
     while (!gStopRequested) {
         std::uint32_t requestedRate = 0;
@@ -388,6 +389,23 @@ int main(int argc, char** argv) {
         if (gStopRequested) break;
 
         if (initStatus != 0) {
+            if (operationalEnumerationPending) {
+                if (Clock::now() < operationalEnumerationDeadline) {
+                    std::printf("FW1814 operational personality not ready after "
+                                "boot-from-flash; polling again in 250 ms\n");
+                    sleepInterruptibly(std::chrono::milliseconds(250));
+                    continue;
+                }
+
+                operationalEnumerationPending = false;
+                deviceRecoveryRequired = true;
+                std::fprintf(stderr,
+                             "FW1814 operational personality did not return "
+                             "within 10 seconds; guarded recovery will retry\n");
+                sleepInterruptibly(retryDelay);
+                continue;
+            }
+
             std::fprintf(stderr,
                          "FW1814 init-%s unavailable/failed with status %d; "
                          "checking guarded bootloader personality\n",
@@ -431,6 +449,16 @@ int main(int argc, char** argv) {
         }
 
         retryDelay = std::chrono::milliseconds(250);
+        if (operationalEnumerationPending) {
+            const auto enumerationMs = std::chrono::duration_cast<
+                std::chrono::milliseconds>(
+                Clock::now() -
+                (operationalEnumerationDeadline - std::chrono::seconds(10)))
+                                           .count();
+            std::printf("FW1814 operational personality ready after %lld ms\n",
+                        static_cast<long long>(enumerationMs));
+            operationalEnumerationPending = false;
+        }
 
         std::uint32_t latestRate = 0;
         if (!requestedSampleRate(latestRate) || latestRate != requestedRate) {
@@ -461,7 +489,11 @@ int main(int argc, char** argv) {
                     continue;
                 }
 
-                std::printf("FW1814 guarded firmware reboot PASS; applying fresh init-48000 after re-enumeration\n");
+                operationalEnumerationPending = true;
+                operationalEnumerationDeadline =
+                    Clock::now() + std::chrono::seconds(10);
+                std::printf("FW1814 guarded firmware reboot PASS; polling for "
+                            "fresh operational init-48000\n");
                 continue;
             }
 

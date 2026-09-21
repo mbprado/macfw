@@ -1241,3 +1241,36 @@ unless repeated testing shows that it reliably clears the artifact and always
 returns the device to the same operational fingerprint. A failed return to the
 operational personality should be recovered only with the already validated
 `fwboot1814` path or a physical power cycle.
+
+## Guarded reboot polling and playback-release latency
+
+Repeated guarded firmware reboots showed that the operational personality
+returns about four seconds after the boot-from-flash cue. The supervisor now
+polls init every 250 ms for up to 10 seconds instead of sleeping for one second
+and falling through to another recovery attempt. Observed returns were 3945 to
+3976 ms across repeated runs. The validated 2-second quiescence after the fresh
+post-reset init remains unchanged. Restart and rate-change testing completed
+normally; one initialization produced brief artifacts that soon normalized.
+
+The four-half READY reserve remains necessary during the rate kick and saved
+control restoration, but carrying that entire 56448-frame reserve into live
+playback adds about 320 ms of latency. An initial 28224-frame release target
+(about 160 ms) produced first-nonzero TX delays of 175 and 186 ms on active
+96 -> 176.4-kHz transitions. Restoring the 8192-frame release target (about
+46 ms) and letting silent TX drain the protected reserve after HAL pre-arm
+reduced the first-nonzero delay to 80 ms.
+
+CoreAudio continued to fill the shared ring during that drain, leaving about
+200 ms of steady playback backlog. Discarding those startup-interval frames
+immediately after the drain removed 17280 stale frames (about 98 ms) in the
+measured active transition. Playback then released with 8192 PCM frames, first
+nonzero TX arrived after 77 ms, and the steady PCM queue settled near 21248 to
+21344 frames (about 121 ms). Subjective testing found the resulting latency
+much better, and repeated restart and mode-change tests remained reliable.
+
+The final active test reported no HAL drops, active-playback PCM underruns,
+dangerous TX gaps or DBC gaps; `tx-max-behind` was one cycle. Capture still
+showed intermittent invalid-label counts even though the two-second TX/HAL
+deltas were exactly 352800 frames and DBC gaps remained zero. Treat this as a
+hardware checkpoint rather than a final resolution of the occasional startup
+artifact.
