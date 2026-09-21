@@ -1145,10 +1145,12 @@ during 192-kHz ISO validation.
 An intermittent 96 -> 176.4-kHz transition later produced broken playback
 despite a stable PCM reserve and exact 352800-frame two-second TX/HAL deltas.
 The failed run had no PCM underruns, transmitted silence or HAL drops, but
-its `tx-late` count grew more quickly. Its ISO setup took 37.8 ms. The engine
-previously began a fixed 550-ms wait only after that variable setup, moving
-the rate kick relative to the scheduled first TX cycle. The next guarded
-trial anchors OUTPUT CONTROL to 50 ms after that scheduled cycle instead.
-It also reports `tx-max-gap`, `tx-danger` and `tx-max-behind` so an audible
-failure can be distinguished from harmless polling gaps without changing
-the validated ring, preload or steady PCM reserve.
+its `tx-late` count grew more quickly. A guarded trial anchored OUTPUT CONTROL
+to 50 ms after the scheduled first TX cycle instead of waiting 550 ms after
+ISO setup. The anchored kick occurred at the intended point, but playback was
+worse while transport remained structurally healthy (`tx-danger=0`,
+`tx-max-behind=1`, no PCM underruns). The engine therefore returned to the
+previous fixed 550-ms wait. The added `tx-max-gap`, `tx-danger` and
+`tx-max-behind` diagnostics remain so future audible failures can be separated
+from dangerous scheduler gaps without changing the validated ring, preload or
+steady PCM reserve.

@@ -44,7 +44,6 @@ constexpr std::size_t kPcmCapacityFrames = 524288;
 constexpr std::size_t kCapturePrefillFrames = 512;
 constexpr std::size_t kQuadPlaybackPcmPositions = 4;
 constexpr UInt32 kCycleLead = 4096;
-constexpr double kTxStartSettleSeconds = 0.050;
 constexpr UInt32 kCyclesPerSecond = 8000;
 constexpr std::uint64_t kAudioServicePeriodNs = 250000;
 // Start with silent PCM through the duplex rate kick. This initial reserve
@@ -344,18 +343,9 @@ bool run() {
         // The dedicated audio thread services TX throughout both CONTROL
         // transactions and the 1-second post-kick silent warmup.
         bool startupOk = true;
-        // Anchor the rate kick to the scheduled TX start rather than to the
-        // end of variable ISO setup. The device therefore always receives
-        // OUTPUT after the same 50 ms of blocking packets.
-        const CFAbsoluteTime rateKickDeadline = cycleAnchorTime +
-            static_cast<double>(kCycleLead) / kCyclesPerSecond +
-            kTxStartSettleSeconds;
-        const double remainingWaitMs = std::max(
-            0.0, (rateKickDeadline - CFAbsoluteTimeGetCurrent()) * 1000.0);
-        std::cout << "FW1814 176.4 kHz TX lead: 4096 cycles; waiting "
-                  << remainingWaitMs
-                  << " ms to rate kick 50 ms after scheduled TX start\n";
-        while (CFAbsoluteTimeGetCurrent() < rateKickDeadline && !gStopRequested &&
+        std::cout << "FW1814 176.4 kHz TX lead: 4096 cycles; waiting 550 ms\n";
+        const CFAbsoluteTime firstCycleDeadline = CFAbsoluteTimeGetCurrent() + 0.550;
+        while (CFAbsoluteTimeGetCurrent() < firstCycleDeadline && !gStopRequested &&
                !audioFinished.load(std::memory_order_acquire))
             CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
         if (gStopRequested || audioFinished.load(std::memory_order_acquire))
