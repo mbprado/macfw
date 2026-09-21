@@ -53,7 +53,9 @@ constexpr std::uint64_t kAudioServicePeriodNs = 250000;
 // Start with silent PCM through the duplex rate kick. This initial reserve
 // follows the 96-kHz prototype; hardware testing must validate its latency.
 constexpr std::size_t kSilentStartupFrames = 8 * kRate / 5;
-constexpr std::size_t kMinReadySilenceFrames = 4 * kFramesPerTxHalf;
+constexpr std::size_t kReadySilenceFrames = 4 * kFramesPerTxHalf;
+constexpr std::size_t kReleaseSilenceFrames = 2 * kFramesPerTxHalf;
+constexpr std::chrono::milliseconds kHalPlaybackPrearmTimeout(1000);
 
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
@@ -208,6 +210,7 @@ bool run() {
         // loop and 100 ms INPUT delay must not starve the 80 ms TX halves.
         std::atomic<bool> rateKicked{false};
         std::atomic<bool> releasePlayback{false};
+        std::atomic<std::int64_t> playbackReleaseNs{0};
 
         macfw::fw1814::experimental::CapturePump176400 capturePump;
         PlaybackPumpStats playbackPumpStats;
@@ -237,6 +240,8 @@ bool run() {
             }
 
             bool captureReady = false;
+            bool firstSharedReadLogged = false;
+            bool firstNonzeroTxLogged = false;
             const bool verbose = std::getenv("MACFW_VERBOSE") != nullptr;
             CFAbsoluteTime lastGenerationCheck = CFAbsoluteTimeGetCurrent();
             CFAbsoluteTime lastStatus = lastGenerationCheck;
@@ -247,14 +252,44 @@ bool run() {
 
                 if (rateKicked.load(std::memory_order_acquire))
                     capturePump.service(rx, *captureShared.ring());
-                if (releasePlayback.load(std::memory_order_acquire))
+                if (releasePlayback.load(std::memory_order_acquire)) {
+                    const auto framesBefore = playbackPumpStats.framesRead;
                     drainPlaybackQuad(*playbackShared.ring(), pcm, audio, mapped,
-                                  &playbackPumpStats);
+                                      &playbackPumpStats);
+                    if (!firstSharedReadLogged &&
+                        playbackPumpStats.framesRead != framesBefore) {
+                        const auto released =
+                            playbackReleaseNs.load(std::memory_order_acquire);
+                        const auto now = std::chrono::duration_cast<
+                            std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch())
+                                             .count();
+                        std::cout << "FW1814 176.4 kHz first shared playback read: "
+                                  << (now - released) / 1000000
+                                  << " ms after release\n";
+                        firstSharedReadLogged = true;
+                    }
+                }
 
                 UInt32 nowCycleTime = 0;
                 if ((*device.nativeHandle())->GetCycleTime(
                         device.nativeHandle(), &nowCycleTime) == kIOReturnSuccess)
                     streamer.service(cycleCount(nowCycleTime));
+
+                if (releasePlayback.load(std::memory_order_acquire) &&
+                    !firstNonzeroTxLogged &&
+                    streamer.stats().nonzeroFrames != 0) {
+                    const auto released =
+                        playbackReleaseNs.load(std::memory_order_acquire);
+                    const auto now = std::chrono::duration_cast<
+                        std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                                         .count();
+                    std::cout << "FW1814 176.4 kHz first nonzero TX: "
+                              << (now - released) / 1000000
+                              << " ms after release\n";
+                    firstNonzeroTxLogged = true;
+                }
 
                 if (rateKicked.load(std::memory_order_acquire))
                     capturePump.service(rx, *captureShared.ring());
@@ -380,8 +415,8 @@ bool run() {
             // Only the audio thread reads this ring. Establish the guarded
             // reserve before notifying the supervisor that transport is ready.
             const auto queued = pcm.availableFrames();
-            if (queued < kMinReadySilenceFrames) {
-                const auto topUpFrames = kMinReadySilenceFrames - queued;
+            if (queued < kReadySilenceFrames) {
+                const auto topUpFrames = kReadySilenceFrames - queued;
                 if (pcm.write(silence.data(), topUpFrames) != topUpFrames) {
                     std::cerr << "FW1814 176.4 kHz ready silence top-up failed\n";
                     startupOk = false;
@@ -412,9 +447,45 @@ bool run() {
                 lifecycle.generationStillValid();
         }
         if (startupOk) {
+            // Arm the HAL before releasing the playback pump. A full firmware
+            // reboot can make CoreAudio resume later than the transport, so
+            // wait for its first fresh callback instead of consuming the
+            // entire PCM safety reserve while the shared ring is still empty.
+            playbackShared.discardBacklog();
+            auto* playbackRing = playbackShared.ring();
+            const auto prearmStart = std::chrono::steady_clock::now();
+            playbackRing->active.store(1, std::memory_order_release);
+            playbackActive = true;
+            while (macfw::fw1814::hal::availableFrames(*playbackRing) == 0 &&
+                   !gStopRequested &&
+                   !audioFinished.load(std::memory_order_acquire) &&
+                   std::chrono::steady_clock::now() - prearmStart <
+                       kHalPlaybackPrearmTimeout) {
+                control.service();
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+            }
+            const auto prearmMs = std::chrono::duration_cast<
+                std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - prearmStart).count();
+            const auto prearmFrames =
+                macfw::fw1814::hal::availableFrames(*playbackRing);
+            if (prearmFrames != 0) {
+                std::cout << "FW1814 176.4 kHz HAL playback pre-arm: "
+                          << prearmFrames << " frames after " << prearmMs
+                          << " ms\n";
+            } else {
+                std::cout << "FW1814 176.4 kHz HAL playback pre-arm: "
+                          << "no active client after " << prearmMs
+                          << " ms; continuing guarded release\n";
+            }
+            startupOk = !gStopRequested &&
+                !audioFinished.load(std::memory_order_acquire) &&
+                lifecycle.generationStillValid();
+        }
+        if (startupOk) {
             const auto queued = pcm.availableFrames();
-            if (queued < kMinReadySilenceFrames) {
-                const auto topUpFrames = kMinReadySilenceFrames - queued;
+            if (queued < kReleaseSilenceFrames) {
+                const auto topUpFrames = kReleaseSilenceFrames - queued;
                 if (pcm.write(silence.data(), topUpFrames) != topUpFrames) {
                     std::cerr << "FW1814 176.4 kHz playback-release silence top-up failed\n";
                     startupOk = false;
@@ -428,9 +499,11 @@ bool run() {
             std::cout << "FW1814 176.4 kHz playback release reserve: "
                       << pcm.availableFrames() << " frames ("
                       << pcm.availableFrames() * 1000 / kRate << " ms)\n";
+            const auto releaseNs = std::chrono::duration_cast<
+                std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            playbackReleaseNs.store(releaseNs, std::memory_order_release);
             releasePlayback.store(true, std::memory_order_release);
-            playbackShared.ring()->active.store(1, std::memory_order_release);
-            playbackActive = true;
             std::cout << "FW1814 176.4 kHz analog engine ONLINE\n";
         }
 
