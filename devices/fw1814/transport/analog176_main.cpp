@@ -58,8 +58,11 @@ constexpr std::size_t kReadySilenceFrames = 4 * kFramesPerTxHalf;
 // 88.2/96 kHz engines without changing the validated 1280/640 TX geometry.
 constexpr std::size_t kReleaseSilenceFrames = 8192;
 constexpr std::chrono::milliseconds kHalPlaybackPrearmTimeout(1000);
+constexpr std::chrono::milliseconds kCaptureQualificationQuiet(1500);
+constexpr std::chrono::milliseconds kCaptureQualificationTimeout(8000);
 
 volatile std::sig_atomic_t gStopRequested = 0;
+volatile std::sig_atomic_t gQualificationFailed = 0;
 void signalHandler(int) { gStopRequested = 1; }
 
 UInt32 cycleCount(UInt32 cycleTime) {
@@ -134,6 +137,9 @@ bool run() {
         }
         const UInt32 initialCycle = cycleCount(cycleTime);
         const CFAbsoluteTime cycleAnchorTime = CFAbsoluteTimeGetCurrent();
+        const auto startupMs = [&] {
+            return (CFAbsoluteTimeGetCurrent() - cycleAnchorTime) * 1000.0;
+        };
         const UInt32 firstCycle = (initialCycle + kCycleLead) % kCyclesPerSecond;
         auto tx = macfw::fw1814::transport::BlockingPcmTransmitRing176400::create(
             device, firstCycle, kTxPackets);
@@ -211,6 +217,7 @@ bool run() {
         // Start TX servicing before the special FCP kick. The FCP response
         // loop and 100 ms INPUT delay must not starve the 80 ms TX halves.
         std::atomic<bool> rateKicked{false};
+        std::atomic<bool> captureQualified{false};
         std::atomic<bool> releasePlayback{false};
         std::atomic<std::int64_t> playbackReleaseNs{0};
 
@@ -248,12 +255,62 @@ bool run() {
             CFAbsoluteTime lastGenerationCheck = CFAbsoluteTimeGetCurrent();
             CFAbsoluteTime lastStatus = lastGenerationCheck;
             std::uint64_t lastCaptureFrames = 0;
+            bool qualificationStarted = false;
+            auto qualificationStartedAt = std::chrono::steady_clock::now();
+            auto captureQuietSince = qualificationStartedAt;
+            std::uint64_t qualificationStartFrames = 0;
+            std::uint64_t lastCaptureFaults = 0;
 
             while (!gStopRequested) {
                 pacer.wait();
 
                 if (rateKicked.load(std::memory_order_acquire))
                     capturePump.service(rx, *captureShared.ring());
+                if (rateKicked.load(std::memory_order_acquire) &&
+                    !captureQualified.load(std::memory_order_acquire)) {
+                    const auto nowQualification = std::chrono::steady_clock::now();
+                    const auto& stats = capturePump.stats();
+                    const auto frames = captureShared.ring()->decodedFrames.load(
+                        std::memory_order_acquire);
+                    const auto faults =
+                        captureShared.ring()->invalidLabels.load(std::memory_order_acquire) +
+                        captureShared.ring()->malformedPackets.load(std::memory_order_acquire) +
+                        stats.metadataByteSwaps + stats.dbcDiscontinuities +
+                        stats.timestampRegressions + stats.reorderedPackets + stats.stalePackets;
+                    if (!qualificationStarted) {
+                        qualificationStarted = true;
+                        qualificationStartedAt = nowQualification;
+                        captureQuietSince = nowQualification;
+                        qualificationStartFrames = frames;
+                        lastCaptureFaults = faults;
+                        std::cout << "FW1814 176.4 kHz capture qualification: "
+                                     "waiting for 1500 ms clean input\n";
+                    } else {
+                        if (faults != lastCaptureFaults) {
+                            captureQuietSince = nowQualification;
+                            lastCaptureFaults = faults;
+                        }
+                        if (frames - qualificationStartFrames >= kRate &&
+                            nowQualification - captureQuietSince >=
+                                kCaptureQualificationQuiet) {
+                            captureQualified.store(true, std::memory_order_release);
+                            const auto write = captureShared.ring()->writeFrame.load(
+                                std::memory_order_acquire);
+                            captureShared.ring()->readFrame.store(write,
+                                                                  std::memory_order_release);
+                            std::cout << "FW1814 176.4 kHz capture qualified: "
+                                      << frames - qualificationStartFrames
+                                      << " frames observed; startup faults=" << faults << '\n';
+                        } else if (nowQualification - qualificationStartedAt >=
+                                   kCaptureQualificationTimeout) {
+                            std::cerr << "FW1814 176.4 kHz capture qualification FAILED: "
+                                      << "faults=" << faults << "; requesting stream retry\n";
+                            gQualificationFailed = 1;
+                            audioFinished.store(true, std::memory_order_release);
+                            return;
+                        }
+                    }
+                }
                 if (releasePlayback.load(std::memory_order_acquire)) {
                     const auto framesBefore = playbackPumpStats.framesRead;
                     drainPlaybackQuad(*playbackShared.ring(), pcm, audio, mapped,
@@ -296,7 +353,7 @@ bool run() {
                 if (rateKicked.load(std::memory_order_acquire))
                     capturePump.service(rx, *captureShared.ring());
 
-                if (rateKicked.load(std::memory_order_acquire) &&
+                if (captureQualified.load(std::memory_order_acquire) &&
                     captureShared.ring()->active.load(std::memory_order_acquire) == 0) {
                     const bool resumed = captureReady;
                     captureReady = false;
@@ -393,12 +450,14 @@ bool run() {
             startupOk = false;
         if (startupOk) {
             rateAttempted = true;
-            std::cout << "FW1814 special stream kick: OUTPUT 176400 Hz\n";
+            std::cout << "FW1814 startup timeline: OUTPUT 176400 Hz at "
+                      << startupMs() << " ms after ISO anchor\n";
             startupOk = fcp.setSignalRate(kRate, 0x18, false);
         }
         if (startupOk) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            std::cout << "FW1814 special stream kick: INPUT 176400 Hz\n";
+            std::cout << "FW1814 startup timeline: INPUT 176400 Hz at "
+                      << startupMs() << " ms after ISO anchor\n";
             startupOk = fcp.setSignalRate(kRate, 0x19, false);
         }
         if (startupOk) {
@@ -406,6 +465,8 @@ bool run() {
             // the first half-second after INPUT CONTROL. Withhold it from HAL.
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
             rateKicked.store(true, std::memory_order_release);
+            std::cout << "FW1814 startup timeline: RX qualification enabled at "
+                      << startupMs() << " ms after ISO anchor\n";
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
             startupOk = !gStopRequested &&
                 !audioFinished.load(std::memory_order_acquire) &&
@@ -446,6 +507,19 @@ bool run() {
             }
             startupOk = !gStopRequested &&
                 !audioFinished.load(std::memory_order_acquire) &&
+                lifecycle.generationStillValid();
+        }
+        if (startupOk) {
+            const auto qualificationDeadline = std::chrono::steady_clock::now() +
+                kCaptureQualificationTimeout;
+            while (!captureQualified.load(std::memory_order_acquire) &&
+                   !gStopRequested && !audioFinished.load(std::memory_order_acquire) &&
+                   std::chrono::steady_clock::now() < qualificationDeadline) {
+                control.service();
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+            }
+            startupOk = captureQualified.load(std::memory_order_acquire) &&
+                !gStopRequested && !audioFinished.load(std::memory_order_acquire) &&
                 lifecycle.generationStillValid();
         }
         if (startupOk) {
@@ -582,26 +656,29 @@ cleanup:
 
     if (!restoreOk && ok) ok = false;
     device.close();
+    if (gQualificationFailed)
+        return 2;
     return ok;
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 3 ||
-        std::strcmp(argv[1], "--experimental-high-rate") != 0 ||
-        std::strcmp(argv[2], "--experimental-quad-rate") != 0) {
-        std::cerr << "usage: fw1814analog176 --experimental-high-rate --experimental-quad-rate\n"
-                     "This guarded engine requires a 176.4 kHz playback SHM "
-                     "and stopped FW1814 supervisor.\n";
+    const bool legacyExperimental =
+        argc == 3 && std::strcmp(argv[1], "--experimental-high-rate") == 0 &&
+        std::strcmp(argv[2], "--experimental-quad-rate") == 0;
+    if (argc != 1 && !legacyExperimental) {
+        std::cerr << "usage: fw1814analog176\n";
         return 64;
     }
     gStopRequested = 0;
+    gQualificationFailed = 0;
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
     // Flush diagnostics immediately during this manual guarded prototype.
     std::cout.setf(std::ios::unitbuf);
     std::cerr.setf(std::ios::unitbuf);
-    std::cout << "macfw fw1814analog176 — experimental 176.4 kHz analog full-duplex engine\n";
-    return run() ? 0 : 1;
+    std::cout << "macfw fw1814analog176 — 176.4 kHz analog full-duplex engine\n";
+    const bool success = run();
+    return gQualificationFailed ? 2 : (success ? 0 : 1);
 }

@@ -18,11 +18,11 @@ SUPERVISOR := fw1814supervisor
 DUPLEX44_PROBE := fw1814duplex44
 TONE44_PROBE := fw1814tone44
 
-.PHONY: all runtime analog48 analog44 analog96-experimental analog88-experimental analog176-experimental analog192-experimental shm-test supervisor duplex44-probe tone44-probe clean
+.PHONY: all runtime analog48 analog44 analog96 analog88 analog176 analog192 analog96-experimental analog88-experimental analog176-experimental analog192-experimental shm-test supervisor duplex44-probe tone44-probe clean
 
-all: $(ANALOG48) $(ANALOG44) $(SHM_TEST) $(SUPERVISOR) $(DUPLEX44_PROBE) $(TONE44_PROBE)
+all: $(ANALOG48) $(ANALOG44) $(ANALOG96) $(ANALOG88) $(ANALOG176) $(ANALOG192) $(SHM_TEST) $(SUPERVISOR) $(DUPLEX44_PROBE) $(TONE44_PROBE)
 
-runtime: $(ANALOG48) $(ANALOG44) $(SHM_TEST) $(SUPERVISOR)
+runtime: $(ANALOG48) $(ANALOG44) $(ANALOG96) $(ANALOG88) $(ANALOG176) $(ANALOG192) $(SHM_TEST) $(SUPERVISOR)
 
 $(LIBMACFW):
 	$(MAKE) -C ../../fw410/lib libmacfw.a
@@ -43,7 +43,6 @@ $(ANALOG44): analog44_main.cpp blocking_pcm_tx44.h capture_pump44.h \
 	$(CXX) $(CXXFLAGS) -I$(LIBMACFW_INCLUDE) -I$(DEVICE_INCLUDE) -I$(HAL_INCLUDE) \
 		analog44_main.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
 
-# Explicit build only. The opt-in installer enables selection separately.
 $(ANALOG96): analog96_main.cpp ../tools/fw1814_pcm96_tx.h \
 	../tools/fw1814_pcm96_stream.h ../tools/fw1814_capture96_pump.h \
 	duplex_lifecycle.h engine_ready.h fw1814_control_server.h playback_pump.h realtime_service.h shared_io.h \
@@ -55,6 +54,8 @@ $(ANALOG96): analog96_main.cpp ../tools/fw1814_pcm96_tx.h \
 analog96-experimental:
 	$(MAKE) -C ../../fw410/lib libmacfw.a
 	$(MAKE) $(ANALOG96)
+
+analog96: $(ANALOG96)
 
 $(ANALOG88): analog88_main.cpp blocking_pcm_tx88.h \
 	../tools/fw1814_capture88_pump.h ../tools/fw1814_receive_cycle.h \
@@ -70,6 +71,8 @@ analog88-experimental:
 	$(MAKE) -C ../../fw410/lib libmacfw.a
 	$(MAKE) $(ANALOG88)
 
+analog88: $(ANALOG88)
+
 $(ANALOG176): analog176_main.cpp blocking_pcm_tx176.h \
 	../tools/fw1814_capture_quad_pump.h ../tools/fw1814_receive_cycle.h \
 	duplex_lifecycle.h engine_ready.h \
@@ -84,6 +87,8 @@ analog176-experimental:
 	$(MAKE) -C ../../fw410/lib libmacfw.a
 	$(MAKE) $(ANALOG176)
 
+analog176: $(ANALOG176)
+
 $(ANALOG192): analog192_main.cpp blocking_pcm_tx192.h \
 	../tools/fw1814_capture_quad_pump.h ../tools/fw1814_receive_cycle.h \
 	duplex_lifecycle.h engine_ready.h \
@@ -97,6 +102,8 @@ $(ANALOG192): analog192_main.cpp blocking_pcm_tx192.h \
 analog192-experimental:
 	$(MAKE) -C ../../fw410/lib libmacfw.a
 	$(MAKE) $(ANALOG192)
+
+analog192: $(ANALOG192)
 
 $(SHM_TEST): shm_test.cpp ../hal/include/macfw_fw1814_hal_shm.h \
 	../hal/include/macfw_fw1814_capture_shm.h

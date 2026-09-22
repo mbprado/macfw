@@ -442,10 +442,10 @@ cleanup:
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 2 || std::strcmp(argv[1], "--experimental-high-rate") != 0) {
-        std::cerr << "usage: fw1814analog88 --experimental-high-rate\n"
-                     "This guarded engine requires a 88.2 kHz playback SHM "
-                     "and stopped FW1814 supervisor.\n";
+    const bool legacyExperimental =
+        argc == 2 && std::strcmp(argv[1], "--experimental-high-rate") == 0;
+    if (argc != 1 && !legacyExperimental) {
+        std::cerr << "usage: fw1814analog88\n";
         return 64;
     }
     gStopRequested = 0;
@@ -454,6 +454,6 @@ int main(int argc, char** argv) {
     // Flush diagnostics immediately during this manual guarded prototype.
     std::cout.setf(std::ios::unitbuf);
     std::cerr.setf(std::ios::unitbuf);
-    std::cout << "macfw fw1814analog88 — experimental 88.2 kHz analog full-duplex engine\n";
+    std::cout << "macfw fw1814analog88 — 88.2 kHz analog full-duplex engine\n";
     return run() ? 0 : 1;
 }

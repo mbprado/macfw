@@ -1,7 +1,5 @@
 #pragma once
 
-#include <sys/stat.h>
-
 namespace macfw::fw1814::experimental {
 
 constexpr const char* kEnable96Path =
@@ -14,27 +12,19 @@ constexpr const char* kEnable192Path =
     "/Library/Application Support/macfw/fw1814/enable-192-experimental";
 
 inline bool enabled88() {
-    struct stat st{};
-    return stat(kEnable88Path, &st) == 0 && S_ISREG(st.st_mode) &&
-           st.st_uid == 0 && (st.st_mode & 0022) == 0;
+    return true;
 }
 
 inline bool enabled96() {
-    struct stat st{};
-    return stat(kEnable96Path, &st) == 0 && S_ISREG(st.st_mode) &&
-           st.st_uid == 0 && (st.st_mode & 0022) == 0;
+    return true;
 }
 
 inline bool enabled176() {
-    struct stat st{};
-    return stat(kEnable176Path, &st) == 0 && S_ISREG(st.st_mode) &&
-           st.st_uid == 0 && (st.st_mode & 0022) == 0;
+    return true;
 }
 
 inline bool enabled192() {
-    struct stat st{};
-    return stat(kEnable192Path, &st) == 0 && S_ISREG(st.st_mode) &&
-           st.st_uid == 0 && (st.st_mode & 0022) == 0;
+    return true;
 }
 
 } // namespace macfw::fw1814::experimental

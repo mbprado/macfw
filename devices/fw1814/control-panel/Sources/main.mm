@@ -17,6 +17,8 @@ static NSArray<NSString*> *ALL(void){return @[@"sw1/2",@"sw3/4",@"analog1/2",@"a
 static NSArray<NSString*> *PAIR(void){return @[@"1/2",@"3/4"];}
 static NSArray<NSString*> *HP(void){return @[@"1",@"2"];}
 static NSArray<NSString*> *TITLE(void){return @[@"SW Return 1/2",@"SW Return 3/4",@"Analog Inputs 1/2",@"Analog Inputs 3/4",@"Analog Inputs 5/6",@"Analog Inputs 7/8"];}
+static const double kRates[] = {44100.0, 48000.0, 88200.0, 96000.0, 176400.0, 192000.0};
+static NSArray<NSString*> *RATE_LABELS(void){return @[@"44.1 kHz", @"48 kHz", @"88.2 kHz", @"96 kHz", @"176.4 kHz", @"192 kHz"];}
 
 static NSDictionary *Run(NSString *path, NSArray<NSString*> *args){
     if(![[NSFileManager defaultManager] isExecutableFileAtPath:path])
@@ -170,8 +172,8 @@ static AudioObjectID FindDevice(void){
     NSView *v=[self tab:@"Device" id:@"device"];[v addSubview:Hdr(@"M-Audio FireWire 1814",NSMakeRect(28,550,350,24))];
     [v addSubview:Lbl(@"Sample-rate changes use the normal CoreAudio device lifecycle.",NSMakeRect(28,520,650,20))];
     self.deviceStatus=Lbl(@"CoreAudio device: checking…",NSMakeRect(28,465,600,24));self.deviceStatus.font=[NSFont monospacedDigitSystemFontOfSize:13 weight:NSFontWeightMedium];[v addSubview:self.deviceStatus];
-    self.rate=[[NSSegmentedControl alloc] initWithFrame:NSMakeRect(28,410,240,30)];self.rate.segmentCount=2;[self.rate setLabel:@"44.1 kHz" forSegment:0];[self.rate setLabel:@"48 kHz" forSegment:1];self.rate.target=self;self.rate.action=@selector(rateChanged:);[v addSubview:self.rate];
-    NSTextField *note=Lbl(@"Initial release scope: validated 44.1/48 kHz analog engine. Digital I/O, MIDI, and higher rates remain deferred.",NSMakeRect(28,342,850,42));note.maximumNumberOfLines=2;note.textColor=NSColor.secondaryLabelColor;[v addSubview:note];
+    self.rate=[[NSSegmentedControl alloc] initWithFrame:NSMakeRect(28,410,620,30)];self.rate.segmentCount=6;NSArray *labels=RATE_LABELS();for(NSInteger i=0;i<6;++i)[self.rate setLabel:labels[i] forSegment:i];self.rate.target=self;self.rate.action=@selector(rateChanged:);[v addSubview:self.rate];
+    NSTextField *note=Lbl(@"All six analog sample rates are available. Digital I/O, MIDI, and headphone-specific paths remain deferred.",NSMakeRect(28,342,850,42));note.maximumNumberOfLines=2;note.textColor=NSColor.secondaryLabelColor;[v addSubview:note];
 }
 - (void)buildDiagnostics{
     NSView *v=[self tab:@"Diagnostics" id:@"diagnostics"];
@@ -200,6 +202,10 @@ static AudioObjectID FindDevice(void){
 - (void)refreshRoutes{
     for(NSInteger i=0;i<6;++i)for(NSInteger b=0;b<2;++b){NSArray *a=i<2?@[@"mixer-route",@"get",SW()[i],PAIR()[b]]:@[@"input-mixer-route",@"get",ANA()[i-2],PAIR()[b]];
         NSDictionary *r=[self ctl:a];if([r[@"status"] integerValue])continue;NSString *s=[r[@"output"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if(i>=2){
+            NSRange newline=[s rangeOfString:@"\n"];
+            if(newline.location!=NSNotFound)s=[s substringToIndex:newline.location];
+        }
         self.routes[i*2+b].state=[s hasSuffix:@": on"]?NSControlStateValueOn:NSControlStateValueOff;}
 }
 - (void)refreshSources{
@@ -226,7 +232,7 @@ static AudioObjectID FindDevice(void){
     AudioObjectPropertyAddress a{kAudioDevicePropertyNominalSampleRate,kAudioObjectPropertyScopeGlobal,kAudioObjectPropertyElementMain};Float64 rate=0;UInt32 n=sizeof(rate);
     if(AudioObjectGetPropertyData(d,&a,0,nullptr,&n,&rate)!=noErr){self.deviceStatus.stringValue=@"CoreAudio device: rate unavailable";self.rate.enabled=NO;return;}
     self.deviceStatus.stringValue=[NSString stringWithFormat:@"CoreAudio device: connected • %.0f Hz",rate];self.rate.enabled=YES;
-    self.rate.selectedSegment=std::fabs(rate-44100.0)<1?0:(std::fabs(rate-48000.0)<1?1:-1);
+    self.rate.selectedSegment=-1;for(NSInteger i=0;i<6;++i)if(std::fabs(rate-kRates[i])<1){self.rate.selectedSegment=i;break;}
     [self setAuxAvailable:rate<176400.0];
 }
 - (void)refreshDiagnostics{
@@ -292,7 +298,7 @@ static AudioObjectID FindDevice(void){
     self.status.stringValue=@"Applying live monitor pan…";self.status.textColor=NSColor.labelColor;
 }
 - (void)rateChanged:(NSSegmentedControl*)s{
-    AudioObjectID d=FindDevice();if(d==kAudioObjectUnknown){NSBeep();[self refreshDevice];return;}Float64 rate=s.selectedSegment?48000:44100;
+    AudioObjectID d=FindDevice();if(d==kAudioObjectUnknown){NSBeep();[self refreshDevice];return;}if(s.selectedSegment<0||s.selectedSegment>=6){[self refreshDevice];return;}Float64 rate=kRates[s.selectedSegment];
     AudioObjectPropertyAddress a{kAudioDevicePropertyNominalSampleRate,kAudioObjectPropertyScopeGlobal,kAudioObjectPropertyElementMain};Boolean settable=false;
     OSStatus st=AudioObjectIsPropertySettable(d,&a,&settable);if(st==noErr&&settable)st=AudioObjectSetPropertyData(d,&a,0,nullptr,sizeof(rate),&rate);
     if(st!=noErr||!settable){self.status.stringValue=[NSString stringWithFormat:@"CoreAudio rejected rate change (OSStatus %d)",(int)st];self.status.textColor=NSColor.systemRedColor;NSBeep();[self refreshDevice];return;}

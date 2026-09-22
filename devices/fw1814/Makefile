@@ -22,6 +22,10 @@ install-check:
 	    [ ! -x transport/fw1814supervisor ] || \
 	    [ ! -x transport/fw1814analog48 ] || \
 	    [ ! -x transport/fw1814analog44 ] || \
+	    [ ! -x transport/fw1814analog88 ] || \
+	    [ ! -x transport/fw1814analog96 ] || \
+	    [ ! -x transport/fw1814analog176 ] || \
+	    [ ! -x transport/fw1814analog192 ] || \
 	    [ ! -x tools/fw1814init ] || \
 	    [ ! -x tools/fwboot1814 ] || \
 	    [ ! -x tools/fw1814firmwarereset ] || \

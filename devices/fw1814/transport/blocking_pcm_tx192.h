@@ -55,7 +55,8 @@ public:
         BlockingPcmTransmitRing192000 ring;
         auto native = device.nativeHandle();
         if (!native || (packetCount != kRequiredPackets &&
-                        packetCount != kExtendedPackets))
+                        packetCount != kExtendedPackets &&
+                        packetCount != kLongPackets))
             return ring;
 
         ring.packetCount_ = packetCount;
@@ -156,7 +157,8 @@ public:
                         UInt32& cycle) {
         RefillResult result{};
         if (!storage_ || (packetCount_ != kRequiredPackets &&
-                          packetCount_ != kExtendedPackets) || !pcm.valid() ||
+                          packetCount_ != kExtendedPackets &&
+                          packetCount_ != kLongPackets) || !pcm.valid() ||
             pcm.channelCount() != kPcmChannels || firstPacket >= packetCount_ ||
             packetCount == 0)
             return result;
@@ -221,6 +223,7 @@ private:
     static constexpr std::size_t kEventsPerDataPacket = 32;
     static constexpr std::size_t kRequiredPackets = 640;
     static constexpr std::size_t kExtendedPackets = 1280;
+    static constexpr std::size_t kLongPackets = 2560;
     static constexpr UInt32 kMaxPacketBytes =
         8 + kEventsPerDataPacket * kDbs * sizeof(std::uint32_t);
 
@@ -347,7 +350,8 @@ public:
     bool valid() const {
         return tx_ && pcm_ && static_cast<bool>(*tx_) && pcm_->valid() &&
                pcm_->channelCount() == BlockingPcmTransmitRing192000::pcmChannels() &&
-               (tx_->packetCount() == 640 || tx_->packetCount() == 1280) &&
+               (tx_->packetCount() == 640 || tx_->packetCount() == 1280 ||
+                tx_->packetCount() == 2560) &&
                tx_->packetCount() == halfPackets_ * 2;
     }
 
