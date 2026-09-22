@@ -12,7 +12,7 @@ also has one MIDI position, which macfw does not currently expose.
 | 88.2 kHz | 10 PCM | 6 PCM | Experimental CoreAudio playback, recording and monitoring tested, including an approximately five-minute recording; hardware opt-in required |
 | 96 kHz | 10 PCM | 6 PCM | Experimental CoreAudio playback and analog capture tested; hardware opt-in required |
 | 176.4 kHz | 2 PCM | 4 PCM | Clear tone and four-output routing verified; continuous capture probe passed six steady windows; CoreAudio untested |
-| 192 kHz | 2 PCM | 4 PCM | Guarded silent duplex and bounded-tone transport tested; CoreAudio untested |
+| 192 kHz | 2 PCM | 4 PCM | Guarded duplex plus CoreAudio playback and input monitoring tested; experimental opt-in required |
 
 Linux's [FW1814 clock protocol](https://github.com/alsa-project/snd-firewire-ctl-services/blob/master/protocols/bebob/src/maudio/special.rs)
 lists all six rates. This is evidence of a supported rate-control code, not
@@ -1343,4 +1343,40 @@ passes on raw playback position 2 were audible and the output activity became
 visible. This validates sustained nonzero host-to-device playback at 192 kHz in
 addition to the previously validated capture cadence, rate restoration and PCR
 cleanup. The result remains a standalone guarded diagnostic; 192-kHz CoreAudio
-exposure and long-running program-audio playback are not implemented.
+exposure was the next integration gate.
+
+### Opt-in 192 kHz CoreAudio trial
+
+The standalone result is integrated behind its own root-owned
+`enable-192-experimental` marker. The normal installer still removes the marker
+and does not install `fw1814analog192`. Build and install the guarded trial with:
+
+```sh
+make fw1814-experimental192
+sudo make fw1814-install-experimental192
+```
+
+The HAL advertises four analog outputs and two analog inputs at 192 kHz. The
+supervisor uses the quad-rate guarded firmware reboot and retains the validated
+two-second post-init quiescence. The dedicated engine then follows the startup
+sequence proven by the standalone diagnostic: OUTPUT and INPUT are pre-armed
+at 192 kHz before CMP/ISO, INPUT STATUS is checked after 300 ms, both streams
+start, and the special-firmware OUTPUT/INPUT kick is repeated while TX remains
+continuously serviced. Saved mixer routing is restored before live CoreAudio
+playback is released.
+
+The first integrated transition reached `FW1814 192 kHz analog engine ONLINE`
+with the full 61440-frame READY reserve, no pre-ready TX underrun and a
+40-42 ms release reserve. Hardware listening confirmed clean CoreAudio output,
+acceptable latency and normal two-channel input monitoring. Active TX carried
+nonzero samples without dangerous cycle gaps, while capture continued at
+384000 frames per two-second status interval with zero DBC gaps, malformed
+packets, timestamp regressions, reordering or metadata swaps. Startup produced
+a bounded invalid-label count which stopped increasing before the listening
+test. Long-running program audio, recording and repeated cross-rate switching
+remain validation work; 192 kHz stays experimental. One controlled
+192 -> 48 -> 192 transition completed successfully through the supervisor.
+The return used the firmware reboot, fresh 48-kHz init and full two-second
+quiescence, then reached 192-kHz `ONLINE` again with no pre-ready underrun.
+Its capture startup reported zero invalid labels, DBC gaps, malformed packets
+and metadata swaps, followed by steady 384000-frame two-second intervals.

@@ -4,6 +4,29 @@ This file records visible project milestones rather than every diagnostic
 experiment. Detailed protocol, transport and routing findings remain under
 `devices/fw1814/analysis/`.
 
+## 2026-09-22 — Experimental 192 kHz CoreAudio trial
+
+The hardware-validated 192 kHz blocking transport is now available through a
+separate `fw1814-install-experimental192` opt-in. The HAL advertises four analog
+outputs and two analog inputs only when its root-owned marker exists. The
+supervisor applies the same guarded firmware reboot and validated two-second
+post-init settling period used at 176.4 kHz, then starts a dedicated 192 kHz
+engine. Unlike the 176.4 kHz path, the engine pre-arms OUTPUT and INPUT at
+192 kHz before CMP/ISO setup, waits for authoritative INPUT readback, and still
+repeats the M-Audio rate kick after both streams start.
+
+Hardware testing confirmed clean 192 kHz CoreAudio output with acceptable
+latency and normal two-channel input monitoring. During active playback the
+transport reported nonzero 24-bit PCM with no dangerous TX gaps or FireWire
+DBC discontinuities. Capture advanced by exactly 384000 frames per two-second
+status interval with no malformed packets, timestamp regressions, reordering
+or metadata swaps. Invalid MBLA labels were confined to startup and stopped
+increasing before the listener test. A controlled 192 -> 48 -> 192 transition
+also returned both engines online; the returning 192 kHz start had no invalid
+labels, DBC gaps, malformed packets or metadata swaps. The 192 kHz engine
+remains experimental; extended recording, program-audio and broader repeated
+cross-rate testing are still needed.
+
 ## 2026-09-18 — Experimental 88.2/96 kHz CoreAudio trials
 
 Guarded rate-control and duplex-stream diagnostics established the FW1814's
@@ -39,9 +62,7 @@ result was traced to a generator fault. After correction, Input 2 appeared
 only on raw position 1 at -29.66 dBFS while position 0 remained at the noise
 floor; Input 1 had already appeared on position 0. The two quad-rate capture
 positions are therefore mapped as Input 1 -> 0 and Input 2 -> 1. The guarded
-standalone transport is ready for opt-in CoreAudio integration. Audible
-CoreAudio capture/monitoring remain unverified; 192-kHz ISO streaming has
-not yet been tested.
+standalone transport provided the basis for opt-in CoreAudio integration.
 
 Hardware routing tests also identified a quad-rate AUX boundary. The AUX bus
 remained audible at 88.2/96 kHz but was silent through both headphone and

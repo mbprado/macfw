@@ -28,6 +28,10 @@ constexpr int kBootNoBootloader = 10;
 constexpr int kBootFailure = 11;
 constexpr int kBootGuardRefused = 12;
 
+bool isQuadRate(std::uint32_t rate) {
+    return rate == 176400 || rate == 192000;
+}
+
 std::string executableDirectory(const char* argv0) {
     char resolved[PATH_MAX] = {};
     if (argv0 && realpath(argv0, resolved)) {
@@ -56,7 +60,8 @@ bool requestedSampleRate(std::uint32_t& rate) {
         ready = requested == 44100 || requested == 48000 ||
                 (requested == 88200 && macfw::fw1814::experimental::enabled88()) ||
                 (requested == 96000 && macfw::fw1814::experimental::enabled96()) ||
-                (requested == 176400 && macfw::fw1814::experimental::enabled176());
+                (requested == 176400 && macfw::fw1814::experimental::enabled176()) ||
+                (requested == 192000 && macfw::fw1814::experimental::enabled192());
         if (ready) rate = requested;
     }
     munmap(p, sizeof(*ring));
@@ -168,7 +173,7 @@ int runEngine(const std::string& path,
         char fdText[32] = {};
         std::snprintf(fdText, sizeof(fdText), "%d", readyPipe[1]);
         setenv("MACFW_ENGINE_READY_FD", fdText, 1);
-        if (startedRate == 176400)
+        if (isQuadRate(startedRate))
             execl(path.c_str(), path.c_str(), "--experimental-high-rate",
                   "--experimental-quad-rate", static_cast<char*>(nullptr));
         else if (startedRate == 96000 || startedRate == 88200)
@@ -344,12 +349,13 @@ int main(int argc, char** argv) {
     const std::string engine96Path = here + "/fw1814analog96";
     const std::string engine88Path = here + "/fw1814analog88";
     const std::string engine176Path = here + "/fw1814analog176";
+    const std::string engine192Path = here + "/fw1814analog192";
     const std::string stateHelperPath = here + "/fw1814state";
     const std::string controlHelperPath = here + "/fw1814ctl";
 
-    std::printf("macfw fw1814supervisor — resilient 44.1/48 kHz transport supervisor; guarded 88.2/96/176.4 kHz\n");
+    std::printf("macfw fw1814supervisor — resilient 44.1/48 kHz transport supervisor; guarded 88.2/96/176.4/192 kHz\n");
     std::printf("automatic reconnect and guarded bootloader recovery: enabled\n");
-    std::printf("validated pre-transport recovery: bus reset at lower rates; firmware reboot at 176.4 kHz\n");
+    std::printf("validated pre-transport recovery: bus reset at lower rates; firmware reboot at quad rates\n");
     std::printf("persistent validated routing-state restore: enabled\n");
 
     std::chrono::milliseconds retryDelay(250);
@@ -361,7 +367,7 @@ int main(int argc, char** argv) {
 
     // Every fresh transport start passes through a guarded device recovery.
     // Lower rates retain the validated product-scoped FireWire bus reset.
-    // At 176.4 kHz, this experiment replaces the ineffective bus reset with
+    // At 176.4/192 kHz, this experiment replaces the ineffective bus reset with
     // the documented BeBoB application-to-bootloader reset followed by
     // boot-from-flash, the closest software equivalent to a power cycle.
     //
@@ -471,8 +477,9 @@ int main(int argc, char** argv) {
             // changes device/bus state and must not schedule itself recursively.
             deviceRecoveryRequired = false;
 
-            if (requestedRate == 176400) {
-                std::printf("FW1814 operational init PASS; performing guarded firmware reboot before 176.4 kHz transport\n");
+            if (isQuadRate(requestedRate)) {
+                std::printf("FW1814 operational init PASS; performing guarded firmware reboot before %u Hz transport\n",
+                            requestedRate);
                 const int recoveryStatus =
                     runFirmwareReboot(firmwareResetPath, bootPath);
                 if (gStopRequested) break;
@@ -519,7 +526,8 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        const std::string& enginePath = requestedRate == 176400 ? engine176Path :
+        const std::string& enginePath = requestedRate == 192000 ? engine192Path :
+            requestedRate == 176400 ? engine176Path :
             requestedRate == 88200 ? engine88Path :
             requestedRate == 96000 ? engine96Path :
             requestedRate == 44100 ? engine44Path : engine48Path;
@@ -528,19 +536,22 @@ int main(int argc, char** argv) {
             sleepInterruptibly(retryDelay);
             continue;
         }
-        if (requestedRate == 176400) {
-            std::printf("FW1814 post-reset init-48000 PASS; quiescing device for 2000 ms before 176.4 kHz transport\n");
+        if (isQuadRate(requestedRate)) {
+            std::printf("FW1814 post-reset init-48000 PASS; quiescing device for 2000 ms before %u Hz transport\n",
+                        requestedRate);
             sleepInterruptibly(kQuadRatePostInitQuiescence);
             if (gStopRequested) break;
 
             std::uint32_t settledRate = 0;
             if (!requestedSampleRate(settledRate) || settledRate != requestedRate) {
-                std::printf("FW1814 rate request changed during 176.4 kHz quiescence; restarting selection\n");
+                std::printf("FW1814 rate request changed during quad-rate quiescence; restarting selection\n");
                 continue;
             }
         }
         std::printf("FW1814 post-reset init-%s PASS; starting %s\n",
-                    rateArg, requestedRate == 176400
+                    rateArg, requestedRate == 192000
+                        ? "experimental 192 kHz analog transport engine"
+                        : requestedRate == 176400
                         ? "experimental 176.4 kHz analog transport engine"
                         : requestedRate == 88200
                         ? "experimental 88.2 kHz analog transport engine"

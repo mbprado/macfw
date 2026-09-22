@@ -27,6 +27,7 @@ constexpr Float64 kRate48000 = 48000.0;
 constexpr Float64 kRate88200 = 88200.0;
 constexpr Float64 kRate96000 = 96000.0;
 constexpr Float64 kRate176400 = 176400.0;
+constexpr Float64 kRate192000 = 192000.0;
 constexpr UInt32 kOutputChannels = macfw::fw1814::hal::kOutputChannels;
 constexpr UInt32 kInputChannels = macfw::fw1814::hal::capture::kInputChannels;
 constexpr UInt32 kQuadRateInputChannels = 2;
@@ -55,13 +56,15 @@ bool IsSupportedRate(std::uint32_t rate) {
     return rate == 44100 || rate == 48000 ||
            (rate == 88200 && macfw::fw1814::experimental::enabled88()) ||
            (rate == 96000 && macfw::fw1814::experimental::enabled96()) ||
-           (rate == 176400 && macfw::fw1814::experimental::enabled176());
+           (rate == 176400 && macfw::fw1814::experimental::enabled176()) ||
+           (rate == 192000 && macfw::fw1814::experimental::enabled192());
 }
 
 UInt32 AvailableRateCount() {
     return 2 + macfw::fw1814::experimental::enabled88() +
            macfw::fw1814::experimental::enabled96() +
-           macfw::fw1814::experimental::enabled176();
+           macfw::fw1814::experimental::enabled176() +
+           macfw::fw1814::experimental::enabled192();
 }
 
 Float64 AvailableHighRate(UInt32 index) {
@@ -74,8 +77,12 @@ Float64 AvailableHighRate(UInt32 index) {
         if (index == current) return kRate96000;
         ++current;
     }
-    if (macfw::fw1814::experimental::enabled176() && index == current)
-        return kRate176400;
+    if (macfw::fw1814::experimental::enabled176()) {
+        if (index == current) return kRate176400;
+        ++current;
+    }
+    if (macfw::fw1814::experimental::enabled192() && index == current)
+        return kRate192000;
     return 0.0;
 }
 
@@ -227,7 +234,7 @@ AudioStreamBasicDescription OutputFormat(Float64 rate) {
 }
 
 AudioStreamBasicDescription InputFormat(Float64 rate) {
-    return Format(rate, rate == kRate176400
+    return Format(rate, (rate == kRate176400 || rate == kRate192000)
         ? kQuadRateInputChannels : kInputChannels);
 }
 
@@ -569,7 +576,8 @@ OSStatus GetCommon(AudioObjectID object,
             object == kAudioObjectPlugInObject ? CFSTR("macfw FW1814 HAL") :
             object == kDeviceID ? CFSTR("M-Audio FireWire 1814") :
             object == kOutputStreamID ? CFSTR("Analog Outputs 1-4") :
-            gSampleRate.load(std::memory_order_acquire) == 176400
+            (gSampleRate.load(std::memory_order_acquire) == 176400 ||
+             gSampleRate.load(std::memory_order_acquire) == 192000)
                 ? CFSTR("Analog Inputs 1-2") : CFSTR("Analog Inputs 1-8");
         return CopyString(inSize, outSize, outData, value);
     }
@@ -789,7 +797,8 @@ OSStatus STDMETHODCALLTYPE SetPropertyData(AudioServerPlugInDriverRef driver,
         if (rate != kRate44100 && rate != kRate48000 &&
             !(rate == kRate88200 && macfw::fw1814::experimental::enabled88()) &&
             !(rate == kRate96000 && macfw::fw1814::experimental::enabled96()) &&
-            !(rate == kRate176400 && macfw::fw1814::experimental::enabled176()))
+            !(rate == kRate176400 && macfw::fw1814::experimental::enabled176()) &&
+            !(rate == kRate192000 && macfw::fw1814::experimental::enabled192()))
             return kAudioHardwareIllegalOperationError;
         if (static_cast<std::uint32_t>(rate) ==
             gSampleRate.load(std::memory_order_acquire))
@@ -941,7 +950,8 @@ OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef,
         auto* out = static_cast<Float32*>(mainBuffer);
         const auto currentRate =
             gSampleRate.load(std::memory_order_acquire);
-        const UInt32 inputChannels = currentRate == 176400
+        const UInt32 inputChannels =
+            (currentRate == 176400 || currentRate == 192000)
             ? kQuadRateInputChannels : kInputChannels;
 
         if (!gCaptureRing ||
@@ -969,10 +979,10 @@ OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef,
             // A flush makes this callback silent; the engine refills from
             // fresh packets before enabling capture again.
             const bool stale = (currentRate == 96000 || currentRate == 88200 ||
-                currentRate == 176400) &&
+                currentRate == 176400 || currentRate == 192000) &&
                 macfw::fw1814::hal::capture::suspendStaleCapture(*gCaptureRing, 4096);
             if (!stale) {
-                got = currentRate == 176400
+                got = (currentRate == 176400 || currentRate == 192000)
                     ? macfw::fw1814::hal::capture::readFirstChannels(
                           *gCaptureRing, out, frames, kQuadRateInputChannels)
                     : macfw::fw1814::hal::capture::read(

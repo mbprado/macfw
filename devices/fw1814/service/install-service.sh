@@ -20,6 +20,7 @@ ENGINE44="$FW1814_DIR/transport/fw1814analog44"
 ENGINE96="$FW1814_DIR/transport/fw1814analog96"
 ENGINE88="$FW1814_DIR/transport/fw1814analog88"
 ENGINE176="$FW1814_DIR/transport/fw1814analog176"
+ENGINE192="$FW1814_DIR/transport/fw1814analog192"
 INIT="$FW1814_DIR/tools/fw1814init"
 BOOT="$FW1814_DIR/tools/fwboot1814"
 FIRMWARE_RESET="$FW1814_DIR/tools/fw1814firmwarereset"
@@ -31,6 +32,12 @@ STATE_FILE="$INSTALL_ROOT/control-state.conf"
 ENABLE96="$INSTALL_ROOT/enable-96-experimental"
 ENABLE88="$INSTALL_ROOT/enable-88-experimental"
 ENABLE176="$INSTALL_ROOT/enable-176-experimental"
+ENABLE192="$INSTALL_ROOT/enable-192-experimental"
+
+if [[ "${MACFW_INSTALL_EXPERIMENTAL192:-0}" == 1 && ! -x "$ENGINE192" ]]; then
+    echo "error: experimental FW1814 192 kHz engine is missing: $ENGINE192" >&2
+    exit 1
+fi
 
 if [[ "${MACFW_INSTALL_EXPERIMENTAL176:-0}" == 1 && ! -x "$ENGINE176" ]]; then
     echo "error: experimental FW1814 176.4 kHz engine is missing: $ENGINE176" >&2
@@ -87,6 +94,8 @@ had_enable88=0
 [[ -e "$ENABLE88" ]] && had_enable88=1
 had_enable176=0
 [[ -e "$ENABLE176" ]] && had_enable176=1
+had_enable192=0
+[[ -e "$ENABLE192" ]] && had_enable192=1
 install -o root -g wheel -m 0755 "$SUPERVISOR" "$BIN_DIR/fw1814supervisor"
 install -o root -g wheel -m 0755 "$ENGINE48" "$BIN_DIR/fw1814analog48"
 install -o root -g wheel -m 0755 "$ENGINE44" "$BIN_DIR/fw1814analog44"
@@ -94,26 +103,38 @@ if [[ "${MACFW_INSTALL_EXPERIMENTAL96:-0}" == 1 ]]; then
     install -o root -g wheel -m 0755 "$ENGINE96" "$BIN_DIR/fw1814analog96"
     install -o root -g wheel -m 0644 /dev/null "$ENABLE96"
 elif [[ "${MACFW_INSTALL_EXPERIMENTAL88:-0}" != 1 &&
-        "${MACFW_INSTALL_EXPERIMENTAL176:-0}" != 1 ]]; then
+        "${MACFW_INSTALL_EXPERIMENTAL176:-0}" != 1 &&
+        "${MACFW_INSTALL_EXPERIMENTAL192:-0}" != 1 ]]; then
     rm -f "$ENABLE96" "$BIN_DIR/fw1814analog96"
 fi
 if [[ "${MACFW_INSTALL_EXPERIMENTAL88:-0}" == 1 ]]; then
     install -o root -g wheel -m 0755 "$ENGINE88" "$BIN_DIR/fw1814analog88"
     install -o root -g wheel -m 0644 /dev/null "$ENABLE88"
 elif [[ "${MACFW_INSTALL_EXPERIMENTAL96:-0}" != 1 &&
-        "${MACFW_INSTALL_EXPERIMENTAL176:-0}" != 1 ]]; then
+        "${MACFW_INSTALL_EXPERIMENTAL176:-0}" != 1 &&
+        "${MACFW_INSTALL_EXPERIMENTAL192:-0}" != 1 ]]; then
     rm -f "$ENABLE88" "$BIN_DIR/fw1814analog88"
 fi
 if [[ "${MACFW_INSTALL_EXPERIMENTAL176:-0}" == 1 ]]; then
     install -o root -g wheel -m 0755 "$ENGINE176" "$BIN_DIR/fw1814analog176"
     install -o root -g wheel -m 0644 /dev/null "$ENABLE176"
 elif [[ "${MACFW_INSTALL_EXPERIMENTAL96:-0}" != 1 &&
-        "${MACFW_INSTALL_EXPERIMENTAL88:-0}" != 1 ]]; then
+        "${MACFW_INSTALL_EXPERIMENTAL88:-0}" != 1 &&
+        "${MACFW_INSTALL_EXPERIMENTAL192:-0}" != 1 ]]; then
     rm -f "$ENABLE176" "$BIN_DIR/fw1814analog176"
+fi
+if [[ "${MACFW_INSTALL_EXPERIMENTAL192:-0}" == 1 ]]; then
+    install -o root -g wheel -m 0755 "$ENGINE192" "$BIN_DIR/fw1814analog192"
+    install -o root -g wheel -m 0644 /dev/null "$ENABLE192"
+elif [[ "${MACFW_INSTALL_EXPERIMENTAL96:-0}" != 1 &&
+        "${MACFW_INSTALL_EXPERIMENTAL88:-0}" != 1 &&
+        "${MACFW_INSTALL_EXPERIMENTAL176:-0}" != 1 ]]; then
+    rm -f "$ENABLE192" "$BIN_DIR/fw1814analog192"
 fi
 if [[ "${MACFW_INSTALL_EXPERIMENTAL96:-0}" == 1 || $had_enable96 == 1 ||
       "${MACFW_INSTALL_EXPERIMENTAL88:-0}" == 1 || $had_enable88 == 1 ||
-      "${MACFW_INSTALL_EXPERIMENTAL176:-0}" == 1 || $had_enable176 == 1 ]]; then
+      "${MACFW_INSTALL_EXPERIMENTAL176:-0}" == 1 || $had_enable176 == 1 ||
+      "${MACFW_INSTALL_EXPERIMENTAL192:-0}" == 1 || $had_enable192 == 1 ]]; then
     # CoreAudio caches available formats; reload after the opt-in gate changes.
     killall coreaudiod >/dev/null 2>&1 || true
 fi
@@ -155,6 +176,6 @@ echo "runtime build: $runtime_version build $runtime_build"
 echo "loaded launchd service: $LABEL"
 echo "automatic reconnect + guarded bootloader recovery: enabled"
 echo "automatic 44.1/48 kHz transport selection: enabled"
-echo "rate-aware transport recovery: bus reset at lower rates; guarded firmware reboot at 176.4 kHz"
+echo "rate-aware transport recovery: bus reset at lower rates; guarded firmware reboot at 176.4/192 kHz"
 echo "persistent validated routing state: $STATE_FILE"
 echo "log: $LOG"
