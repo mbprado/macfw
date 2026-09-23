@@ -34,6 +34,7 @@ constexpr UInt32 kQuadRateInputChannels = 2;
 // Provisional 48-kHz device latency after the 128-packet live TX reserve
 // reduction. The physical loopback measured about 16.8 ms round trip.
 constexpr UInt32 kReported48DeviceLatencyFrames = 400;
+constexpr UInt32 kReported96DeviceLatencyFrames = 750;
 
 AudioServerPlugInHostRef gHost = nullptr;
 std::atomic<UInt32> gRefCount{1};
@@ -71,8 +72,10 @@ UInt32 AvailableRateCount() {
 }
 
 UInt32 ReportedDeviceLatencyFrames(AudioObjectPropertyScope scope) {
-    if (gSampleRate.load(std::memory_order_acquire) != 48000)
-        return 0;
+    const auto rate = gSampleRate.load(std::memory_order_acquire);
+    if (rate == 48000) return kReported48DeviceLatencyFrames;
+    if (rate == 96000) return kReported96DeviceLatencyFrames;
+    return 0;
     (void)scope;
     return kReported48DeviceLatencyFrames;
 }

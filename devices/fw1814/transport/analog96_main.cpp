@@ -36,12 +36,11 @@ constexpr UInt32 kCaptureMaxPacket = 712;
 constexpr UInt32 kPlaybackMaxPacket = 456;
 // Keep publication chunks at 32 slots; use a deeper ring for service jitter.
 constexpr std::size_t kCaptureSlots = 256;
-// The standalone probe validated 1280/640. Reduce only the experimental
-// installed engine to the 80-ms ring / 40-ms halves used by the 48-kHz engine;
-// Logic monitoring with the longer ring remained noticeably delayed after
-// both shared-memory queues had been brought down to a few milliseconds.
-constexpr std::size_t kTxPackets = 640;
-constexpr std::size_t kTxHalfPackets = 320;
+// Keep the live reserve near a few CoreAudio periods. The previous 640-packet
+// ring held about 80 ms before the physical loopback; retain the same packet
+// geometry with a 128-packet ring while leaving startup reserves unchanged.
+constexpr std::size_t kTxPackets = 128;
+constexpr std::size_t kTxHalfPackets = 64;
 constexpr std::size_t kPcmCapacityFrames = 262144;
 constexpr std::size_t kCapturePrefillFrames = 512;
 constexpr UInt32 kCycleLead = 4096;

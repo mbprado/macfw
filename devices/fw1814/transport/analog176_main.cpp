@@ -36,8 +36,9 @@ constexpr UInt32 kCaptureMaxPacket = 392;
 constexpr UInt32 kPlaybackMaxPacket = 648;
 // Keep publication chunks at 32 slots; use a deeper ring for service jitter.
 constexpr std::size_t kCaptureSlots = 256;
-// The standalone 176.4-kHz probe played clearly with 1280/640 and produced
-// broken audio with 640/320. Retain the hardware-validated TX ring here.
+// The standalone 176.4-kHz probe played clearly with 1280/640; the shorter
+// 640/320 ring still fails to return a clean physical impulse. Retain the
+// validated TX geometry while reducing latency through the release reserve.
 constexpr std::size_t kTxPackets = 1280;
 constexpr std::size_t kTxHalfPackets = 640;
 // At 176.4 kHz each 640-cycle half contains 441 data packets with 32 PCM

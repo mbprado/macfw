@@ -49,6 +49,13 @@ host-timestamped electrical round-trip latency, and FW1814 shared-ring queue
 estimates. The H5 reference measured 9.46 ms at 48 kHz; stale capture queues
 are identified explicitly in the FW1814 report.
 
+The same live TX reserve reduction was applied to the experimental 96 kHz
+engine. Its 640-packet ring was reduced to 128 packets while retaining the
+separate startup reserve and warmup sequence. Loopback improved to 11.8–15.6
+ms round trip, and the HAL now reports 750 device frames per direction at
+96 kHz. A 640/320 reduction was tested at 176.4 kHz but did not return a clean
+physical impulse, so the validated 1280/640 176.4-kHz geometry was restored.
+
 ## 2026-09-18 — Experimental 88.2/96 kHz CoreAudio trials
 
 Guarded rate-control and duplex-stream diagnostics established the FW1814's
