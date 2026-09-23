@@ -31,10 +31,18 @@ constexpr Float64 kRate192000 = 192000.0;
 constexpr UInt32 kOutputChannels = macfw::fw1814::hal::kOutputChannels;
 constexpr UInt32 kInputChannels = macfw::fw1814::hal::capture::kInputChannels;
 constexpr UInt32 kQuadRateInputChannels = 2;
-// Provisional 48-kHz device latency after the 128-packet live TX reserve
-// reduction. The physical loopback measured about 16.8 ms round trip.
-constexpr UInt32 kReported48DeviceLatencyFrames = 400;
-constexpr UInt32 kReported96DeviceLatencyFrames = 750;
+// Provisional device-latency estimates. Loopback round-trip measurements are
+// split equally between input and output scopes for CoreAudio clients.
+constexpr UInt32 kReported44DeviceLatencyFrames = 1345;
+// The restored 640-packet TX reserve measured 82.65 ms round trip; report half
+// that measured latency on each CoreAudio device scope.
+constexpr UInt32 kReported48DeviceLatencyFrames = 1984;
+// Earlier external loopback measured about 119 ms round trip with the
+// restored 640-packet TX reserve; report half on each CoreAudio scope.
+constexpr UInt32 kReported96DeviceLatencyFrames = 5712;
+constexpr UInt32 kReported88DeviceLatencyFrames = 7286;
+constexpr UInt32 kReported176DeviceLatencyFrames = 14920;
+constexpr UInt32 kReported192DeviceLatencyFrames = 17018;
 
 AudioServerPlugInHostRef gHost = nullptr;
 std::atomic<UInt32> gRefCount{1};
@@ -72,12 +80,15 @@ UInt32 AvailableRateCount() {
 }
 
 UInt32 ReportedDeviceLatencyFrames(AudioObjectPropertyScope scope) {
-    const auto rate = gSampleRate.load(std::memory_order_acquire);
-    if (rate == 48000) return kReported48DeviceLatencyFrames;
-    if (rate == 96000) return kReported96DeviceLatencyFrames;
-    return 0;
     (void)scope;
-    return kReported48DeviceLatencyFrames;
+    const auto rate = gSampleRate.load(std::memory_order_acquire);
+    if (rate == 44100) return kReported44DeviceLatencyFrames;
+    if (rate == 48000) return kReported48DeviceLatencyFrames;
+    if (rate == 88200) return kReported88DeviceLatencyFrames;
+    if (rate == 96000) return kReported96DeviceLatencyFrames;
+    if (rate == 176400) return kReported176DeviceLatencyFrames;
+    if (rate == 192000) return kReported192DeviceLatencyFrames;
+    return 0;
 }
 
 Float64 AvailableHighRate(UInt32 index) {

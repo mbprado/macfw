@@ -56,6 +56,16 @@ ms round trip, and the HAL now reports 750 device frames per direction at
 96 kHz. A 640/320 reduction was tested at 176.4 kHz but did not return a clean
 physical impulse, so the validated 1280/640 176.4-kHz geometry was restored.
 
+CoreAudio device-latency reporting was extended to 44.1, 88.2, 176.4 and
+192 kHz. Provisional values split stabilized electrical loopback measurements
+equally between input and output scopes: 1345, 7286, 14920 and 17018 frames
+per direction, respectively. The corresponding 44.1/88.2/176.4/192 kHz
+round-trip measurements used for reporting were 61.0/165.2/169.2/177.3 ms.
+The 44.1-kHz loopback varied from 56.4 to 66.4 ms across recent runs. The
+192-kHz value uses an earlier successful loopback; its verification probe did
+not return an impulse. The 48 and 96 kHz reports were later updated when their
+validated 640-packet TX reserves were restored.
+
 ## 2026-09-18 — Experimental 88.2/96 kHz CoreAudio trials
 
 Guarded rate-control and duplex-stream diagnostics established the FW1814's
@@ -374,6 +384,46 @@ state containing `MIX_STM_IN=0x0000000e` and `SRC_ANA_OUT=0x00000002` survived:
 - a launchd transport restart;
 - 44.1 -> 48 kHz and 48 -> 44.1 kHz transitions;
 - physical disconnect/reconnect at both supported rates.
+
+## 2026-09-23 — Restore validated 48 kHz playback reserve
+
+The 48 kHz transmit ring is restored from 128 packets (16 ms) to the previous
+hardware-validated 640-packet geometry (about 80 ms), with 320-packet refill
+halves. Playback crackling persisted after reinstall and reboot, while the
+transport counters showed no host playback underruns. The earlier physical
+loopback measurement for the 640-packet configuration was 82.65 ms round trip,
+so the HAL reports 1984 device-latency frames on each 48 kHz input/output
+scope. The 48 kHz mode should be retested after installing this rollback.
+
+## 2026-09-23 — Restore validated 96 kHz playback reserve
+
+The experimental 96 kHz transmit ring is restored from 128 packets to its
+previous 640-packet geometry, with 320-packet refill halves (80 ms / 40 ms).
+The 128-packet configuration repeatedly started with broken playback. The
+existing external recording reference measured about 119 ms round trip with
+the longer reserve, so the HAL reports 5712 device-latency frames per 96 kHz
+input/output scope. The 96 kHz mode needs listener validation after install.
+
+## 2026-09-23 — Capture recovery and latency probe follow-up
+
+After recording was reported to go silent after several seconds at 48 kHz,
+the transport was found to enable capture only once. When the HAL discarded a
+stale capture backlog and cleared the ring's active flag, the 48 kHz engine did
+not re-enable it. The 44.1 kHz path now also tracks that state; 48 kHz now
+prefills and reactivates capture after a HAL flush. Logic capture and the
+electrical loopback test both worked after the 48 kHz fix. The 48 kHz loopback
+measured 87.98 ms; Logic's reported latency was within about 2 ms.
+
+`fw1814audioloopback --rate RATE` now reads the current nominal rate and skips
+the rate write and two-second wait when the device is already at `RATE`.
+Otherwise it requests the rate and retains the existing settling wait.
+
+At 96 kHz, two consecutive loopback runs measured 80.30 ms round trip while
+CoreAudio reported 5712 frames on each device scope (about 119 ms combined),
+and Logic displayed about 121 ms. The report remains at 5712 frames per scope
+pending better directional latency measurements; the loopback only measures
+the combined path. No 96 kHz latency adjustment was made. The two-second
+post-init settling period remains unchanged.
 
 `fw1814state reset` applies and records the proven straight-through macfw
 baseline without claiming undocumented M-Audio factory-default semantics.

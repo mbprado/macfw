@@ -40,11 +40,11 @@ constexpr UInt32 kPlaybackMaxPacket = 232;
 // some reconnect phases, observed as one missing 8-frame data packet per ring
 // revolution (47 kHz decoded instead of 48 kHz).
 constexpr std::size_t kCaptureSlots = 256;
-// Keep the live TX reserve close to a few CoreAudio periods. The previous
-// 640-packet ring held about 80 ms of audio before the physical loopback;
-// 128 packets retain the same 4-phase packet geometry with a 16 ms reserve.
-constexpr std::size_t kTxPackets = 128;
-constexpr std::size_t kTxHalfPackets = 64;
+// Keep the hardware-validated dynamic playback geometry. The 128-packet
+// reserve reduced latency but caused cracked playback; restore the previously
+// validated 640-packet ring until that reduction can be regression-tested.
+constexpr std::size_t kTxPackets = 640;
+constexpr std::size_t kTxHalfPackets = 320;
 constexpr std::size_t kPcmCapacityFrames = 16384;
 constexpr std::size_t kCapturePrefillFrames = 512;
 constexpr UInt32 kCycleLead = 256;
@@ -244,10 +244,16 @@ bool run() {
 
                 capturePump.service(rx, *captureShared.ring());
 
+                // The HAL suspends capture when a stopped or stalled client
+                // leaves a stale queue behind. Re-arm here after it flushes
+                // that backlog, then resume only after a fresh prefill.
+                if (captureReady &&
+                    captureShared.ring()->active.load(std::memory_order_acquire) == 0)
+                    captureReady = false;
                 if (!captureReady &&
                     captureShared.activateForConsumer(kCapturePrefillFrames)) {
                     captureReady = true;
-                    std::cout << "FW1814 capture consumer detected; live capture enabled\n";
+                    std::cout << "FW1814 capture consumer resumed; fresh capture enabled\n";
                 }
 
                 const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();

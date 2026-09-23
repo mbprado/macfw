@@ -366,6 +366,12 @@ bool run() {
                 if (!playbackOnlyDiagnostic)
                     capturePump.service(rx, *captureShared.ring());
 
+                // The HAL may suspend a stale/full capture queue while the
+                // client is not reading. Reflect that transition locally so
+                // the transport can prefill and reactivate capture again.
+                if (!playbackOnlyDiagnostic && captureReady &&
+                    captureShared.ring()->active.load(std::memory_order_acquire) == 0)
+                    captureReady = false;
                 if (!playbackOnlyDiagnostic && !captureReady &&
                     captureShared.activateForConsumer(kCapturePrefillFrames)) {
                     captureReady = true;
