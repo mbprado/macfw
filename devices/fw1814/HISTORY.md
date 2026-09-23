@@ -27,6 +27,28 @@ labels, DBC gaps, malformed packets or metadata swaps. The 192 kHz engine
 remains experimental; extended recording, program-audio and broader repeated
 cross-rate testing are still needed.
 
+## 2026-09-23 — 48 kHz latency reduction and loopback diagnostic
+
+The released 48 kHz engine's live transmit ring was reduced from 640 packets
+(about 80 ms) to 128 packets (about 16 ms), retaining the same four-phase
+blocking packet geometry and 64-packet refill halves. Physical CoreAudio
+loopback improved from 82.65 ms to approximately 17–22 ms round trip, making
+the mode usable for software monitoring and approaching the 9.46 ms result
+measured from the connected H5 interface.
+
+The HAL now reports provisional 48 kHz device latency of 400 frames on each
+input and output scope; stream latency remains zero. Logic consequently reports
+about 22 ms, close to the measured live path. The HAL also flushes any active
+capture backlog larger than 4096 frames at every supported rate, preventing a
+stopped client from replaying hundreds of milliseconds of stale monitoring
+audio. The validated two-second post-init settling period is unchanged.
+
+`fw1814audioloopback` was added as a selectable-device CoreAudio diagnostic.
+It reports the actual AUHAL rate, device and stream latency properties,
+host-timestamped electrical round-trip latency, and FW1814 shared-ring queue
+estimates. The H5 reference measured 9.46 ms at 48 kHz; stale capture queues
+are identified explicitly in the FW1814 report.
+
 ## 2026-09-18 — Experimental 88.2/96 kHz CoreAudio trials
 
 Guarded rate-control and duplex-stream diagnostics established the FW1814's

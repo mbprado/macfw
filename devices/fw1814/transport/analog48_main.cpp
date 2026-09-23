@@ -40,10 +40,11 @@ constexpr UInt32 kPlaybackMaxPacket = 232;
 // some reconnect phases, observed as one missing 8-frame data packet per ring
 // revolution (47 kHz decoded instead of 48 kHz).
 constexpr std::size_t kCaptureSlots = 256;
-// Hardware-validated dynamic playback geometry. Do not reduce without
-// arbitrary-frequency and real-audio regression testing.
-constexpr std::size_t kTxPackets = 640;
-constexpr std::size_t kTxHalfPackets = 320;
+// Keep the live TX reserve close to a few CoreAudio periods. The previous
+// 640-packet ring held about 80 ms of audio before the physical loopback;
+// 128 packets retain the same 4-phase packet geometry with a 16 ms reserve.
+constexpr std::size_t kTxPackets = 128;
+constexpr std::size_t kTxHalfPackets = 64;
 constexpr std::size_t kPcmCapacityFrames = 16384;
 constexpr std::size_t kCapturePrefillFrames = 512;
 constexpr UInt32 kCycleLead = 256;

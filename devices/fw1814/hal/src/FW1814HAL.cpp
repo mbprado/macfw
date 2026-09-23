@@ -31,6 +31,9 @@ constexpr Float64 kRate192000 = 192000.0;
 constexpr UInt32 kOutputChannels = macfw::fw1814::hal::kOutputChannels;
 constexpr UInt32 kInputChannels = macfw::fw1814::hal::capture::kInputChannels;
 constexpr UInt32 kQuadRateInputChannels = 2;
+// Provisional 48-kHz device latency after the 128-packet live TX reserve
+// reduction. The physical loopback measured about 16.8 ms round trip.
+constexpr UInt32 kReported48DeviceLatencyFrames = 400;
 
 AudioServerPlugInHostRef gHost = nullptr;
 std::atomic<UInt32> gRefCount{1};
@@ -65,6 +68,13 @@ UInt32 AvailableRateCount() {
            macfw::fw1814::experimental::enabled96() +
            macfw::fw1814::experimental::enabled176() +
            macfw::fw1814::experimental::enabled192();
+}
+
+UInt32 ReportedDeviceLatencyFrames(AudioObjectPropertyScope scope) {
+    if (gSampleRate.load(std::memory_order_acquire) != 48000)
+        return 0;
+    (void)scope;
+    return kReported48DeviceLatencyFrames;
 }
 
 Float64 AvailableHighRate(UInt32 index) {
@@ -688,7 +698,11 @@ OSStatus STDMETHODCALLTYPE GetPropertyData(AudioServerPlugInDriverRef driver,
                 return CopyScalar(inSize, outSize, outData, static_cast<UInt32>(0));
             case kAudioDevicePropertyLatency:
             case kAudioDevicePropertySafetyOffset:
-                return CopyScalar(inSize, outSize, outData, static_cast<UInt32>(0));
+                return CopyScalar(
+                    inSize, outSize, outData,
+                    selector == kAudioDevicePropertyLatency
+                        ? ReportedDeviceLatencyFrames(address->mScope)
+                        : static_cast<UInt32>(0));
             case kAudioDevicePropertyZeroTimeStampPeriod:
                 return CopyScalar(inSize, outSize, outData, static_cast<UInt32>(512));
             case kAudioDevicePropertyNominalSampleRate:
@@ -973,14 +987,16 @@ OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef,
         if (gCaptureRing->active.load(std::memory_order_acquire) != 0 &&
             gCaptureRing->sampleRate.load(std::memory_order_acquire) ==
                 gSampleRate.load(std::memory_order_acquire)) {
-            // The experimental 96-kHz path can retain a full 32768-frame
-            // queue after a client pauses. Reading at exactly 96 kHz then
-            // preserves ~341 ms of stale software-monitor audio forever.
-            // A flush makes this callback silent; the engine refills from
-            // fresh packets before enabling capture again.
-            const bool stale = (currentRate == 96000 || currentRate == 88200 ||
-                currentRate == 176400 || currentRate == 192000) &&
-                macfw::fw1814::hal::capture::suspendStaleCapture(*gCaptureRing, 4096);
+            // A stopped client can leave a full 32768-frame queue behind.
+            // Reading it back would replay hundreds of milliseconds of stale
+            // software-monitor audio. A flush makes this callback silent; the
+            // engine refills from fresh packets before enabling capture again.
+            // A client can stop and restart at any supported rate while the
+            // transport continues producing capture frames. Never replay a
+            // stale backlog larger than the bounded live-capture threshold.
+            const bool stale =
+                macfw::fw1814::hal::capture::suspendStaleCapture(
+                    *gCaptureRing, 4096);
             if (!stale) {
                 got = (currentRate == 176400 || currentRate == 192000)
                     ? macfw::fw1814::hal::capture::readFirstChannels(

@@ -29,6 +29,7 @@ ROUTE_ANALOG_TOOL := fw1814route_stream_to_analog
 CONTROL_DIR := control/fw1814ctl
 STATE_CONTROL_DIR := control/fw1814state
 DEVICE_PROBE_TOOL := fw1814deviceprobe
+AUDIO_LOOPBACK_TOOL := fw1814audioloopback
 
 .PHONY: all runtime fingerprint probe boot-tool boot-check boot \
 	firmware-reset-tool firmware-reset-check firmware-reset \
@@ -49,7 +50,8 @@ DEVICE_PROBE_TOOL := fw1814deviceprobe
 	client-close-watch-tool client-close-watch-check client-close-watch \
 	stream-client-close-watch-tool stream-client-close-watch-check stream-client-close-watch \
 	playback-map-tool playback-map-check playback-map \
-	route-analog-tool route-analog-check route-analog control-tool control-state-tool device-probe-tool clean
+	route-analog-tool route-analog-check route-analog audio-loopback-tool audio-loopback \
+	control-tool control-state-tool device-probe-tool clean
 
 all: probe bebob-probe bus-reset-tool boot-tool init-tool capture48-tool dualcmp-tool dualcmp-wait-tool \
 	duplex-blocking-tool output-watch-tool teardown-watch-tool \
@@ -411,6 +413,17 @@ route-analog-check: route-analog-tool
 route-analog: route-analog-tool
 	./$(ROUTE_ANALOG_TOOL) --execute
 
+# Full-duplex CoreAudio impulse loopback diagnostic. Selects the M-Audio FW1814,
+# reports the actual AUHAL playback rate, and measures electrical round-trip
+# latency from output channel 1 to input channel 1 using host timestamps.
+audio-loopback-tool: $(AUDIO_LOOPBACK_TOOL)
+
+$(AUDIO_LOOPBACK_TOOL): fw1814audioloopback.cpp
+	$(CXX) $(CXXFLAGS) $< -framework AudioUnit -framework CoreAudio -framework CoreFoundation -o $@
+
+audio-loopback: audio-loopback-tool
+	./$(AUDIO_LOOPBACK_TOOL)
+
 control-tool:
 	$(MAKE) -C $(CONTROL_DIR)
 
@@ -428,4 +441,4 @@ clean:
 	$(MAKE) -C $(BUS_RESET_DIR) clean
 	$(MAKE) -C $(CONTROL_DIR) clean
 	$(MAKE) -C $(STATE_CONTROL_DIR) clean
-	rm -f $(BOOT_TOOL) $(FIRMWARE_RESET_TOOL) $(INIT_TOOL) $(DEVICE_PROBE_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(DUPLEX96_TOOL) $(TONE96_TOOL) $(TONE96_LIVE_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) $(PLAYBACK_MAP_TOOL) $(ROUTE_ANALOG_TOOL) fw1814capture48_duplex_nodata
+	rm -f $(BOOT_TOOL) $(FIRMWARE_RESET_TOOL) $(INIT_TOOL) $(DEVICE_PROBE_TOOL) $(AUDIO_LOOPBACK_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(DUPLEX96_TOOL) $(TONE96_TOOL) $(TONE96_LIVE_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) $(PLAYBACK_MAP_TOOL) $(ROUTE_ANALOG_TOOL) fw1814capture48_duplex_nodata

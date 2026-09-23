@@ -497,9 +497,19 @@ bool run() {
                     const auto& txStats = streamer.stats();
                     const auto& rxStats = capturePump.stats();
                     const auto* pb = playbackShared.ring();
+                    const auto outSharedFrames =
+                        macfw::fw1814::hal::availableFrames(*pb);
+                    const auto outTransportFrames =
+                        outSharedFrames + pcm.availableFrames();
+                    const auto inTransportFrames =
+                        macfw::fw1814::hal::capture::availableFrames(
+                            *captureShared.ring());
                     std::cout << "FW1814 out-shared="
-                              << macfw::fw1814::hal::availableFrames(*pb)
+                              << outSharedFrames
                               << " pcm=" << pcm.availableFrames()
+                              << " transport-out=" << outTransportFrames
+                              << " (" << outTransportFrames * 1000 / kRate
+                              << " ms)"
                               << " tx-audio=" << txStats.framesFromBuffer
                               << " tx-silence=" << txStats.framesSilenced
                               << " tx-nonzero=" << txStats.nonzeroFrames
@@ -519,7 +529,9 @@ bool run() {
                               << " | capture=" << captureFrames
                               << " (delta " << (captureFrames - lastCaptureFrames) << ')'
                               << " queued="
-                              << macfw::fw1814::hal::capture::availableFrames(*captureShared.ring())
+                              << inTransportFrames
+                              << " (" << inTransportFrames * 1000 / kRate
+                              << " ms)"
                               << " cap-drop=" << captureShared.ring()->droppedFrames.load(std::memory_order_relaxed)
                               << " cap-active=" << captureShared.ring()->active.load(std::memory_order_relaxed)
                               << " cap-qualified="
