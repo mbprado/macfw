@@ -54,6 +54,7 @@ constexpr std::size_t kWarmupPcmFrames = 2 * kRate;
 // live playback into PCM after the silent preload has fallen to roughly one
 // refill, instead of retaining ~170 ms of silence throughout the session.
 constexpr std::size_t kLivePcmReserveFrames = 2048;
+constexpr std::size_t kRollingLivePcmReserveFrames = 512;
 
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
@@ -78,6 +79,18 @@ std::size_t rollingTxLeadPackets() {
     char* end = nullptr;
     const auto parsed = std::strtoull(value, &end, 10);
     if (!end || *end != '\0' || parsed < 16 || parsed >= kTxPackets)
+        return 0;
+    return static_cast<std::size_t>(parsed);
+}
+
+std::size_t rollingLivePcmReserveFrames() {
+    const char* value = std::getenv("MACFW_44_ROLLING_PCM_RESERVE_FRAMES");
+    if (!value || value[0] == '\0')
+        return kRollingLivePcmReserveFrames;
+    char* end = nullptr;
+    const auto parsed = std::strtoull(value, &end, 10);
+    if (!end || *end != '\0' || parsed < 64 ||
+        parsed > kLivePcmReserveFrames)
         return 0;
     return static_cast<std::size_t>(parsed);
 }
@@ -221,9 +234,17 @@ bool run() {
         const bool rollingTx = rollingTxRequested();
         const std::size_t rollingLead = rollingTx ? rollingTxLeadPackets() : 0;
         const std::size_t rollingGuard = rollingLead / 2;
+        const std::size_t livePcmReserve = rollingTx
+            ? rollingLivePcmReserveFrames()
+            : kLivePcmReserveFrames;
         if (rollingTx && rollingLead == 0) {
             std::cerr << "FW1814 invalid 44.1 rolling TX configuration; "
                          "MACFW_44_ROLLING_TX_CYCLES must be 16..639\n";
+            goto cleanup;
+        }
+        if (rollingTx && livePcmReserve == 0) {
+            std::cerr << "FW1814 invalid 44.1 rolling PCM reserve; "
+                         "MACFW_44_ROLLING_PCM_RESERVE_FRAMES must be 64..2048\n";
             goto cleanup;
         }
         if (!streamer.valid() || !streamer.prime()) {
@@ -239,7 +260,8 @@ bool run() {
                       << rollingLead << "-cycle lead ("
                       << rollingLead * 1000 / kCyclesPerSecond
                       << " ms), " << rollingGuard
-                      << "-cycle deadline guard\n";
+                      << "-cycle deadline guard, " << livePcmReserve
+                      << "-frame live PCM reserve\n";
         } else {
             std::cout << "FW1814 44.1 rolling TX: disabled; "
                          "validated half-ring refill active\n";
@@ -394,7 +416,7 @@ bool run() {
                     // CoreAudio can write during the preload. Drop those old
                     // frames so the first admitted sample is current audio.
                     playbackShared.discardBacklog();
-                    if (pcm.availableFrames() <= kLivePcmReserveFrames) {
+                    if (pcm.availableFrames() <= livePcmReserve) {
                         awaitingLivePlayback = false;
                         std::cout << "FW1814 44.1 live playback enabled after "
                                   << CFAbsoluteTimeGetCurrent() - playbackWaitStart
