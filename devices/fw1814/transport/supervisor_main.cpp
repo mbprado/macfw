@@ -570,9 +570,12 @@ int main(int argc, char** argv) {
             // then start the selected engine. Reserve firmware recovery for
             // an engine failure or failed qualification.
             deviceRecoveryRequired = false;
-        } else if (engineStatus == kQualificationRetry && isQuadRate(requestedRate)) {
-            std::printf("FW1814 %u Hz qualification failed; retrying stream "
-                        "without firmware recovery\n", requestedRate);
+        } else if (engineStatus == kQualificationRetry) {
+            // Qualification and startup-schedule rejection are host-side
+            // transport failures. A FireWire bus reset cannot repair them and
+            // would only turn a deterministic rejection into a reset loop.
+            std::printf("FW1814 %u Hz transport qualification/startup failed; "
+                        "retrying without firmware recovery\n", requestedRate);
             deviceRecoveryRequired = false;
         } else {
             // Any unexpected engine exit means the next transport start must
