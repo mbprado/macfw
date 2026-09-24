@@ -35,6 +35,7 @@ constexpr UInt32 kPlaybackMaxPacket = 232;
 constexpr std::size_t kCaptureSlots = 256;
 constexpr std::size_t kTxPackets = 640;
 constexpr std::size_t kTxHalfPackets = 320;
+constexpr std::size_t kRollingTxDefaultLeadPackets = 96;
 // Match the hardware-clean native 44.1 tone probe for this diagnostic.  Its
 // preloaded 262144-frame PCM ring removes concurrent small-ring pressure from
 // the comparison, leaving the SHM float conversion as the only added stage.
@@ -63,6 +64,22 @@ UInt32 cycleCount(UInt32 cycleTime) {
 
 UInt32 cycleDelta(UInt32 newer, UInt32 older) {
     return (newer + kCyclesPerSecond - older) % kCyclesPerSecond;
+}
+
+bool rollingTxRequested() {
+    const char* value = std::getenv("MACFW_44_ROLLING_TX");
+    return value && value[0] != '\0' && value[0] != '0';
+}
+
+std::size_t rollingTxLeadPackets() {
+    const char* value = std::getenv("MACFW_44_ROLLING_TX_CYCLES");
+    if (!value || value[0] == '\0')
+        return kRollingTxDefaultLeadPackets;
+    char* end = nullptr;
+    const auto parsed = std::strtoull(value, &end, 10);
+    if (!end || *end != '\0' || parsed < 16 || parsed >= kTxPackets)
+        return 0;
+    return static_cast<std::size_t>(parsed);
 }
 
 bool preloadDiagnosticAudio(macfw::PcmRingBuffer& pcm,
@@ -108,6 +125,10 @@ bool serviceTxFor(IOFireWireLibDeviceRef native,
         if ((*native)->GetCycleTime(native, &cycleTime) != kIOReturnSuccess)
             return false;
         streamer.service(cycleCount(cycleTime));
+        if (!streamer.healthy()) {
+            std::cerr << "FW1814 44.1 rolling TX deadline missed during startup\n";
+            return false;
+        }
     }
     return !gStopRequested;
 }
@@ -197,6 +218,14 @@ bool run() {
 
         BlockingPcmStream44100 streamer(
             tx, pcm, initialCycle, firstCycle, kTxHalfPackets);
+        const bool rollingTx = rollingTxRequested();
+        const std::size_t rollingLead = rollingTx ? rollingTxLeadPackets() : 0;
+        const std::size_t rollingGuard = rollingLead / 2;
+        if (rollingTx && rollingLead == 0) {
+            std::cerr << "FW1814 invalid 44.1 rolling TX configuration; "
+                         "MACFW_44_ROLLING_TX_CYCLES must be 16..639\n";
+            goto cleanup;
+        }
         if (!streamer.valid() || !streamer.prime()) {
             std::cerr << "FW1814 44.1 playback stream prime failed\n";
             goto cleanup;
@@ -205,6 +234,16 @@ bool run() {
         std::cout << "FW1814 44.1 playback TX ring: " << kTxPackets
                   << " packets / " << kTxHalfPackets
                   << "-packet halves (80 ms / 40 ms)\n";
+        if (rollingTx) {
+            std::cout << "FW1814 44.1 EXPERIMENTAL rolling TX: "
+                      << rollingLead << "-cycle lead ("
+                      << rollingLead * 1000 / kCyclesPerSecond
+                      << " ms), " << rollingGuard
+                      << "-cycle deadline guard\n";
+        } else {
+            std::cout << "FW1814 44.1 rolling TX: disabled; "
+                         "validated half-ring refill active\n";
+        }
         std::cout << "FW1814 44.1 capture RX ring: " << kCaptureSlots
                   << " packets / 32-packet publication chunks\n";
         std::cout << "FW1814 44.1 scheduled TX lead: " << kCycleLead
@@ -294,6 +333,14 @@ bool run() {
         if (!control.start(device, kRate))
             std::cerr << "warning: FW1814 control socket unavailable; audio will continue\n";
 
+        // Preserve the validated half-ring scheduler throughout ISO startup
+        // and the blocking M-Audio rate kick. Switch to the guarded rolling
+        // horizon only after those operations have completed.
+        if (rollingTx && !streamer.enableRolling(rollingLead, rollingGuard)) {
+            std::cerr << "FW1814 could not enable 44.1 rolling TX\n";
+            goto cleanup;
+        }
+
         signalEngineReady();
 
         playbackShared.ring()->active.store(1, std::memory_order_release);
@@ -363,6 +410,17 @@ bool run() {
                 if ((*native)->GetCycleTime(native, &serviceCycleTime) == kIOReturnSuccess)
                     streamer.service(cycleCount(serviceCycleTime));
 
+                if (!streamer.healthy()) {
+                    const auto& txStats = streamer.stats();
+                    std::cerr << "FW1814 44.1 rolling TX deadline missed; "
+                                 "stopping before unsafe slot reuse (misses="
+                              << txStats.rollingDeadlineMisses
+                              << ", max-cycle-gap=" << txStats.maxCycleDelta
+                              << ")\n";
+                    audioFinished.store(true, std::memory_order_release);
+                    return;
+                }
+
                 if (!playbackOnlyDiagnostic)
                     capturePump.service(rx, *captureShared.ring());
 
@@ -400,6 +458,11 @@ bool run() {
                               << " tx-audio=" << txStats.framesFromBuffer
                               << " tx-silence=" << txStats.framesSilenced
                               << " tx-late=" << txStats.lateCyclePolls
+                              << " tx-max-gap=" << txStats.maxCycleDelta
+                              << " tx-roll-packets="
+                              << txStats.rollingPacketsRefilled
+                              << " tx-roll-miss="
+                              << txStats.rollingDeadlineMisses
                               << " pcm-underrun=" << pcm.underrunFrames()
                               << " pb-read=" << playbackPumpStats.framesRead
                               << " hal-calls=" << pb->doIOCalls.load(std::memory_order_relaxed)
