@@ -41,7 +41,11 @@ constexpr std::size_t kRollingTxDefaultLeadPackets = 96;
 // the comparison, leaving the SHM float conversion as the only added stage.
 constexpr std::size_t kPcmCapacityFrames = 262144;
 constexpr std::size_t kCapturePrefillFrames = 512;
-constexpr UInt32 kCycleLead = 2048;
+// Keep the previously validated startup geometry available for the fallback
+// path. The rolling path starts closer to the live bus cursor, like the 48 kHz
+// engine and Linux's continuously recycled AMDTP queue.
+constexpr UInt32 kValidatedCycleLead = 2048;
+constexpr UInt32 kRollingCycleLead = 256;
 constexpr UInt32 kCyclesPerSecond = 8000;
 constexpr std::uint64_t kAudioServicePeriodNs = 250000;
 constexpr double kPi = 3.14159265358979323846;
@@ -192,7 +196,11 @@ bool run() {
             goto cleanup;
         }
         const UInt32 initialCycle = cycleCount(cycleTime);
-        const UInt32 firstCycle = (initialCycle + kCycleLead) % kCyclesPerSecond;
+        const bool rollingTx = rollingTxRequested();
+        const UInt32 cycleLead =
+            rollingTx ? kRollingCycleLead : kValidatedCycleLead;
+        const UInt32 firstCycle =
+            (initialCycle + cycleLead) % kCyclesPerSecond;
 
         macfw::PcmRingBuffer pcm(kPcmCapacityFrames,
                                  macfw::fw1814::kPlaybackPcmPositions);
@@ -208,17 +216,22 @@ bool run() {
                 std::cerr << "FW1814 44.1 prime-silence diagnostic failed\n";
                 goto cleanup;
             }
-        } else {
-            const char* diagnosticFrames =
-                std::getenv("MACFW_44_PRIME_SILENCE_FRAMES");
-            const std::size_t frames = diagnosticFrames
-                ? static_cast<std::size_t>(
-                      std::strtoull(diagnosticFrames, nullptr, 10))
-                : kWarmupPcmFrames;
+        } else if (const char* diagnosticFrames =
+                       std::getenv("MACFW_44_PRIME_SILENCE_FRAMES")) {
+            const std::size_t frames = static_cast<std::size_t>(
+                std::strtoull(diagnosticFrames, nullptr, 10));
             if (!preloadDiagnosticAudio(pcm, 0.0, frames)) {
+                std::cerr << "FW1814 44.1 diagnostic silence preload failed\n";
+                goto cleanup;
+            }
+        } else if (!rollingTx) {
+            if (!preloadDiagnosticAudio(pcm, 0.0, kWarmupPcmFrames)) {
                 std::cerr << "FW1814 44.1 silence preload failed\n";
                 goto cleanup;
             }
+        } else {
+            std::cout << "FW1814 44.1 rolling startup: legacy 2-second PCM "
+                         "preload bypassed\n";
         }
         auto rx = macfw::AmdtpReceiveRing::create(
             device, kCaptureSlots, kCaptureMaxPacket);
@@ -231,7 +244,6 @@ bool run() {
 
         BlockingPcmStream44100 streamer(
             tx, pcm, initialCycle, firstCycle, kTxHalfPackets);
-        const bool rollingTx = rollingTxRequested();
         const std::size_t rollingLead = rollingTx ? rollingTxLeadPackets() : 0;
         const std::size_t rollingGuard = rollingLead / 2;
         const std::size_t livePcmReserve = rollingTx
@@ -245,6 +257,14 @@ bool run() {
         if (rollingTx && livePcmReserve == 0) {
             std::cerr << "FW1814 invalid 44.1 rolling PCM reserve; "
                          "MACFW_44_ROLLING_PCM_RESERVE_FRAMES must be 64..2048\n";
+            goto cleanup;
+        }
+        // Linux starts its rolling AMDTP domain before issuing the M-Audio
+        // post-start rate command. Do the same for the opt-in path so startup
+        // never falls back to 320-packet half-ring scheduling.
+        if (rollingTx &&
+            !streamer.enableRolling(rollingLead, rollingGuard)) {
+            std::cerr << "FW1814 could not enable 44.1 rolling TX\n";
             goto cleanup;
         }
         if (!streamer.valid() || !streamer.prime()) {
@@ -268,8 +288,9 @@ bool run() {
         }
         std::cout << "FW1814 44.1 capture RX ring: " << kCaptureSlots
                   << " packets / 32-packet publication chunks\n";
-        std::cout << "FW1814 44.1 scheduled TX lead: " << kCycleLead
-                  << " cycles (256 ms)\n";
+        std::cout << "FW1814 44.1 scheduled TX lead: " << cycleLead
+                  << " cycles (" << cycleLead * 1000 / kCyclesPerSecond
+                  << " ms)\n";
 
         if (!lifecycle.prepare(device, rx, tx.nativeLocalPort(),
                                kCaptureMaxPacket, kPlaybackMaxPacket)) {
@@ -354,14 +375,6 @@ bool run() {
 
         if (!control.start(device, kRate))
             std::cerr << "warning: FW1814 control socket unavailable; audio will continue\n";
-
-        // Preserve the validated half-ring scheduler throughout ISO startup
-        // and the blocking M-Audio rate kick. Switch to the guarded rolling
-        // horizon only after those operations have completed.
-        if (rollingTx && !streamer.enableRolling(rollingLead, rollingGuard)) {
-            std::cerr << "FW1814 could not enable 44.1 rolling TX\n";
-            goto cleanup;
-        }
 
         signalEngineReady();
 
