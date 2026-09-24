@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <mach/mach_time.h>
 
 namespace macfw::fw1814::transport {
 
@@ -27,6 +28,7 @@ public:
         std::uint64_t completedChunks = 0;
         std::uint64_t repeatedTerminalTimestamps = 0;
         std::uint64_t noDataPackets = 0;
+        std::uint64_t firstLoudHostTime = 0;
     };
 
     std::size_t service(const macfw::AmdtpReceiveRing& rx,
@@ -229,6 +231,9 @@ private:
                     ++invalid;
                 }
                 decoded[base + physical] = static_cast<float>(raw / 8388608.0);
+                if (stats_.firstLoudHostTime == 0 &&
+                    (raw >= 6291456 || raw <= -6291456))
+                    stats_.firstLoudHostTime = mach_absolute_time();
             }
             p += kCaptureStreamPositions * 4;
         }

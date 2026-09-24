@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <mach/mach_time.h>
 #include <vector>
 
 namespace macfw::fw1814::transport {
@@ -17,6 +18,7 @@ struct PlaybackPumpStats {
     std::uint64_t samplesSeen = 0;
     std::uint64_t clippedSamples = 0;
     std::uint64_t nonFiniteSamples = 0;
+    std::uint64_t firstLoudHostTime = 0;
     double peakAbs = 0.0;
 };
 
@@ -48,6 +50,9 @@ inline std::size_t pumpPlayback(
             const float rawFloat =
                 audio[frame * macfw::fw1814::hal::kOutputChannels + physical];
             double raw = static_cast<double>(rawFloat);
+            if (stats && stats->firstLoudHostTime == 0 &&
+                std::isfinite(raw) && std::fabs(raw) >= 0.75)
+                stats->firstLoudHostTime = mach_absolute_time();
             if (stats) {
                 ++stats->samplesSeen;
                 if (!std::isfinite(raw)) {

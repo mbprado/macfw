@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <mach/mach_time.h>
 #include <sys/mman.h>
 #include <utility>
 
@@ -33,6 +34,7 @@ public:
         std::size_t framesRequested = 0;
         std::size_t framesFromBuffer = 0;
         std::size_t framesSilenced = 0;
+        std::uint64_t firstLoudHostTime = 0;
     };
 
     BlockingPcmTransmitRing44100() = default;
@@ -177,6 +179,13 @@ public:
                 result.framesRequested += rr.framesRequested;
                 result.framesFromBuffer += rr.framesFromBuffer;
                 result.framesSilenced += rr.framesSilenced;
+                for (const auto sample : frames) {
+                    if (result.firstLoudHostTime == 0 &&
+                        (sample >= 6291456 || sample <= -6291456)) {
+                        result.firstLoudHostTime = mach_absolute_time();
+                        break;
+                    }
+                }
 
                 for (std::size_t event = 0; event < kEventsPerDataPacket; ++event) {
                     for (std::size_t ch = 0; ch < kPcmChannels; ++ch) {
@@ -223,6 +232,13 @@ public:
             result.framesRequested += rr.framesRequested;
             result.framesFromBuffer += rr.framesFromBuffer;
             result.framesSilenced += rr.framesSilenced;
+            for (const auto sample : frames) {
+                if (result.firstLoudHostTime == 0 &&
+                    (sample >= 6291456 || sample <= -6291456)) {
+                    result.firstLoudHostTime = mach_absolute_time();
+                    break;
+                }
+            }
             for (std::size_t event = 0; event < kEventsPerDataPacket; ++event) {
                 for (std::size_t ch = 0; ch < kPcmChannels; ++ch) {
                     const auto sample = std::max<std::int32_t>(
@@ -377,6 +393,7 @@ public:
         std::uint64_t framesSilenced = 0;
         std::uint64_t lateCyclePolls = 0;
         UInt32 maxCycleDelta = 0;
+        std::uint64_t firstLoudHostTime = 0;
     };
 
     BlockingPcmStream44100(BlockingPcmTransmitRing44100& tx,
@@ -456,6 +473,8 @@ public:
             stats_.dataPacketsRefilled += rr.dataPacketsRefilled;
             stats_.framesFromBuffer += rr.framesFromBuffer;
             stats_.framesSilenced += rr.framesSilenced;
+            if (stats_.firstLoudHostTime == 0 && rr.firstLoudHostTime != 0)
+                stats_.firstLoudHostTime = rr.firstLoudHostTime;
             ++lastHalfNumber_;
         }
     }
@@ -476,6 +495,8 @@ private:
         stats_.dataPacketsRefilled += refill.dataPacketsRefilled;
         stats_.framesFromBuffer += refill.framesFromBuffer;
         stats_.framesSilenced += refill.framesSilenced;
+        if (stats_.firstLoudHostTime == 0 && refill.firstLoudHostTime != 0)
+            stats_.firstLoudHostTime = refill.firstLoudHostTime;
     }
 
     bool refillRolling(std::uint64_t firstPacket, std::size_t packetCount) {

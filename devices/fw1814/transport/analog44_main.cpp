@@ -485,6 +485,10 @@ bool run() {
                               << txStats.rollingPacketsRefilled
                               << " tx-roll-miss="
                               << txStats.rollingDeadlineMisses
+                              << " marker-pb="
+                              << playbackPumpStats.firstLoudHostTime
+                              << " marker-tx=" << txStats.firstLoudHostTime
+                              << " marker-cap=" << rxStats.firstLoudHostTime
                               << " pcm-underrun=" << pcm.underrunFrames()
                               << " pb-read=" << playbackPumpStats.framesRead
                               << " hal-calls=" << pb->doIOCalls.load(std::memory_order_relaxed)
