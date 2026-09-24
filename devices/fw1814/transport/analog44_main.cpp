@@ -439,12 +439,17 @@ bool run() {
             std::uint64_t lastCaptureFrames = 0;
             bool awaitingLivePlayback = true;
             const CFAbsoluteTime playbackWaitStart = CFAbsoluteTimeGetCurrent();
+            AudioLoopTimingStats loopTiming;
 
             while (!gStopRequested) {
-                pacer.wait();
+                const std::uint64_t wakeLateTicks = pacer.wait();
+                const std::uint64_t loopStartTicks =
+                    verbose ? mach_absolute_time() : 0;
 
                 if (!playbackOnlyDiagnostic)
                     capturePump.service(rx, *captureShared.ring());
+                const std::uint64_t firstCaptureDoneTicks =
+                    verbose ? mach_absolute_time() : 0;
                 if (awaitingLivePlayback) {
                     // CoreAudio can write during the preload. Drop those old
                     // frames so the first admitted sample is current audio.
@@ -460,6 +465,8 @@ bool run() {
                     drainPlayback(*playbackShared.ring(), pcm, audio, mapped,
                                   &playbackPumpStats);
                 }
+                const std::uint64_t playbackDoneTicks =
+                    verbose ? mach_absolute_time() : 0;
 
                 UInt32 serviceCycleTime = 0;
                 if ((*native)->GetCycleTime(native, &serviceCycleTime) == kIOReturnSuccess)
@@ -475,9 +482,22 @@ bool run() {
                     audioFinished.store(true, std::memory_order_release);
                     return;
                 }
+                const std::uint64_t txDoneTicks =
+                    verbose ? mach_absolute_time() : 0;
 
                 if (!playbackOnlyDiagnostic)
                     capturePump.service(rx, *captureShared.ring());
+                const std::uint64_t secondCaptureDoneTicks =
+                    verbose ? mach_absolute_time() : 0;
+                if (verbose) {
+                    loopTiming.observe(
+                        wakeLateTicks,
+                        (firstCaptureDoneTicks - loopStartTicks) +
+                            (secondCaptureDoneTicks - txDoneTicks),
+                        playbackDoneTicks - firstCaptureDoneTicks,
+                        txDoneTicks - playbackDoneTicks,
+                        secondCaptureDoneTicks - loopStartTicks);
+                }
 
                 // The HAL may suspend a stale/full capture queue while the
                 // client is not reading. Reflect that transition locally so
@@ -549,7 +569,10 @@ bool run() {
                               << " dbc-gap=" << rxStats.dbcDiscontinuities
                               << " ts-regress=" << rxStats.timestampRegressions
                               << " reorder=" << rxStats.reorderedPackets
-                              << " stale=" << rxStats.stalePackets << '\n';
+                              << " stale=" << rxStats.stalePackets;
+                    loopTiming.append(std::cout);
+                    std::cout << '\n';
+                    loopTiming.reset();
                     lastCaptureFrames = captureFrames;
                     lastStatus = now;
                 }
