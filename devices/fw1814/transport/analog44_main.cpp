@@ -259,14 +259,6 @@ bool run() {
                          "MACFW_44_ROLLING_PCM_RESERVE_FRAMES must be 64..2048\n";
             goto cleanup;
         }
-        // Linux starts its rolling AMDTP domain before issuing the M-Audio
-        // post-start rate command. Do the same for the opt-in path so startup
-        // never falls back to 320-packet half-ring scheduling.
-        if (rollingTx &&
-            !streamer.enableRolling(rollingLead, rollingGuard)) {
-            std::cerr << "FW1814 could not enable 44.1 rolling TX\n";
-            goto cleanup;
-        }
         if (!streamer.valid() || !streamer.prime()) {
             std::cerr << "FW1814 44.1 playback stream prime failed\n";
             goto cleanup;
@@ -375,6 +367,16 @@ bool run() {
 
         if (!control.start(device, kRate))
             std::cerr << "warning: FW1814 control socket unavailable; audio will continue\n";
+
+        // Linux can keep its kernel DMA queue moving while the M-Audio rate
+        // command completes. This user-space transport cannot safely service
+        // the rolling horizon during the synchronous FCP call, so retain the
+        // primed half-ring only for that startup operation and switch
+        // immediately afterward.
+        if (rollingTx && !streamer.enableRolling(rollingLead, rollingGuard)) {
+            std::cerr << "FW1814 could not enable 44.1 rolling TX\n";
+            goto cleanup;
+        }
 
         signalEngineReady();
 
