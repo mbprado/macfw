@@ -45,7 +45,10 @@ constexpr std::size_t kCapturePrefillFrames = 512;
 // path. The rolling path starts closer to the live bus cursor, like the 48 kHz
 // engine and Linux's continuously recycled AMDTP queue.
 constexpr UInt32 kValidatedCycleLead = 2048;
-constexpr UInt32 kRollingCycleLead = 256;
+// Ring construction plus CMP/ISO preparation can exceed 32 ms on the 44.1
+// path. This is startup-only headroom; the live rolling horizon remains the
+// independently configured 96 cycles (12 ms).
+constexpr UInt32 kRollingCycleLead = 1024;
 constexpr UInt32 kCyclesPerSecond = 8000;
 constexpr std::uint64_t kAudioServicePeriodNs = 250000;
 constexpr double kPi = 3.14159265358979323846;
@@ -61,6 +64,8 @@ constexpr std::size_t kLivePcmReserveFrames = 2048;
 constexpr std::size_t kRollingLivePcmReserveFrames = 512;
 
 volatile std::sig_atomic_t gStopRequested = 0;
+constexpr int kQualificationRetryExit = 2;
+int gFailureExitStatus = 1;
 void signalHandler(int) { gStopRequested = 1; }
 
 UInt32 cycleCount(UInt32 cycleTime) {
@@ -326,7 +331,12 @@ bool run() {
         const UInt32 nowCycle = cycleCount(nowCycleTime);
         const UInt32 forward = cycleDelta(firstCycle, nowCycle);
         if (forward > 4096u) {
-            std::cerr << "FW1814 44.1 scheduled first cycle is no longer safely ahead\n";
+            std::cerr << "FW1814 44.1 scheduled first cycle expired during "
+                         "startup (lead=" << cycleLead
+                      << " cycles, elapsed="
+                      << cycleDelta(nowCycle, initialCycle)
+                      << " cycles); retrying without device recovery\n";
+            gFailureExitStatus = kQualificationRetryExit;
             goto cleanup;
         }
         const double startupWait =
@@ -570,10 +580,11 @@ cleanup:
 
 int main() {
     gStopRequested = 0;
+    gFailureExitStatus = 1;
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
     std::cout.setf(std::ios::unitbuf);
     std::cerr.setf(std::ios::unitbuf);
     std::cout << "macfw fw1814analog44 — experimental 44.1 kHz analog full-duplex engine\n";
-    return run() ? 0 : 1;
+    return run() ? 0 : gFailureExitStatus;
 }
