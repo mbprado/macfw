@@ -4,6 +4,27 @@ This file records visible project milestones rather than every diagnostic
 experiment. Detailed protocol, transport and routing findings remain under
 `devices/fw1814/analysis/`.
 
+## 2026-09-24 — Experimental rolling 48 kHz transmit window
+
+An opt-in rolling transmitter decouples the stable 640-packet NuDCL allocation
+from the amount of live audio scheduled ahead of the FireWire cursor. The
+validated startup sequence, 640/320 allocation geometry and capture prefill
+remain unchanged. `MACFW_48_ROLLING_TX=1` enables the experiment, and
+`MACFW_48_ROLLING_TX_CYCLES` can override its 96-cycle (12 ms) default lead.
+The engine stops before unsafe slot reuse if it misses the associated
+48-cycle deadline guard.
+
+Hardware testing exposed an effective DMA-prefetch boundary between 64 and
+96 cycles. A 64-cycle lead remained stable but still measured 88.1–90.3 ms
+electrical round trip because updated packets apparently missed the active
+DMA pass and waited for the next ring rotation. At 96 cycles, repeated 48 kHz
+loopback measurements fell to 14.81–17.98 ms (711–863 frames). Program audio,
+capture and software monitoring remained clean and usable in real time, with
+no rolling deadline misses, DBC discontinuities, malformed packets, invalid
+labels or reordering in the representative run. Rare capture artifacts were
+heard only while deliberately stressing host CPU or I/O; the 512-frame
+capture prefill is therefore retained for headroom.
+
 ## 2026-09-22 — Experimental 192 kHz CoreAudio trial
 
 The hardware-validated 192 kHz blocking transport is now available through a

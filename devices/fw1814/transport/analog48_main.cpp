@@ -45,7 +45,7 @@ constexpr std::size_t kCaptureSlots = 256;
 // validated 640-packet ring until that reduction can be regression-tested.
 constexpr std::size_t kTxPackets = 640;
 constexpr std::size_t kTxHalfPackets = 320;
-constexpr std::size_t kRollingTxDefaultLeadPackets = 64;
+constexpr std::size_t kRollingTxDefaultLeadPackets = 96;
 constexpr std::size_t kPcmCapacityFrames = 16384;
 constexpr std::size_t kCapturePrefillFrames = 512;
 constexpr UInt32 kCycleLead = 256;
