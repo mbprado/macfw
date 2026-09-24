@@ -264,13 +264,20 @@ bool run() {
             CFAbsoluteTime lastGenerationCheck = CFAbsoluteTimeGetCurrent();
             CFAbsoluteTime lastStatus = lastGenerationCheck;
             std::uint64_t lastCaptureFrames = 0;
+            AudioLoopTimingStats loopTiming;
 
             while (!gStopRequested) {
-                pacer.wait();
+                const std::uint64_t wakeLateTicks = pacer.wait();
+                const std::uint64_t loopStartTicks =
+                    verbose ? mach_absolute_time() : 0;
 
                 capturePump.service(rx, *captureShared.ring());
+                const std::uint64_t firstCaptureDoneTicks =
+                    verbose ? mach_absolute_time() : 0;
                 drainPlayback(*playbackShared.ring(), pcm, audio, mapped,
                               &playbackPumpStats);
+                const std::uint64_t playbackDoneTicks =
+                    verbose ? mach_absolute_time() : 0;
 
                 UInt32 nowCycleTime = 0;
                 if ((*device.nativeHandle())->GetCycleTime(
@@ -287,8 +294,21 @@ bool run() {
                     audioFinished.store(true, std::memory_order_release);
                     return;
                 }
+                const std::uint64_t txDoneTicks =
+                    verbose ? mach_absolute_time() : 0;
 
                 capturePump.service(rx, *captureShared.ring());
+                const std::uint64_t secondCaptureDoneTicks =
+                    verbose ? mach_absolute_time() : 0;
+                if (verbose) {
+                    loopTiming.observe(
+                        wakeLateTicks,
+                        (firstCaptureDoneTicks - loopStartTicks) +
+                            (secondCaptureDoneTicks - txDoneTicks),
+                        playbackDoneTicks - firstCaptureDoneTicks,
+                        txDoneTicks - playbackDoneTicks,
+                        secondCaptureDoneTicks - loopStartTicks);
+                }
 
                 // The HAL suspends capture when a stopped or stalled client
                 // leaves a stale queue behind. Re-arm here after it flushes
@@ -347,7 +367,10 @@ bool run() {
                               << " nodata=" << rxStats.noDataPackets
                               << " dbc-gap=" << rxStats.dbcDiscontinuities
                               << " reorder=" << rxStats.reorderedPackets
-                              << " stale=" << rxStats.stalePackets << '\n';
+                              << " stale=" << rxStats.stalePackets;
+                    loopTiming.append(std::cout);
+                    std::cout << '\n';
+                    loopTiming.reset();
                     lastCaptureFrames = captureFrames;
                     lastStatus = now;
                 }
