@@ -40,7 +40,11 @@ constexpr std::size_t kRollingTxDefaultLeadPackets = 96;
 // preloaded 262144-frame PCM ring removes concurrent small-ring pressure from
 // the comparison, leaving the SHM float conversion as the only added stage.
 constexpr std::size_t kPcmCapacityFrames = 262144;
-constexpr std::size_t kCapturePrefillFrames = 512;
+constexpr std::size_t kValidatedCapturePrefillFrames = 512;
+// The marker path currently spends about 12.6 ms between transport decode and
+// the CoreAudio input callback. Halve only the rolling-path admission prefill;
+// retain the established fallback depth for A/B recovery.
+constexpr std::size_t kRollingCapturePrefillFrames = 256;
 // Keep the previously validated startup geometry available for the fallback
 // path. The rolling path starts closer to the live bus cursor, like the 48 kHz
 // engine and Linux's continuously recycled AMDTP queue.
@@ -254,6 +258,9 @@ bool run() {
         const std::size_t livePcmReserve = rollingTx
             ? rollingLivePcmReserveFrames()
             : kLivePcmReserveFrames;
+        const std::size_t capturePrefillFrames = rollingTx
+            ? kRollingCapturePrefillFrames
+            : kValidatedCapturePrefillFrames;
         if (rollingTx && rollingLead == 0) {
             std::cerr << "FW1814 invalid 44.1 rolling TX configuration; "
                          "MACFW_44_ROLLING_TX_CYCLES must be 16..639\n";
@@ -278,7 +285,8 @@ bool run() {
                       << rollingLead * 1000 / kCyclesPerSecond
                       << " ms), " << rollingGuard
                       << "-cycle deadline guard, " << livePcmReserve
-                      << "-frame live PCM reserve\n";
+                      << "-frame live PCM reserve, " << capturePrefillFrames
+                      << "-frame capture prefill\n";
         } else {
             std::cout << "FW1814 44.1 rolling TX: disabled; "
                          "validated half-ring refill active\n";
@@ -478,7 +486,7 @@ bool run() {
                     captureShared.ring()->active.load(std::memory_order_acquire) == 0)
                     captureReady = false;
                 if (!playbackOnlyDiagnostic && !captureReady &&
-                    captureShared.activateForConsumer(kCapturePrefillFrames)) {
+                    captureShared.activateForConsumer(capturePrefillFrames)) {
                     captureReady = true;
                     std::cout << "FW1814 44.1 capture consumer detected; live capture enabled\n";
                 }
