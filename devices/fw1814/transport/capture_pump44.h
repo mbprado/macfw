@@ -232,7 +232,7 @@ private:
                 }
                 decoded[base + physical] = static_cast<float>(raw / 8388608.0);
                 if (stats_.firstLoudHostTime == 0 &&
-                    (raw >= 6291456 || raw <= -6291456))
+                    (raw >= 1258291 || raw <= -1258291))
                     stats_.firstLoudHostTime = mach_absolute_time();
             }
             p += kCaptureStreamPositions * 4;
