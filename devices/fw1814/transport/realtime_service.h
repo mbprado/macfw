@@ -6,6 +6,7 @@
 #include <mach/thread_policy.h>
 #include <pthread.h>
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -196,18 +197,96 @@ public:
 
     bool valid() const { return intervalTicks_ != 0; }
 
-    void wait() {
-        if (!valid()) return;
+    std::uint64_t wait() {
+        if (!valid()) return 0;
         nextWake_ += intervalTicks_;
         mach_wait_until(nextWake_);
         const std::uint64_t now = mach_absolute_time();
+        const std::uint64_t lateness = now > nextWake_ ? now - nextWake_ : 0;
         if (now > nextWake_ + intervalTicks_ * 4)
             nextWake_ = now;
+        return lateness;
     }
 
 private:
     std::uint64_t intervalTicks_ = 0;
     std::uint64_t nextWake_ = 0;
+};
+
+// Lightweight, verbose-only profiling accumulator for the deadline-sensitive
+// audio loop. Callers take the mach timestamps so stages can be measured
+// without callbacks, allocation, locks or logging in the hot path.
+class AudioLoopTimingStats {
+public:
+    void observe(std::uint64_t wakeLateTicks,
+                 std::uint64_t captureTicks,
+                 std::uint64_t playbackTicks,
+                 std::uint64_t txTicks,
+                 std::uint64_t loopTicks) {
+        ++loops_;
+        captureTicks_ += captureTicks;
+        playbackTicks_ += playbackTicks;
+        txTicks_ += txTicks;
+        loopTicks_ += loopTicks;
+        maxWakeLateTicks_ = std::max(maxWakeLateTicks_, wakeLateTicks);
+        maxCaptureTicks_ = std::max(maxCaptureTicks_, captureTicks);
+        maxPlaybackTicks_ = std::max(maxPlaybackTicks_, playbackTicks);
+        maxTxTicks_ = std::max(maxTxTicks_, txTicks);
+        maxLoopTicks_ = std::max(maxLoopTicks_, loopTicks);
+    }
+
+    void append(std::ostream& out) const {
+        if (loops_ == 0) return;
+        out << " rt-loop-us=" << averageMicroseconds(loopTicks_)
+            << '/' << microseconds(maxLoopTicks_)
+            << " rt-cap-us=" << averageMicroseconds(captureTicks_)
+            << '/' << microseconds(maxCaptureTicks_)
+            << " rt-pb-us=" << averageMicroseconds(playbackTicks_)
+            << '/' << microseconds(maxPlaybackTicks_)
+            << " rt-tx-us=" << averageMicroseconds(txTicks_)
+            << '/' << microseconds(maxTxTicks_)
+            << " rt-wake-max-us=" << microseconds(maxWakeLateTicks_);
+    }
+
+    void reset() {
+        loops_ = 0;
+        captureTicks_ = 0;
+        playbackTicks_ = 0;
+        txTicks_ = 0;
+        loopTicks_ = 0;
+        maxWakeLateTicks_ = 0;
+        maxCaptureTicks_ = 0;
+        maxPlaybackTicks_ = 0;
+        maxTxTicks_ = 0;
+        maxLoopTicks_ = 0;
+    }
+
+private:
+    static double microseconds(std::uint64_t ticks) {
+        mach_timebase_info_data_t timebase{};
+        if (mach_timebase_info(&timebase) != KERN_SUCCESS ||
+            timebase.denom == 0)
+            return 0.0;
+        return static_cast<double>(ticks) *
+               static_cast<double>(timebase.numer) /
+               static_cast<double>(timebase.denom) / 1000.0;
+    }
+
+    double averageMicroseconds(std::uint64_t ticks) const {
+        return loops_ == 0 ? 0.0 : microseconds(ticks) /
+            static_cast<double>(loops_);
+    }
+
+    std::uint64_t loops_ = 0;
+    std::uint64_t captureTicks_ = 0;
+    std::uint64_t playbackTicks_ = 0;
+    std::uint64_t txTicks_ = 0;
+    std::uint64_t loopTicks_ = 0;
+    std::uint64_t maxWakeLateTicks_ = 0;
+    std::uint64_t maxCaptureTicks_ = 0;
+    std::uint64_t maxPlaybackTicks_ = 0;
+    std::uint64_t maxTxTicks_ = 0;
+    std::uint64_t maxLoopTicks_ = 0;
 };
 
 } // namespace macfw::fw1814::transport
