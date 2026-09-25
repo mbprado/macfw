@@ -4,6 +4,23 @@ This file records visible project milestones rather than every diagnostic
 experiment. Detailed protocol, transport and routing findings remain under
 `devices/fw1814/analysis/`.
 
+## 2026-09-25 — Persistent transport performance profiles
+
+The validated 44.1/48 kHz rolling engines now expose three persistent,
+live-switchable service cadences: Aggressive at 250 µs, Balanced at 375 µs,
+and Conservative at 500 µs. Hardware testing found clean playback/capture at
+all three values. The 375 µs profile measured a median 48 kHz electrical
+round trip of approximately 14.0 ms (20.0 ms callback wall time); two valid
+44.1 kHz runs measured approximately 21.5–23.4 ms.
+
+`fw1814ctl performance-profile get|set` uses the existing transport-owned
+socket and `fw1814state` persistence path. The Device tab presents the same
+three choices without editing launchd configuration or requiring an
+administrator prompt. `MACFW_AUDIO_SERVICE_PERIOD_US` remains an advanced
+authoritative override. The loopback diagnostic now waits for matching active
+transport shared memory and advancing capture before injecting its impulse
+after a rate change, avoiding the observed first-run readiness race.
+
 ## 2026-09-24 — Experimental rolling 48 kHz transmit window
 
 An opt-in rolling transmitter decouples the stable 640-packet NuDCL allocation

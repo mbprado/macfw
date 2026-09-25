@@ -7,12 +7,14 @@
 #include <pthread.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <mutex>
+#include <string>
 #include <thread>
 
 namespace macfw::fw1814::transport {
@@ -164,6 +166,110 @@ inline std::uint64_t configuredAudioServicePeriodNs(
     return microseconds * 1000;
 }
 
+inline bool hasAudioServicePeriodEnvironmentOverride() {
+    const char* value = std::getenv("MACFW_AUDIO_SERVICE_PERIOD_US");
+    if (!value || value[0] == '\0') return false;
+    char* end = nullptr;
+    const auto microseconds = std::strtoull(value, &end, 10);
+    return end && *end == '\0' && microseconds >= 250 &&
+           microseconds <= 2000;
+}
+
+enum class AudioPerformanceProfile : unsigned {
+    Aggressive = 0,
+    Balanced = 1,
+    Conservative = 2,
+};
+
+inline std::uint64_t audioPerformanceProfilePeriodNs(
+    AudioPerformanceProfile profile) {
+    switch (profile) {
+        case AudioPerformanceProfile::Aggressive: return 250000;
+        case AudioPerformanceProfile::Balanced: return 375000;
+        case AudioPerformanceProfile::Conservative: return 500000;
+    }
+    return 375000;
+}
+
+inline const char* audioPerformanceProfileName(
+    AudioPerformanceProfile profile) {
+    switch (profile) {
+        case AudioPerformanceProfile::Aggressive: return "aggressive";
+        case AudioPerformanceProfile::Balanced: return "balanced";
+        case AudioPerformanceProfile::Conservative: return "conservative";
+    }
+    return "balanced";
+}
+
+inline bool parseAudioPerformanceProfile(
+    const std::string& name,
+    AudioPerformanceProfile& profile) {
+    if (name == "aggressive") {
+        profile = AudioPerformanceProfile::Aggressive;
+        return true;
+    }
+    if (name == "balanced") {
+        profile = AudioPerformanceProfile::Balanced;
+        return true;
+    }
+    if (name == "conservative") {
+        profile = AudioPerformanceProfile::Conservative;
+        return true;
+    }
+    return false;
+}
+
+class AudioServicePeriodControl {
+public:
+    explicit AudioServicePeriodControl(std::uint64_t fallbackNanoseconds)
+        : periodNs_(configuredAudioServicePeriodNs(fallbackNanoseconds)),
+          environmentOverride_(hasAudioServicePeriodEnvironmentOverride()) {
+        const auto period = periodNs_.load(std::memory_order_relaxed);
+        if (period == audioPerformanceProfilePeriodNs(
+                          AudioPerformanceProfile::Aggressive))
+            profile_.store(static_cast<unsigned>(
+                               AudioPerformanceProfile::Aggressive),
+                           std::memory_order_relaxed);
+        else if (period == audioPerformanceProfilePeriodNs(
+                               AudioPerformanceProfile::Conservative))
+            profile_.store(static_cast<unsigned>(
+                               AudioPerformanceProfile::Conservative),
+                           std::memory_order_relaxed);
+        else
+            profile_.store(static_cast<unsigned>(
+                               AudioPerformanceProfile::Balanced),
+                           std::memory_order_relaxed);
+    }
+
+    std::uint64_t periodNs() const {
+        return periodNs_.load(std::memory_order_acquire);
+    }
+
+    AudioPerformanceProfile profile() const {
+        return static_cast<AudioPerformanceProfile>(
+            profile_.load(std::memory_order_acquire));
+    }
+
+    bool environmentOverride() const { return environmentOverride_; }
+
+    // A profile selected while an environment override is active is still
+    // remembered by the persistent control state, but the explicit launchd
+    // value remains authoritative until it is removed.
+    void setProfile(AudioPerformanceProfile profile) {
+        profile_.store(static_cast<unsigned>(profile),
+                       std::memory_order_release);
+        if (!environmentOverride_)
+            periodNs_.store(audioPerformanceProfilePeriodNs(profile),
+                            std::memory_order_release);
+    }
+
+private:
+    std::atomic<std::uint64_t> periodNs_;
+    std::atomic<unsigned> profile_{static_cast<unsigned>(
+        AudioPerformanceProfile::Balanced)};
+    bool environmentOverride_ = false;
+};
+
 inline bool requestAudioTimeConstraint() {
     constexpr std::uint64_t kPeriodNs = 2000000;
     constexpr std::uint64_t kComputationNs = 500000;
@@ -199,18 +305,28 @@ inline bool requestAudioTimeConstraint() {
 class MachPacer {
 public:
     explicit MachPacer(std::uint64_t nanoseconds) {
+        setIntervalNanoseconds(nanoseconds);
+    }
+
+    bool setIntervalNanoseconds(std::uint64_t nanoseconds) {
         mach_timebase_info_data_t timebase{};
-        if (mach_timebase_info(&timebase) != KERN_SUCCESS || timebase.numer == 0)
-            return;
+        if (mach_timebase_info(&timebase) != KERN_SUCCESS ||
+            timebase.numer == 0)
+            return false;
         const long double ticks = static_cast<long double>(nanoseconds) *
                                   static_cast<long double>(timebase.denom) /
                                   static_cast<long double>(timebase.numer);
         intervalTicks_ = static_cast<std::uint64_t>(ticks);
         if (intervalTicks_ == 0) intervalTicks_ = 1;
+        intervalNanoseconds_ = nanoseconds;
         nextWake_ = mach_absolute_time();
+        return true;
     }
 
     bool valid() const { return intervalTicks_ != 0; }
+    std::uint64_t intervalNanoseconds() const {
+        return intervalNanoseconds_;
+    }
 
     std::uint64_t wait() {
         if (!valid()) return 0;
@@ -225,6 +341,7 @@ public:
 
 private:
     std::uint64_t intervalTicks_ = 0;
+    std::uint64_t intervalNanoseconds_ = 0;
     std::uint64_t nextWake_ = 0;
 };
 

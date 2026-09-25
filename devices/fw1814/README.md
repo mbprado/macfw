@@ -17,6 +17,8 @@ The released FW1814 analog profile currently provides:
 - restoration of the previously selected rate after reconnect;
 - a transport-owned routing-control API, authoritative write-only register
   cache and native AppKit control panel;
+- persistent Aggressive, Balanced and Conservative transport-performance
+  profiles for the validated 44.1/48 kHz engines;
 - hardware-validated runtime assignment of software returns 1/2 and 3/4 to Mixer
   buses 1/2 and 3/4;
 - hardware-validated Mixer/AUX source selection for Analog Outputs 1/2 and 3/4;
@@ -135,6 +137,8 @@ The active transport owns `/tmp/macfw-fw1814-control.sock`; clients never open F
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" aux-output-volume set -6 -30
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" aux-output-volume set-all mute
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" aux-output-volume set-all unity
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" performance-profile get
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" performance-profile set balanced
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" capabilities get
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" engine get
 "/Library/Application Support/macfw/fw1814/bin/fw1814state" show
@@ -147,6 +151,15 @@ saved controls. The supervisor then publishes control readiness, so the first
 successful client read reflects restored authoritative state rather than the
 temporary startup baseline. Direct standalone engine runs remain available
 immediately because they have no supervisor-managed replay phase.
+
+At 44.1/48 kHz, the performance profiles select the Mach-paced audio service
+period: **Aggressive** is 250 µs, **Balanced** is 375 µs, and
+**Conservative** is 500 µs. Shorter periods favor latency; longer periods
+reduce transport wakeups and CPU use. Profile changes apply live and are saved
+through `fw1814state`. Experimental high-rate engines retain their individually
+validated fixed cadence. `MACFW_AUDIO_SERVICE_PERIOD_US` remains an advanced
+launchd override (250–2000 µs); while present it is authoritative and the GUI
+selector is disabled.
 
 Only the hardware-validated analog fields of `MIX_ANA_DIG_IN`, together with
 `MIX_STM_IN`, `SRC_ANA_OUT` and `SRC_HP_OUT`, are writable through the

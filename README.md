@@ -118,7 +118,8 @@ The current AppKit control panel includes:
 - **Headphones** — source, L/R volume and five mixer-output pair enables;
 - **AUX** — software-return/AUX output levels;
 - **Inputs** — live four-channel capture meters;
-- **Device** — transport/CoreAudio state and 44.1/48 kHz selection;
+- **Device** — transport/CoreAudio state, sample-rate selection and persistent
+  FW1814 Aggressive/Balanced/Conservative transport profiles;
 - **Info** — component/runtime identity and support diagnostics.
 
 The Device sample-rate selector uses the normal CoreAudio nominal-sample-rate property and HAL configuration-change lifecycle. It does not bypass CoreAudio or call FireWire rate-control probes directly.
@@ -127,6 +128,8 @@ The FW1814 control panel follows the same transport-owned architecture and
 covers its validated analog surface: two software returns, four analog input
 pairs, two analog output pairs, two digital-volume headphone outputs, AUX
 sends/master, persistent state, diagnostics and 44.1/48 kHz selection.
+At 44.1/48 kHz its Device tab also exposes validated 250/375/500 µs
+performance profiles, trading transport CPU wakeups against latency.
 
 ## Main mixer discovery
 

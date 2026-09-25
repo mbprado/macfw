@@ -163,6 +163,8 @@ The first routing-control API is available through the transport-owned socket. I
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" routing get
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" capabilities get
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" engine get
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" performance-profile get
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" performance-profile set balanced
 ```
 
 Do not run standalone FireWire probes while the supervised engine is active; the transport must remain the sole FireWire owner.
@@ -259,6 +261,15 @@ AUX bus. Its physical headphone encoders adjust saved volume and the panel
 updates the sliders while open. Both panels use the standard CoreAudio
 nominal-sample-rate property for Device-tab rate changes rather than calling
 FireWire rate-control probes directly.
+
+The FW1814 Device tab also provides three persistent low-rate transport
+profiles: **Aggressive** (250 µs, lowest latency), **Balanced** (375 µs), and
+**Conservative** (500 µs, fewer wakeups). They apply live at 44.1/48 kHz and
+survive rate changes and transport restarts through the normal control-state
+path. Experimental high-rate engines retain fixed validated cadence. Advanced
+installations may set `MACFW_AUDIO_SERVICE_PERIOD_US` between 250 and 2000;
+that explicit launchd value overrides and disables the GUI selector until
+removed.
 
 ## Control architecture and persistence
 

@@ -69,6 +69,8 @@ static AudioObjectID FindDevice(void){
 @property(nonatomic,strong) NSTextField *status;
 @property(nonatomic,strong) NSTextView *diagnostics;
 @property(nonatomic,strong) NSSegmentedControl *rate;
+@property(nonatomic,strong) NSSegmentedControl *performanceProfile;
+@property(nonatomic,strong) NSTextField *performanceNote;
 @property(nonatomic,strong) NSTextField *deviceStatus;
 @property(nonatomic,strong) NSTextField *auxNote;
 @property(nonatomic,assign) BOOL refreshing;
@@ -174,6 +176,11 @@ static AudioObjectID FindDevice(void){
     self.deviceStatus=Lbl(@"CoreAudio device: checking…",NSMakeRect(28,465,600,24));self.deviceStatus.font=[NSFont monospacedDigitSystemFontOfSize:13 weight:NSFontWeightMedium];[v addSubview:self.deviceStatus];
     self.rate=[[NSSegmentedControl alloc] initWithFrame:NSMakeRect(28,410,620,30)];self.rate.segmentCount=6;NSArray *labels=RATE_LABELS();for(NSInteger i=0;i<6;++i)[self.rate setLabel:labels[i] forSegment:i];self.rate.target=self;self.rate.action=@selector(rateChanged:);[v addSubview:self.rate];
     NSTextField *note=Lbl(@"All six analog sample rates are available. Digital I/O, MIDI, and headphone-specific paths remain deferred.",NSMakeRect(28,342,850,42));note.maximumNumberOfLines=2;note.textColor=NSColor.secondaryLabelColor;[v addSubview:note];
+    [v addSubview:Hdr(@"Transport performance",NSMakeRect(28,282,300,24))];
+    self.performanceProfile=[[NSSegmentedControl alloc] initWithFrame:NSMakeRect(28,238,480,30)];self.performanceProfile.segmentCount=3;
+    [self.performanceProfile setLabel:@"Aggressive" forSegment:0];[self.performanceProfile setLabel:@"Balanced" forSegment:1];[self.performanceProfile setLabel:@"Conservative" forSegment:2];
+    self.performanceProfile.target=self;self.performanceProfile.action=@selector(performanceProfileChanged:);[v addSubview:self.performanceProfile];
+    self.performanceNote=Lbl(@"Checking transport profile…",NSMakeRect(28,178,850,45));self.performanceNote.maximumNumberOfLines=2;self.performanceNote.textColor=NSColor.secondaryLabelColor;[v addSubview:self.performanceNote];
 }
 - (void)buildDiagnostics{
     NSView *v=[self tab:@"Diagnostics" id:@"diagnostics"];
@@ -235,6 +242,22 @@ static AudioObjectID FindDevice(void){
     self.rate.selectedSegment=-1;for(NSInteger i=0;i<6;++i)if(std::fabs(rate-kRates[i])<1){self.rate.selectedSegment=i;break;}
     [self setAuxAvailable:rate<176400.0];
 }
+- (void)refreshPerformanceProfile{
+    NSDictionary *r=[self ctl:@[@"performance-profile",@"get"]];
+    if([r[@"status"] integerValue]){self.performanceProfile.enabled=NO;self.performanceProfile.selectedSegment=-1;self.performanceNote.stringValue=@"Transport profile unavailable.";return;}
+    NSString *s=[r[@"output"] lowercaseString];
+    if([s containsString:@"apply to 44.1/48"]){self.performanceProfile.enabled=NO;self.performanceProfile.selectedSegment=-1;self.performanceNote.stringValue=@"Profiles apply at 44.1/48 kHz. High-rate engines retain their validated fixed cadence.";return;}
+    self.performanceProfile.selectedSegment=[s containsString:@"aggressive"]?0:([s containsString:@"conservative"]?2:1);
+    BOOL overridden=[s containsString:@"environment override: active"];
+    self.performanceProfile.enabled=!overridden;
+    self.performanceNote.stringValue=overridden
+        ? @"MACFW_AUDIO_SERVICE_PERIOD_US is active and overrides this control. Remove the launchd override to use GUI profiles."
+        : (self.performanceProfile.selectedSegment==0
+            ? @"250 µs • lowest latency and highest transport CPU use."
+            : self.performanceProfile.selectedSegment==1
+                ? @"375 µs • recommended balance of latency and transport CPU use."
+                : @"500 µs • lower transport CPU use with additional latency.");
+}
 - (void)refreshDiagnostics{
     NSMutableString *s=[NSMutableString stringWithFormat:@"macfw FW1814 Control %s build %s\n%@\n\n",macfw::fw1814::build::kVersion,macfw::fw1814::build::kGitSha,[NSDate date]];
     for(NSArray *a in @[@[@"engine",@"get"],@[@"routing",@"get"],@[@"capabilities",@"get"]]){NSDictionary *r=[self ctl:a];[s appendFormat:@"$ fw1814ctl %@\n%@\n",[a componentsJoinedByString:@" "],r[@"output"]];}self.diagnostics.string=s;
@@ -245,7 +268,7 @@ static AudioObjectID FindDevice(void){
     [self refreshRoutes];[self refreshSources];[self refreshLevels:self.swRows command:@"software-return-level" args:SW()];
     [self refreshLevels:self.inputRows command:@"input-monitor-level" args:ANA()];[self refreshLevels:self.outputRows command:@"output-volume" args:PAIR()];
     [self refreshLevels:self.hpRows command:@"headphone-volume" args:HP()];[self refreshLevels:self.auxRows command:@"aux-send-level" args:ALL()];
-    [self refreshLevels:self.auxMasterRows command:@"aux-output-volume" args:@[]];[self refreshPans];[self refreshDevice];[self refreshDiagnostics];
+    [self refreshLevels:self.auxMasterRows command:@"aux-output-volume" args:@[]];[self refreshPans];[self refreshDevice];[self refreshPerformanceProfile];[self refreshDiagnostics];
     self.status.stringValue=@"FW1814 controls ready • changes save automatically";self.status.textColor=NSColor.labelColor;self.refreshing=NO;
 }
 - (void)routeChanged:(NSButton*)s{
@@ -303,6 +326,13 @@ static AudioObjectID FindDevice(void){
     OSStatus st=AudioObjectIsPropertySettable(d,&a,&settable);if(st==noErr&&settable)st=AudioObjectSetPropertyData(d,&a,0,nullptr,sizeof(rate),&rate);
     if(st!=noErr||!settable){self.status.stringValue=[NSString stringWithFormat:@"CoreAudio rejected rate change (OSStatus %d)",(int)st];self.status.textColor=NSColor.systemRedColor;NSBeep();[self refreshDevice];return;}
     self.status.stringValue=@"Sample-rate change requested through CoreAudio…";s.enabled=NO;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{s.enabled=YES;[self refresh:nil];});
+}
+- (void)performanceProfileChanged:(NSSegmentedControl*)s{
+    if(s.selectedSegment<0||s.selectedSegment>2){[self refreshPerformanceProfile];return;}
+    NSArray *profiles=@[@"aggressive",@"balanced",@"conservative"];
+    NSDictionary *r=[self ctl:@[@"performance-profile",@"set",profiles[s.selectedSegment]]];
+    [self report:r ok:@"Transport performance profile applied and saved"];
+    [self refreshPerformanceProfile];
 }
 - (void)resetDefaults:(id)s{(void)s;NSAlert *a=[NSAlert new];a.messageText=@"Reset FW1814 controls?";a.informativeText=@"This replaces saved routing and levels with the macfw defaults.";[a addButtonWithTitle:@"Reset"];[a addButtonWithTitle:@"Cancel"];
     if([a runModal]!=NSAlertFirstButtonReturn)return;NSDictionary *r=Run(kState,@[@"reset"]);[self report:r ok:@"FW1814 defaults applied and saved"];if(![r[@"status"] integerValue])[self refresh:nil];}

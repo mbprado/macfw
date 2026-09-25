@@ -2,6 +2,7 @@
 
 #include "../special_mixer.h"
 #include "headphone_rotaries.h"
+#include "realtime_service.h"
 
 #include <array>
 #include <chrono>
@@ -37,11 +38,14 @@ public:
 
     ~Fw1814ControlServer() { reset(); }
 
-    bool start(FireWireDevice& device, unsigned sampleRate) {
+    bool start(FireWireDevice& device,
+               unsigned sampleRate,
+               AudioServicePeriodControl* performance = nullptr) {
         reset();
         device_ = &device;
         sampleRate_ = sampleRate;
         generation_ = device.generation();
+        performance_ = performance;
         restoringControlState_ = std::getenv("MACFW_ENGINE_READY_FD") != nullptr;
         routing_.loadStraightAnalogPlaybackPreset();
         softwareReturnLevelKnown_.fill(true);
@@ -111,6 +115,7 @@ public:
         device_ = nullptr;
         sampleRate_ = 0;
         generation_ = 0;
+        performance_ = nullptr;
         restoringControlState_ = false;
         routing_.loadStraightAnalogPlaybackPreset();
         softwareReturnLevelKnown_.fill(false);
@@ -1297,12 +1302,52 @@ private:
                   "aux-software-return-sends=continuous-persistent "
                   "aux-analog-input-sends=continuous-persistent "
                   "aux-output-level=continuous-persistent "
+                  "performance-profiles=44.1/48-persistent-live "
                   "levels=deferred midi=deferred\n");
             return;
         }
         if (command == "ENGINE GET") {
             reply("OK " + std::to_string(sampleRate_) + " " +
                   std::to_string(generation_) + "\n");
+            return;
+        }
+        if (command == "PERFORMANCE_PROFILE GET") {
+            if (!performance_) {
+                reply("OK unavailable 0 0\n");
+                return;
+            }
+            reply("OK " + std::string(audioPerformanceProfileName(
+                      performance_->profile())) + " " +
+                  std::to_string(performance_->periodNs() / 1000) + " " +
+                  (performance_->environmentOverride() ? "1\n" : "0\n"));
+            return;
+        }
+        if (command.rfind("PERFORMANCE_PROFILE SET ", 0) == 0) {
+            const std::string name = command.substr(
+                std::strlen("PERFORMANCE_PROFILE SET "));
+            AudioPerformanceProfile profile{};
+            if (!parseAudioPerformanceProfile(name, profile)) {
+                reply("ERR invalid-performance-profile\n");
+                return;
+            }
+            if (performance_) {
+                performance_->setProfile(profile);
+                std::printf("FW1814 performance profile: %s (%llu us)%s\n",
+                            audioPerformanceProfileName(profile),
+                            static_cast<unsigned long long>(
+                                performance_->periodNs() / 1000),
+                            performance_->environmentOverride()
+                                ? " [environment override active]" : "");
+                reply("OK " + std::string(audioPerformanceProfileName(
+                          performance_->profile())) + " " +
+                      std::to_string(performance_->periodNs() / 1000) + " " +
+                      (performance_->environmentOverride() ? "1\n" : "0\n"));
+            } else {
+                // High-rate engines currently retain their validated fixed
+                // cadence. Accept restored state so the preference persists
+                // until a low-rate engine is selected.
+                reply("OK unavailable 0 0\n");
+            }
             return;
         }
         if (command.rfind("MIXER ", 0) == 0) {
@@ -1363,6 +1408,7 @@ private:
     FireWireDevice* device_ = nullptr;
     unsigned sampleRate_ = 0;
     UInt32 generation_ = 0;
+    AudioServicePeriodControl* performance_ = nullptr;
     bool restoringControlState_ = false;
     macfw::fw1814::SpecialMixerRoutingModel routing_{};
     std::array<bool, 2> softwareReturnLevelKnown_{{false, false}};

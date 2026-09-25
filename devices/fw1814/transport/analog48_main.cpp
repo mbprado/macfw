@@ -224,7 +224,8 @@ bool run() {
                   << " (matched INTERIMs=" << fcp.matchedInterimCount()
                   << ", ignored unrelated=" << fcp.ignoredResponseCount() << ")\n";
 
-        if (!control.start(device, kRate))
+        AudioServicePeriodControl performance(kAudioServicePeriodNs);
+        if (!control.start(device, kRate, &performance))
             std::cerr << "warning: FW1814 control socket unavailable; audio will continue\n";
 
         signalEngineReady();
@@ -238,15 +239,12 @@ bool run() {
             4096 * macfw::fw1814::hal::kOutputChannels, 0.0f);
         std::vector<std::int32_t> mapped(
             4096 * macfw::fw1814::kPlaybackPcmPositions, 0);
-        const std::uint64_t audioServicePeriodNs =
-            configuredAudioServicePeriodNs(kAudioServicePeriodNs);
-
         std::cout << "FW1814 analog engine ONLINE\n"
                   << "    CoreAudio-facing outputs: Analog 1-4\n"
                   << "    CoreAudio-facing inputs:  Analog 1-8\n"
                   << "    digital/MIDI/headphone levels: deferred\n"
                   << "    audio service: dedicated Mach-paced thread ("
-                  << audioServicePeriodNs / 1000 << " us)\n"
+                  << performance.periodNs() / 1000 << " us)\n"
                   << "    Ctrl-C to stop\n";
 
         std::atomic<bool> audioFinished{false};
@@ -255,7 +253,7 @@ bool run() {
         std::thread audioThread([&] {
             requestInteractiveQos("FW1814 audio service thread");
             requestAudioTimeConstraint();
-            MachPacer pacer(audioServicePeriodNs);
+            MachPacer pacer(performance.periodNs());
             if (!pacer.valid()) {
                 std::cerr << "FW1814 Mach pacing setup failed\n";
                 audioFinished.store(true, std::memory_order_release);
@@ -270,6 +268,11 @@ bool run() {
             AudioLoopTimingStats loopTiming;
 
             while (!gStopRequested) {
+                if (pacer.intervalNanoseconds() != performance.periodNs() &&
+                    !pacer.setIntervalNanoseconds(performance.periodNs())) {
+                    std::cerr << "FW1814 cannot apply audio service period\n";
+                    break;
+                }
                 const std::uint64_t wakeLateTicks = pacer.wait();
                 const std::uint64_t loopStartTicks =
                     verbose ? mach_absolute_time() : 0;
