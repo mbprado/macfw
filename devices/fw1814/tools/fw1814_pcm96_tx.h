@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <mach/mach_time.h>
 #include <cstdlib>
 #include <cstring>
 #include <sys/mman.h>
@@ -28,6 +29,7 @@ public:
         std::size_t framesSilenced = 0;
         std::size_t nonzeroFrames = 0;
         std::int32_t peakSample = 0;
+        std::uint64_t firstLoudHostTime = 0;
     };
 
     BlockingPcmTransmitRing96k() = default;
@@ -172,6 +174,14 @@ public:
             result.framesRequested += rr.framesRequested;
             result.framesFromBuffer += rr.framesFromBuffer;
             result.framesSilenced += rr.framesSilenced;
+                if (result.firstLoudHostTime == 0) {
+                    for (const auto sample : frames) {
+                        if (sample >= 6291456 || sample <= -6291456) {
+                            result.firstLoudHostTime = mach_absolute_time();
+                            break;
+                        }
+                    }
+                }
 
             for (std::size_t event = 0; event < kEventsPerDataPacket; ++event) {
                 bool nonzero = false;
