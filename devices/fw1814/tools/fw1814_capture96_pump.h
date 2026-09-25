@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <mach/mach_time.h>
 
 namespace macfw::fw1814::experimental {
 
@@ -19,6 +20,7 @@ class CapturePump96k {
 public:
     struct Stats {
         std::uint64_t dbcDiscontinuities = 0;
+        std::uint64_t firstLoudHostTime = 0;
         std::uint64_t timestampRegressions = 0;
         std::uint32_t firstRegressionPreviousTimestamp = 0;
         std::uint32_t firstRegressionCurrentTimestamp = 0;
@@ -238,6 +240,8 @@ private:
                 }
                 const float value = static_cast<float>(raw / 8388608.0);
                 decoded[base + physical] = value;
+                if (stats_.firstLoudHostTime == 0 && std::fabs(value) >= 0.75f)
+                    stats_.firstLoudHostTime = mach_absolute_time();
                 peaks[physical] = std::max(peaks[physical], std::fabs(value));
             }
             p += kCaptureStreamPositions * 4;
