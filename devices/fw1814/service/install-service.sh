@@ -14,6 +14,31 @@ LAUNCHD_PLIST="/Library/LaunchDaemons/com.mbprado.macfw.fw1814.transport.plist"
 LABEL="com.mbprado.macfw.fw1814.transport"
 LOG="/Library/Logs/macfw-fw1814-transport.log"
 
+# Preserve persistent transport tuning across development reinstalls. Keep this
+# list explicit so one-shot diagnostics such as playback-only or preload-tone
+# modes are not accidentally made permanent.
+PRESERVED_ENV_KEYS=(
+    MACFW_VERBOSE
+    MACFW_44_ROLLING_TX
+    MACFW_44_ROLLING_TX_CYCLES
+    MACFW_44_ROLLING_PCM_RESERVE_FRAMES
+    MACFW_48_ROLLING_TX
+    MACFW_48_ROLLING_TX_CYCLES
+    MACFW_AUDIO_SERVICE_PERIOD_US
+    MACFW_FW1814_FORCE_RECOVERY
+)
+ENV_BACKUP="$(mktemp /tmp/macfw-fw1814-env.XXXXXX)"
+trap 'rm -f "$ENV_BACKUP"' EXIT
+if [[ -f "$LAUNCHD_PLIST" ]]; then
+    for key in "${PRESERVED_ENV_KEYS[@]}"; do
+        if value="$(/usr/libexec/PlistBuddy \
+                -c "Print :EnvironmentVariables:$key" \
+                "$LAUNCHD_PLIST" 2>/dev/null)"; then
+            printf '%s\t%s\n' "$key" "$value" >> "$ENV_BACKUP"
+        fi
+    done
+fi
+
 SUPERVISOR="$FW1814_DIR/transport/fw1814supervisor"
 ENGINE48="$FW1814_DIR/transport/fw1814analog48"
 ENGINE44="$FW1814_DIR/transport/fw1814analog44"
@@ -96,6 +121,37 @@ chmod 0666 "$STATE_FILE"
 
 install -o root -g wheel -m 0644 \
     "$SCRIPT_DIR/com.mbprado.macfw.fw1814.transport.plist" "$LAUNCHD_PLIST"
+
+preserved_env_count=0
+while IFS=
+chown root:wheel "$LOG"
+chmod 0644 "$LOG"
+
+launchctl bootstrap system "$LAUNCHD_PLIST"
+launchctl enable system/$LABEL
+launchctl kickstart -k system/$LABEL
+
+echo "installed macfw FW1814 transport runtime: $INSTALL_ROOT"
+echo "runtime build: $runtime_version build $runtime_build"
+echo "loaded launchd service: $LABEL"
+echo "preserved launchd transport tuning variables: $preserved_env_count"
+echo "automatic reconnect + guarded bootloader recovery: enabled"
+echo "automatic 44.1/48/88.2/96/176.4/192 kHz transport selection: enabled"
+echo "rate-aware transport recovery: bus reset at lower rates; guarded firmware reboot at 176.4/192 kHz"
+echo "persistent validated routing state: $STATE_FILE"
+echo "log: $LOG"
+\t' read -r key value; do
+    [[ -n "$key" ]] || continue
+    /usr/libexec/PlistBuddy \
+        -c "Delete :EnvironmentVariables:$key" \
+        "$LAUNCHD_PLIST" >/dev/null 2>&1 || true
+    /usr/libexec/PlistBuddy \
+        -c "Add :EnvironmentVariables:$key string $value" \
+        "$LAUNCHD_PLIST"
+    preserved_env_count=$((preserved_env_count + 1))
+done < "$ENV_BACKUP"
+chown root:wheel "$LAUNCHD_PLIST"
+chmod 0644 "$LAUNCHD_PLIST"
 
 : > "$LOG"
 chown root:wheel "$LOG"
