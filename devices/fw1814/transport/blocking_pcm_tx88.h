@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <mach/mach_time.h>
 #include <cstring>
 #include <sys/mman.h>
 #include <utility>
@@ -35,6 +36,7 @@ public:
         std::size_t framesSilenced = 0;
         std::size_t nonzeroFrames = 0;
         std::int32_t peakSample = 0;
+        std::uint64_t firstLoudHostTime = 0;
     };
 
     BlockingPcmTransmitRing88200() = default;
@@ -181,6 +183,14 @@ public:
                 result.framesRequested += rr.framesRequested;
                 result.framesFromBuffer += rr.framesFromBuffer;
                 result.framesSilenced += rr.framesSilenced;
+                if (result.firstLoudHostTime == 0) {
+                    for (const auto sample : frames) {
+                        if (sample >= 6291456 || sample <= -6291456) {
+                            result.firstLoudHostTime = mach_absolute_time();
+                            break;
+                        }
+                    }
+                }
 
                 for (std::size_t event = 0; event < kEventsPerDataPacket; ++event) {
                     bool nonzero = false;
@@ -335,6 +345,7 @@ public:
         std::uint64_t framesSilenced = 0;
         std::uint64_t nonzeroFrames = 0;
         std::int32_t peakSample = 0;
+        std::uint64_t firstLoudHostTime = 0;
         std::uint64_t lateCyclePolls = 0;
     };
 
@@ -399,6 +410,8 @@ public:
             stats_.framesSilenced += rr.framesSilenced;
             stats_.nonzeroFrames += rr.nonzeroFrames;
             stats_.peakSample = std::max(stats_.peakSample, rr.peakSample);
+            if (stats_.firstLoudHostTime == 0 && rr.firstLoudHostTime != 0)
+                stats_.firstLoudHostTime = rr.firstLoudHostTime;
             ++lastHalfNumber_;
         }
     }
