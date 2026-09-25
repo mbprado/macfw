@@ -271,6 +271,13 @@ installations may set `MACFW_AUDIO_SERVICE_PERIOD_US` between 250 and 2000;
 that explicit launchd value overrides and disables the GUI selector until
 removed.
 
+After selecting a different FW1814 sample rate in the Device tab, allow the
+new engine to report ONLINE and the CoreAudio stream to settle before making a
+latency measurement. The GUI uses the standard asynchronous CoreAudio rate
+property; an immediate probe can still sample the transition even though the
+new transport starts correctly. Repeating the probe after a few seconds should
+be preferred over changing transport tuning from one anomalous result.
+
 ## Control architecture and persistence
 
 The GUI and CLI do not open FireWire directly. Each interface uses its own

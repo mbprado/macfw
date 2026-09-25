@@ -19,7 +19,22 @@ three choices without editing launchd configuration or requiring an
 administrator prompt. `MACFW_AUDIO_SERVICE_PERIOD_US` remains an advanced
 authoritative override. The loopback diagnostic now waits for matching active
 transport shared memory and advancing capture before injecting its impulse
-after a rate change, avoiding the observed first-run readiness race.
+after a rate change, reducing the observed first-run readiness race.
+
+The completed single-speed investigation is now consolidated in
+[`analysis/single-speed-low-latency-handover.md`](analysis/single-speed-low-latency-handover.md).
+It records the separation between stable NuDCL allocation and the live rolling
+horizon, the independent startup leads, capture/playback admission, real-time
+service measurements, failed approaches and the staged plan for applying the
+same design principles to 88.2/96 kHz dual-speed modes.
+
+Follow-up transition testing also showed that a loopback probe started
+immediately after a GUI sample-rate selection can observe a temporary unsettled
+state. A subsequent clean 44.1 -> 48 kHz cycle returned repeated 12-14 ms
+timestamp round trips with advancing rolling counters, zero rolling misses and
+zero DBC gaps. Matching installed/source hashes and fresh counter resets ruled
+out an old transport binary. The single-rate engines therefore remain the
+stable baseline; GUI transition-state feedback is deferred polish.
 
 ## 2026-09-24 — Experimental rolling 48 kHz transmit window
 

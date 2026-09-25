@@ -3,7 +3,9 @@
 The FW1814 is the second macfw device target.
 
 See [`HISTORY.md`](HISTORY.md) for the main hardware and integration
-milestones.
+milestones. The architecture, measurements, failed approaches and extension
+plan from the completed 44.1/48 kHz low-latency work are consolidated in
+[`analysis/single-speed-low-latency-handover.md`](analysis/single-speed-low-latency-handover.md).
 
 ## Current scope
 
@@ -160,6 +162,14 @@ through `fw1814state`. Experimental high-rate engines retain their individually
 validated fixed cadence. `MACFW_AUDIO_SERVICE_PERIOD_US` remains an advanced
 launchd override (250–2000 µs); while present it is authoritative and the GUI
 selector is disabled.
+
+The 44.1/48 kHz engines are the stable single-speed regression baseline. Their
+640-packet allocation is intentionally separate from the 96-cycle live rolling
+horizon: shrinking the allocation caused cracked playback, while shortening
+only the scheduled horizon retained stability and produced low measured
+latency. Dual-speed development should preserve this distinction and retain
+its already-validated packet formation. See the low-latency handover linked at
+the top of this document before changing high-rate transport geometry.
 
 Only the hardware-validated analog fields of `MIX_ANA_DIG_IN`, together with
 `MIX_STM_IN`, `SRC_ANA_OUT` and `SRC_HP_OUT`, are writable through the
