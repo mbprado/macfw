@@ -236,23 +236,44 @@ bool run() {
             CFAbsoluteTime lastGenerationCheck = CFAbsoluteTimeGetCurrent();
             CFAbsoluteTime lastStatus = lastGenerationCheck;
             std::uint64_t lastCaptureFrames = 0;
+            AudioLoopTimingStats loopTiming;
 
             while (!gStopRequested) {
-                pacer.wait();
+                const std::uint64_t wakeLateTicks = pacer.wait();
+                const std::uint64_t loopStartTicks =
+                    verbose ? mach_absolute_time() : 0;
 
                 if (rateKicked.load(std::memory_order_acquire))
                     capturePump.service(rx, *captureShared.ring());
+                const std::uint64_t firstCaptureDoneTicks =
+                    verbose ? mach_absolute_time() : 0;
                 if (releasePlayback.load(std::memory_order_acquire))
                     drainPlayback(*playbackShared.ring(), pcm, audio, mapped,
                                   &playbackPumpStats);
+                const std::uint64_t playbackDoneTicks =
+                    verbose ? mach_absolute_time() : 0;
 
                 UInt32 nowCycleTime = 0;
                 if ((*device.nativeHandle())->GetCycleTime(
                         device.nativeHandle(), &nowCycleTime) == kIOReturnSuccess)
                     streamer.service(cycleCount(nowCycleTime));
+                const std::uint64_t txDoneTicks =
+                    verbose ? mach_absolute_time() : 0;
 
                 if (rateKicked.load(std::memory_order_acquire))
                     capturePump.service(rx, *captureShared.ring());
+                const std::uint64_t secondCaptureDoneTicks =
+                    verbose ? mach_absolute_time() : 0;
+                if (verbose) {
+                    loopTiming.observe(
+                        wakeLateTicks,
+                        (firstCaptureDoneTicks - loopStartTicks) +
+                            (secondCaptureDoneTicks - txDoneTicks),
+                        playbackDoneTicks - firstCaptureDoneTicks,
+                        txDoneTicks - playbackDoneTicks,
+                        secondCaptureDoneTicks - loopStartTicks);
+                }
+
 
                 if (rateKicked.load(std::memory_order_acquire) &&
                     captureShared.ring()->active.load(std::memory_order_acquire) == 0) {
@@ -326,7 +347,10 @@ bool run() {
                               << " ts-regress=" << rxStats.timestampRegressions
                               << " metadata-swaps=" << rxStats.metadataByteSwaps
                               << " reorder=" << rxStats.reorderedPackets
-                              << " stale=" << rxStats.stalePackets << '\n';
+                              << " stale=" << rxStats.stalePackets;
+                    loopTiming.append(std::cout);
+                    std::cout << '\n';
+                    loopTiming.reset();
                     lastCaptureFrames = captureFrames;
                     lastStatus = now;
                 }
