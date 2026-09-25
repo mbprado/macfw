@@ -238,12 +238,15 @@ bool run() {
             4096 * macfw::fw1814::hal::kOutputChannels, 0.0f);
         std::vector<std::int32_t> mapped(
             4096 * macfw::fw1814::kPlaybackPcmPositions, 0);
+        const std::uint64_t audioServicePeriodNs =
+            configuredAudioServicePeriodNs(kAudioServicePeriodNs);
 
         std::cout << "FW1814 analog engine ONLINE\n"
                   << "    CoreAudio-facing outputs: Analog 1-4\n"
                   << "    CoreAudio-facing inputs:  Analog 1-8\n"
                   << "    digital/MIDI/headphone levels: deferred\n"
-                  << "    audio service: dedicated Mach-paced thread (250 us)\n"
+                  << "    audio service: dedicated Mach-paced thread ("
+                  << audioServicePeriodNs / 1000 << " us)\n"
                   << "    Ctrl-C to stop\n";
 
         std::atomic<bool> audioFinished{false};
@@ -252,7 +255,7 @@ bool run() {
         std::thread audioThread([&] {
             requestInteractiveQos("FW1814 audio service thread");
             requestAudioTimeConstraint();
-            MachPacer pacer(kAudioServicePeriodNs);
+            MachPacer pacer(audioServicePeriodNs);
             if (!pacer.valid()) {
                 std::cerr << "FW1814 Mach pacing setup failed\n";
                 audioFinished.store(true, std::memory_order_release);
