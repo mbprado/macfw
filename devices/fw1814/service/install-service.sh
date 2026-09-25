@@ -123,24 +123,7 @@ install -o root -g wheel -m 0644 \
     "$SCRIPT_DIR/com.mbprado.macfw.fw1814.transport.plist" "$LAUNCHD_PLIST"
 
 preserved_env_count=0
-while IFS=
-chown root:wheel "$LOG"
-chmod 0644 "$LOG"
-
-launchctl bootstrap system "$LAUNCHD_PLIST"
-launchctl enable system/$LABEL
-launchctl kickstart -k system/$LABEL
-
-echo "installed macfw FW1814 transport runtime: $INSTALL_ROOT"
-echo "runtime build: $runtime_version build $runtime_build"
-echo "loaded launchd service: $LABEL"
-echo "preserved launchd transport tuning variables: $preserved_env_count"
-echo "automatic reconnect + guarded bootloader recovery: enabled"
-echo "automatic 44.1/48/88.2/96/176.4/192 kHz transport selection: enabled"
-echo "rate-aware transport recovery: bus reset at lower rates; guarded firmware reboot at 176.4/192 kHz"
-echo "persistent validated routing state: $STATE_FILE"
-echo "log: $LOG"
-\t' read -r key value; do
+while IFS=$'\t' read -r key value; do
     [[ -n "$key" ]] || continue
     /usr/libexec/PlistBuddy \
         -c "Delete :EnvironmentVariables:$key" \
@@ -164,6 +147,7 @@ launchctl kickstart -k system/$LABEL
 echo "installed macfw FW1814 transport runtime: $INSTALL_ROOT"
 echo "runtime build: $runtime_version build $runtime_build"
 echo "loaded launchd service: $LABEL"
+echo "preserved launchd transport tuning variables: $preserved_env_count"
 echo "automatic reconnect + guarded bootloader recovery: enabled"
 echo "automatic 44.1/48/88.2/96/176.4/192 kHz transport selection: enabled"
 echo "rate-aware transport recovery: bus reset at lower rates; guarded firmware reboot at 176.4/192 kHz"
