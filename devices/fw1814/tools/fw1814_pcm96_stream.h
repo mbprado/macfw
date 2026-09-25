@@ -18,6 +18,7 @@ public:
         std::uint64_t framesSilenced = 0;
         std::uint64_t nonzeroFrames = 0;
         std::int32_t peakSample = 0;
+        std::uint64_t firstLoudHostTime = 0;
         std::uint64_t lateCyclePolls = 0;
     };
 
@@ -91,6 +92,8 @@ private:
         stats_.framesSilenced += refill.framesSilenced;
         stats_.nonzeroFrames += refill.nonzeroFrames;
         stats_.peakSample = std::max(stats_.peakSample, refill.peakSample);
+        if (stats_.firstLoudHostTime == 0 && refill.firstLoudHostTime != 0)
+            stats_.firstLoudHostTime = refill.firstLoudHostTime;
     }
 
     BlockingPcmTransmitRing96k* tx_ = nullptr;
