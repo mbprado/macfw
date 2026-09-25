@@ -10,6 +10,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <mutex>
 #include <thread>
@@ -147,6 +148,20 @@ inline std::uint32_t machTicksForNanoseconds(std::uint64_t nanoseconds) {
                               static_cast<long double>(timebase.denom) /
                               static_cast<long double>(timebase.numer);
     return static_cast<std::uint32_t>(ticks);
+}
+
+inline std::uint64_t configuredAudioServicePeriodNs(
+    std::uint64_t fallbackNanoseconds) {
+    const char* value = std::getenv("MACFW_AUDIO_SERVICE_PERIOD_US");
+    if (!value || value[0] == '\0')
+        return fallbackNanoseconds;
+
+    char* end = nullptr;
+    const auto microseconds = std::strtoull(value, &end, 10);
+    // Keep the experiment well inside the 6 ms rolling deadline guard.
+    if (!end || *end != '\0' || microseconds < 250 || microseconds > 2000)
+        return fallbackNanoseconds;
+    return microseconds * 1000;
 }
 
 inline bool requestAudioTimeConstraint() {
