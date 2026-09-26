@@ -1484,7 +1484,7 @@ int performanceProfileCommand(const std::string& action,
     }
 
     if (profile == "unavailable") {
-        std::cout << "FW1814 performance profiles apply to 44.1/48 kHz; "
+        std::cout << "FW1814 performance profiles apply to 44.1/48/88.2/96 kHz; "
                      "this engine retains its validated fixed cadence.\n";
     } else {
         std::cout << "FW1814 performance profile: " << profile << '\n'
