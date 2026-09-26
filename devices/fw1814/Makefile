@@ -48,30 +48,8 @@ install: install-check
 	bash service/install-service.sh
 	$(MAKE) -C control-panel install
 
-# All artifacts and hardware are checked before the HAL or service is replaced.
-install-experimental96: install-check
-	@if [ "$$(id -u)" -ne 0 ]; then \
-		echo "error: experimental FW1814 install must be run as root" >&2; exit 1; \
-	fi
-	@if [ ! -x transport/fw1814analog96 ]; then \
-		echo "error: build the 96 kHz engine with 'make fw1814-experimental96' first" >&2; exit 1; \
-	fi
-	MACFW_INSTALL_EXPERIMENTAL96=1 bash service/install-service.sh --check-only
-	$(MAKE) -C hal install
-	MACFW_INSTALL_EXPERIMENTAL96=1 bash service/install-service.sh
-	$(MAKE) -C control-panel install
-
-install-experimental88: install-check
-	@if [ "$$(id -u)" -ne 0 ]; then \
-		echo "error: experimental FW1814 install must be run as root" >&2; exit 1; \
-	fi
-	@if [ ! -x transport/fw1814analog88 ]; then \
-		echo "error: build the 88.2 kHz engine with 'make fw1814-experimental88' first" >&2; exit 1; \
-	fi
-	MACFW_INSTALL_EXPERIMENTAL88=1 bash service/install-service.sh --check-only
-	$(MAKE) -C hal install
-	MACFW_INSTALL_EXPERIMENTAL88=1 bash service/install-service.sh
-	$(MAKE) -C control-panel install
+# Compatibility aliases: 88.2/96 kHz are included in the normal install.
+install-experimental96 install-experimental88: install
 
 install-experimental176: install-check
 	@if [ "$$(id -u)" -ne 0 ]; then \
