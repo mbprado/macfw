@@ -66,7 +66,7 @@ constexpr std::chrono::milliseconds kCaptureQualificationTimeout(8000);
 
 bool rollingTxRequested() {
     const char* value = std::getenv("MACFW_176_ROLLING_TX");
-    return value && value[0] != '\0' && value[0] != '0';
+    return !value || value[0] != '0';
 }
 
 volatile std::sig_atomic_t gStopRequested = 0;
