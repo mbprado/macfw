@@ -322,6 +322,41 @@ A dual-speed rolling mode is ready for integration only when:
 - an engine failure stops safely and the supervisor recovers without a reboot
   loop.
 
+## Dual-speed rolling progress (26 September 2026)
+
+The experimental branch now has separately opt-in rolling TX at 88.2 and 96 kHz.
+Both retain the fixed 250 us audio service cadence, both capture service calls,
+the 4096-cycle startup lead, and the proven physical NuDCL allocations (1280
+packets at 88.2 kHz; 640 at 96 kHz). The initial live lead is 96 cycles with
+a 48-cycle deadline guard. A missed deadline stops the engine before unsafe
+slot reuse. At 88.2 kHz the native variable blocking cadence, DBC and SYT
+state advance continuously through arbitrary refill chunks and ring wrap; at
+96 kHz the established 16/16/16/NODATA packet phase is preserved.
+
+Electrical loopback observations on the test Mac:
+
+| Rate | Fixed-ring baseline | Rolling, first hardware runs | Status |
+| --- | ---: | ---: | --- |
+| 88.2 kHz | about 167-175 ms | 21.4-21.5 ms | Playback and recording usable; occasional small artifacts under high host demand |
+| 96 kHz | about 78-89 ms | 10.5-12 ms | Loopback clean in initial runs; extended capture/listening test pending |
+
+The 88.2 kHz rolling logs showed advancing `tx-roll-packets`, zero rolling
+deadline misses, and no growth in `dbc-gap`, `reorder` or `stale` across the
+supplied loopback window. In the 96 kHz initial run, rolling misses stayed
+zero, but capture `dbc-gap` and `reorder` counters rose in log snapshots;
+those counters require an active recording comparison before attributing them
+to rolling TX. The 88.2 kHz first-loud marker reached TX about 0.5 ms after
+playback SHM read, and capture about 18.6 ms after TX write. Markers locate
+software events; TX write is not proof of the exact FireWire wire time.
+
+These are experimental opt-ins, not released performance profiles:
+`MACFW_88_ROLLING_TX=1` and `MACFW_96_ROLLING_TX=1`. Each has an optional
+`MACFW_<rate>_ROLLING_TX_CYCLES` lead override. Do not enable dual-speed
+profiles or change capture prefill on the strength of short loopback runs.
+Next verify sustained playback and all-channel capture at 96 kHz, collect
+first/last active-recording counter windows at both rates, stress CPU/I/O,
+and then test repeated rate changes and reconnects.
+
 ## Reproduction commands
 
 Installed profile state:
