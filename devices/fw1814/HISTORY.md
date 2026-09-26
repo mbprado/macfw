@@ -20,6 +20,9 @@ profiles now apply live at all four rates; six 96 kHz profile probes
 measured about 13.3-15.7 ms without a clear profile latency ordering.
 Occasional small artifacts under heavy host load remain under observation.
 Quad-speed 176.4/192 kHz modes were not included in this validation.
+A subsequent clean checkout and full uninstall/rebuild/reinstall showed
+no regressions across the four validated rates; recording artifacts were
+reported as drastically reduced and nearly absent in that run.
 
 ## 2026-09-25 — Persistent transport performance profiles
 
