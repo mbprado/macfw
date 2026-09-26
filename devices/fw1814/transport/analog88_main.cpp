@@ -45,11 +45,11 @@ constexpr std::size_t kCapturePrefillFrames = 512;
 constexpr UInt32 kCycleLead = 4096;
 constexpr UInt32 kCyclesPerSecond = 8000;
 constexpr std::uint64_t kAudioServicePeriodNs = 250000;
-// Start with silent PCM through the duplex rate kick. This initial reserve
-// follows the 96-kHz prototype; hardware testing must validate its latency.
+// Keep startup silence through the duplex rate kick. Only the READY top-up
+// is shortened for rolling TX; the proven startup preload is unchanged.
 constexpr std::size_t kSilentStartupFrames = 8 * kRate / 5;
 constexpr std::size_t kMinReadySilenceFrames = 4096;
-constexpr std::size_t kRollingTestReadySilenceFrames = 512;
+constexpr std::size_t kRollingReadySilenceFrames = 512;
 
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
@@ -61,7 +61,7 @@ bool rollingTxRequested() {
 
 bool shortReadyReserveRequested() {
     const char* value = std::getenv("MACFW_88_SHORT_READY_RESERVE");
-    return value && std::strcmp(value, "1") == 0;
+    return !value || std::strcmp(value, "0") != 0;
 }
 
 std::size_t rollingTxLeadPackets() {
@@ -455,7 +455,7 @@ bool run() {
             const auto queued = pcm.availableFrames();
             const std::size_t readyReserve =
                 rollingTx && shortReadyReserveRequested()
-                    ? kRollingTestReadySilenceFrames : kMinReadySilenceFrames;
+                    ? kRollingReadySilenceFrames : kMinReadySilenceFrames;
             std::cout << "FW1814 88.2 kHz PCM before READY top-up: "
                       << queued << " frames; target=" << readyReserve << " frames\n";
             if (queued < readyReserve &&
