@@ -43,7 +43,8 @@ constexpr UInt32 kReported48DeviceLatencyFrames = 1984;
 // 88.2 kHz. Preserve the existing equal split across CoreAudio scopes.
 constexpr UInt32 kReported96DeviceLatencyFrames = 672;
 constexpr UInt32 kReported88DeviceLatencyFrames = 1147;
-constexpr UInt32 kReported176DeviceLatencyFrames = 14920;
+// Rolling 176.4 kHz electrical loopback measured about 10.1 ms.
+constexpr UInt32 kReported176DeviceLatencyFrames = 893;
 constexpr UInt32 kReported192DeviceLatencyFrames = 17018;
 
 AudioServerPlugInHostRef gHost = nullptr;
