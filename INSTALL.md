@@ -262,14 +262,13 @@ updates the sliders while open. Both panels use the standard CoreAudio
 nominal-sample-rate property for Device-tab rate changes rather than calling
 FireWire rate-control probes directly.
 
-The FW1814 Device tab also provides three persistent low-rate transport
-profiles: **Aggressive** (250 µs, lowest latency), **Balanced** (375 µs), and
-**Conservative** (500 µs, fewer wakeups). They apply live at 44.1/48 kHz and
-survive rate changes and transport restarts through the normal control-state
-path. Experimental high-rate engines retain fixed validated cadence. Advanced
-installations may set `MACFW_AUDIO_SERVICE_PERIOD_US` between 250 and 2000;
-that explicit launchd value overrides and disables the GUI selector until
-removed.
+The FW1814 Device tab provides three persistent transport profiles:
+**Aggressive** (250 µs), **Balanced** (375 µs), and **Conservative** (500 µs).
+They apply live at 44.1, 48, 88.2 and 96 kHz and survive rate changes and
+transport restarts through the normal control-state path. Quad-speed
+176.4/192 kHz engines retain their fixed cadence. Advanced installations may
+set `MACFW_AUDIO_SERVICE_PERIOD_US` between 250 and 2000; that explicit
+launchd value overrides and disables the GUI selector until removed.
 
 After selecting a different FW1814 sample rate in the Device tab, allow the
 new engine to report ONLINE and the CoreAudio stream to settle before making a
