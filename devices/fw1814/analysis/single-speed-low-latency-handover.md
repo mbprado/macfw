@@ -355,7 +355,7 @@ These are experimental opt-ins, not released performance profiles:
 profiles or change capture prefill on the strength of short loopback runs.
 Both rates now have initial positive playback and recording reports. Collect
 first/last active-recording counter windows at both rates, investigate the
-small stress-related artifacts, and test repeated rate changes and reconnects.
+small stress-related artifacts, and test single/dual-family rate changes and reconnects. Repeated 88.2 <-> 96 kHz GUI switching was reported clean with no apparent issue; the user found it more reliable than the previous fixed-refill architecture. This is an observational result, not yet a quantified long-duration transition stress test.
 
 ## Reproduction commands
 
