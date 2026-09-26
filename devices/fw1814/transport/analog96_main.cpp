@@ -55,6 +55,21 @@ constexpr std::size_t kMinReadySilenceFrames = 4096;
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
 
+bool rollingTxRequested() {
+    const char* value = std::getenv("MACFW_96_ROLLING_TX");
+    return value && std::strcmp(value, "1") == 0;
+}
+
+std::size_t rollingTxLeadPackets() {
+    const char* value = std::getenv("MACFW_96_ROLLING_TX_CYCLES");
+    if (!value || !*value) return 96;
+    char* end = nullptr;
+    const auto parsed = std::strtoul(value, &end, 10);
+    if (!end || *end != '\0' || parsed < 16 || parsed >= kTxPackets)
+        return 0;
+    return static_cast<std::size_t>(parsed);
+}
+
 UInt32 cycleCount(UInt32 cycleTime) {
     return (cycleTime >> 12) & 0x1fffu;
 }
@@ -137,6 +152,13 @@ bool run() {
 
         macfw::fw1814::experimental::BlockingPcmStream96k streamer(
             tx, pcm, initialCycle, firstCycle, kTxHalfPackets);
+        const bool rollingTx = rollingTxRequested();
+        const std::size_t rollingLead = rollingTx ? rollingTxLeadPackets() : 0;
+        const std::size_t rollingGuard = rollingLead / 2;
+        if (rollingTx && !streamer.enableRolling(rollingLead, rollingGuard)) {
+            std::cerr << "FW1814 invalid 96 kHz rolling TX configuration\n";
+            goto cleanup;
+        }
         if (!streamer.valid() || !streamer.prime()) {
             std::cerr << "FW1814 playback stream prime failed\n";
             goto cleanup;
@@ -144,6 +166,10 @@ bool run() {
         std::cout << "FW1814 playback TX ring: " << kTxPackets
                   << " packets / " << kTxHalfPackets
                   << "-packet halves (80 ms / 40 ms)\n";
+        if (rollingTx)
+            std::cout << "FW1814 experimental 96 kHz rolling TX: "
+                      << rollingLead << "-cycle live lead, "
+                      << rollingGuard << "-cycle deadline guard\n";
         std::cout << "FW1814 capture RX ring: " << kCaptureSlots
                   << " packets / 32-packet publication chunks\n";
 
@@ -259,6 +285,16 @@ bool run() {
                 if ((*device.nativeHandle())->GetCycleTime(
                         device.nativeHandle(), &nowCycleTime) == kIOReturnSuccess)
                     streamer.service(cycleCount(nowCycleTime));
+                if (!streamer.healthy()) {
+                    const auto& txStats = streamer.stats();
+                    std::cerr << "FW1814 96 kHz rolling TX deadline missed; "
+                                 "stopping before unsafe slot reuse (misses="
+                              << txStats.rollingDeadlineMisses
+                              << ", max-cycle-gap=" << txStats.maxCycleDelta
+                              << ")\n";
+                    audioFinished.store(true, std::memory_order_release);
+                    return;
+                }
                 const std::uint64_t txDoneTicks =
                     verbose ? mach_absolute_time() : 0;
 
@@ -318,6 +354,9 @@ bool run() {
                               << " marker-cap=" << rxStats.firstLoudHostTime
                               << " tx-peak=" << txStats.peakSample
                               << " tx-late=" << txStats.lateCyclePolls
+                              << " tx-max-gap=" << txStats.maxCycleDelta
+                              << " tx-roll-packets=" << txStats.rollingPacketsRefilled
+                              << " tx-roll-miss=" << txStats.rollingDeadlineMisses
                               << " pcm-underrun=" << pcm.underrunFrames()
                               << " pb-read=" << playbackPumpStats.framesRead
                               << " hal-calls=" << pb->doIOCalls.load(std::memory_order_relaxed)
