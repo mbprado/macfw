@@ -45,9 +45,13 @@ lead and a 48-cycle deadline guard. Fixed half-ring refill remains available
 for diagnosis with `MACFW_88_ROLLING_TX=0` or `MACFW_96_ROLLING_TX=0`.
 Both modes have hardware-tested playback, recording, rate switching, restart
 recovery and live performance profiles.
-At 88.2 kHz rolling TX uses a 512-frame READY silence target so a Logic-origin
-rate change does not retain a 4096-frame live PCM queue. Set
-`MACFW_88_SHORT_READY_RESERVE=0` to restore the former target for diagnosis.
+At 88.2 and 96 kHz rolling TX now use a 512-frame READY silence target to
+avoid retaining a 4096-frame live PCM queue after a Logic-origin rate change.
+Set `MACFW_88_SHORT_READY_RESERVE=0` or
+`MACFW_96_SHORT_READY_RESERVE=0` to restore the former target for diagnosis.
+44.1 kHz rolling TX already uses a configurable 512-frame live PCM reserve
+(`MACFW_44_ROLLING_PCM_RESERVE_FRAMES`, 64..2048); 48 kHz has no READY
+silence top-up. Each mode retains its validated startup path.
 The normal `make fw1814` and `sudo make fw1814-install` paths include both
 modes; older `*-experimental88` and `*-experimental96` targets remain as
 compatibility aliases. Minor artifacts have been observed
