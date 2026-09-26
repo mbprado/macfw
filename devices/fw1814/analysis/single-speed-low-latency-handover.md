@@ -161,9 +161,10 @@ installer preserves the recognized tuning variables rather than silently
 removing them. Avoid leaving this override set during normal profile tests;
 otherwise GUI changes are remembered but cannot affect the active cadence.
 
-Experimental high-rate engines intentionally retain their fixed, individually
-validated cadence. Profiles must not be enabled for dual-speed modes until the
-same A/B validation is complete there.
+At the time of the single-speed handover, high-rate engines retained a fixed
+cadence pending A/B validation. That validation has since been completed for
+88.2/96 kHz; the promoted dual-speed result is recorded below. Quad-speed
+engines still retain their fixed cadence.
 
 ## Implementation map and change sequence
 
@@ -270,6 +271,9 @@ A future GUI refinement may expose a `switching` state until the engine and
 CoreAudio path are both ready.
 
 ## Applying the philosophy to dual-speed modes
+
+The following sequence records the original work plan. The completed 88.2/96 kHz
+results and remaining observations are documented in the promotion section below.
 
 The next phase should port the architecture in controlled layers, not copy all
 single-speed constants at once.
