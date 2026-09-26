@@ -12,7 +12,7 @@ plan from the completed 44.1/48 kHz low-latency work are consolidated in
 The released FW1814 analog profile currently provides:
 
 - Intel macOS support through Apple's legacy FireWire stack;
-- hardware-validated analog full-duplex CoreAudio at 44.1 and 48 kHz;
+- hardware-validated analog full-duplex CoreAudio at 44.1, 48, 88.2 and 96 kHz;
 - Analog Outputs 1-4 and Analog Inputs 1-8;
 - rate switching from Audio MIDI Setup;
 - automatic boot, transport restart and disconnect/reconnect recovery;
@@ -20,7 +20,7 @@ The released FW1814 analog profile currently provides:
 - a transport-owned routing-control API, authoritative write-only register
   cache and native AppKit control panel;
 - persistent Aggressive, Balanced and Conservative transport-performance
-  profiles for the validated 44.1/48 kHz engines;
+  profiles for the validated 44.1/48/88.2/96 kHz engines;
 - hardware-validated runtime assignment of software returns 1/2 and 3/4 to Mixer
   buses 1/2 and 3/4;
 - hardware-validated Mixer/AUX source selection for Analog Outputs 1/2 and 3/4;
@@ -39,12 +39,17 @@ The released FW1814 analog profile currently provides:
   and reconnect; all four analog input-pair monitor levels also survive a
   transport restart through the same state path.
 
-Experimental 88.2, 96, 176.4 and 192 kHz analog CoreAudio engines are available
-through separate hardware opt-in installation targets. An approximately
-five-minute 88.2 kHz recording sounded clean on the FW1814 test Mac; 192 kHz
-playback and two-channel input monitoring have also been hardware-tested.
-These rates are not part of the standard installer or release packages. The
-validation history, remaining caveats and test commands are in
+The 88.2 and 96 kHz analog engines now use guarded rolling TX by default,
+with 1280- and 640-packet physical allocations respectively, a 96-cycle live
+lead and a 48-cycle deadline guard. Fixed half-ring refill remains available
+for diagnosis with `MACFW_88_ROLLING_TX=0` or `MACFW_96_ROLLING_TX=0`.
+Both modes have hardware-tested playback, recording, rate switching, restart
+recovery and live performance profiles. Minor artifacts have been observed
+under heavy host demand; extended stress monitoring remains useful.
+
+The 176.4 and 192 kHz engines remain separate experimental quad-speed work.
+The 192 kHz playback and two-channel input monitoring have been hardware-tested.
+The validation history, remaining caveats and test commands are in
 [`analysis/high-rate-development.md`](analysis/high-rate-development.md).
 S/PDIF, ADAT and MIDI are intentionally deferred until macfw can be compared
 directly with the original FW410 and FW1814 control panels running
@@ -59,7 +64,7 @@ FW1814 development is also the beginning of macfw's explicit multi-device layout
 - the released FW410 implementation remains the regression reference while this extraction happens.
 
 The released FW1814 analog profile has hardware-validated full-duplex
-transport and CoreAudio integration at both 44.1 and 48 kHz. Audio MIDI Setup
+transport and CoreAudio integration at 44.1, 48, 88.2 and 96 kHz. Audio MIDI Setup
 can switch the nominal rate in either direction, the supervisor selects the
 matching transport engine, and disconnect/reconnect recovery restores the
 previously selected rate.
@@ -154,16 +159,16 @@ successful client read reflects restored authoritative state rather than the
 temporary startup baseline. Direct standalone engine runs remain available
 immediately because they have no supervisor-managed replay phase.
 
-At 44.1/48 kHz, the performance profiles select the Mach-paced audio service
+At 44.1/48/88.2/96 kHz, the performance profiles select the Mach-paced audio service
 period: **Aggressive** is 250 µs, **Balanced** is 375 µs, and
 **Conservative** is 500 µs. Shorter periods favor latency; longer periods
 reduce transport wakeups and CPU use. Profile changes apply live and are saved
-through `fw1814state`. Experimental high-rate engines retain their individually
+through `fw1814state`. Experimental quad-rate engines retain their individually
 validated fixed cadence. `MACFW_AUDIO_SERVICE_PERIOD_US` remains an advanced
 launchd override (250–2000 µs); while present it is authoritative and the GUI
 selector is disabled.
 
-The 44.1/48 kHz engines are the stable single-speed regression baseline. Their
+The 44.1/48 kHz engines remain the stable single-speed regression baseline. Their
 640-packet allocation is intentionally separate from the 96-cycle live rolling
 horizon: shrinking the allocation caused cracked playback, while shortening
 only the scheduled horizon retained stability and produced low measured
