@@ -61,7 +61,7 @@ UInt32 cycleCount(UInt32 cycleTime) {
 
 bool rollingTxRequested() {
     const char* value = std::getenv("MACFW_48_ROLLING_TX");
-    return value && value[0] != '\0' && value[0] != '0';
+    return !value || value[0] != '0';
 }
 
 std::size_t rollingTxLeadPackets() {
@@ -155,7 +155,7 @@ bool run() {
                   << " packets / " << kTxHalfPackets
                   << "-packet halves (80 ms / 40 ms)\n";
         if (rollingTx) {
-            std::cout << "FW1814 EXPERIMENTAL rolling TX: "
+            std::cout << "FW1814 rolling TX: "
                       << rollingLead << "-cycle lead ("
                       << rollingLead * 1000 / kCyclesPerSecond
                       << " ms), " << rollingGuard << "-cycle deadline guard\n";
