@@ -1302,7 +1302,7 @@ private:
                   "aux-software-return-sends=continuous-persistent "
                   "aux-analog-input-sends=continuous-persistent "
                   "aux-output-level=continuous-persistent "
-                  "performance-profiles=44.1/48-persistent-live "
+                  "performance-profiles=44.1/48/88.2/96-persistent-live "
                   "levels=deferred midi=deferred\n");
             return;
         }
