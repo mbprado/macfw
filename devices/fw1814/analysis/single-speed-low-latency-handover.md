@@ -355,7 +355,7 @@ These are experimental opt-ins, not released performance profiles:
 profiles or change capture prefill on the strength of short loopback runs.
 Both rates now have initial positive playback and recording reports. Collect
 first/last active-recording counter windows at both rates, investigate the
-small stress-related artifacts, and test single/dual-family rate changes and reconnects. Repeated 88.2 <-> 96 kHz GUI switching was reported clean with no apparent issue; the user found it more reliable than the previous fixed-refill architecture. This is an observational result, not yet a quantified long-duration transition stress test.
+small stress-related artifacts, and test single/dual-family rate changes and reconnects. Repeated GUI switching among 44.1, 48, 88.2 and 96 kHz was reported clean with no apparent issue; the user found the rolling dual-speed paths more reliable than the previous fixed-refill architecture. This is an observational result, not yet a quantified long-duration transition stress test. Quad-speed 176.4/192 kHz was not included in these tests and remains separate future work.
 
 ## Reproduction commands
 
