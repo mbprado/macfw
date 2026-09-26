@@ -239,11 +239,19 @@ bool run() {
         std::vector<std::int32_t> mapped(
             4096 * macfw::fw1814::kPlaybackPcmPositions, 0);
 
+        const char* profileEnv = std::getenv("MACFW_DUAL_PERFORMANCE_PROFILES");
+        const bool profileExperiment = profileEnv &&
+            std::strcmp(profileEnv, "1") == 0;
+        AudioServicePeriodControl performance(kAudioServicePeriodNs);
+
         std::cout << "FW1814 experimental 96 kHz analog engine starting\n"
                   << "    CoreAudio-facing outputs: Analog 1-4\n"
                   << "    CoreAudio-facing inputs:  Analog 1-8\n"
                   << "    digital/MIDI/headphone levels: deferred\n"
-                  << "    audio service: dedicated Mach-paced thread (250 us)\n"
+                  << "    audio service: dedicated Mach-paced thread ("
+                  << (profileExperiment ? performance.periodNs() : kAudioServicePeriodNs) / 1000
+                  << " us)" << (profileExperiment ? " [experimental profiles]" : "")
+                  << "\n"
                   << "    Ctrl-C to stop\n";
 
         std::atomic<bool> audioFinished{false};
@@ -252,7 +260,8 @@ bool run() {
         std::thread audioThread([&] {
             requestInteractiveQos("FW1814 audio service thread");
             requestAudioTimeConstraint();
-            MachPacer pacer(kAudioServicePeriodNs);
+            MachPacer pacer(profileExperiment ? performance.periodNs() :
+                                               kAudioServicePeriodNs);
             if (!pacer.valid()) {
                 std::cerr << "FW1814 Mach pacing setup failed\n";
                 audioFinished.store(true, std::memory_order_release);
@@ -267,6 +276,12 @@ bool run() {
             AudioLoopTimingStats loopTiming;
 
             while (!gStopRequested) {
+                if (profileExperiment &&
+                    pacer.intervalNanoseconds() != performance.periodNs() &&
+                    !pacer.setIntervalNanoseconds(performance.periodNs())) {
+                    std::cerr << "FW1814 cannot apply audio service period\n";
+                    break;
+                }
                 const std::uint64_t wakeLateTicks = pacer.wait();
                 const std::uint64_t loopStartTicks =
                     verbose ? mach_absolute_time() : 0;
@@ -426,7 +441,8 @@ bool run() {
                 lifecycle.generationStillValid();
         }
         if (startupOk) {
-            if (!control.start(device, kRate))
+            if (!control.start(device, kRate,
+                               profileExperiment ? &performance : nullptr))
                 std::cerr << "warning: FW1814 control socket unavailable\n";
             // Only the audio thread reads this ring. Before releasing its HAL
             // producer, top up a short silence reserve if a slow FCP exchange
