@@ -271,7 +271,7 @@ private:
                 }
                 const float value = static_cast<float>(raw / 8388608.0);
                 decoded[base + physical] = value;
-                if (stats_.firstLoudHostTime == 0 && std::fabs(value) >= 0.75f)
+                if (stats_.firstLoudHostTime == 0 && std::fabs(value) >= 0.10f)
                     stats_.firstLoudHostTime = mach_absolute_time();
                 peaks[physical] = std::max(peaks[physical], std::fabs(value));
             }
