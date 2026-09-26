@@ -425,6 +425,18 @@ perform a READY silence top-up; rolling 88.2 and 96 kHz default to
 512-frame READY targets with the per-rate `SHORT_READY_RESERVE=0`
 fallbacks. Preserve these distinct startup paths during further tuning.
 
+### Clean-install rolling TX defaults
+
+A clean uninstall removes the service plist, including previously saved
+`MACFW_44_ROLLING_TX=1` and `MACFW_48_ROLLING_TX=1` overrides. Both
+single-speed engines still had opt-in rolling TX code, so a subsequent
+install silently restored half-ring refill and its longer playback latency.
+The four validated 44.1/48/88.2/96 kHz engines now default to rolling TX.
+Per-rate `MACFW_<rate>_ROLLING_TX=0` restores half-ring refill for diagnosis.
+The 44.1 kHz live PCM reserve and dual-speed READY reserve overrides remain
+independent of that fallback. Hardware revalidation after this default flip
+is pending; it uses the previously tested rolling paths.
+
 ## Reproduction commands
 
 Installed profile state:
