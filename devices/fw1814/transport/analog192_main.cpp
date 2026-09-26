@@ -207,7 +207,8 @@ bool run() {
         }
         std::cout << "FW1814 playback TX ring: " << kTxPackets
                   << " packets / " << kTxHalfPackets
-                  << "-packet halves (160 ms / 80 ms)\n";
+                  << "-packet halves (" << kTxPackets / 8 << " ms / "
+                  << kTxHalfPackets / 8 << " ms)\n";
         if (rollingTx)
             std::cout << "FW1814 192 kHz EXPERIMENTAL rolling TX: "
                          "96-cycle live lead, 48-cycle deadline guard\n";
