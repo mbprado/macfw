@@ -78,7 +78,7 @@ bool run() {
     using namespace macfw::fw1814::transport;
 
     if (access("/tmp/macfw-fw1814-control.sock", F_OK) == 0) {
-        std::cerr << "Stop the installed FW1814 supervisor before this experimental engine\n";
+        std::cerr << "Stop the installed FW1814 supervisor before running this engine\n";
         return false;
     }
 
@@ -481,7 +481,7 @@ cleanup:
 
     const bool restoreOk = lifecycle.stopIsochAndRestoreCmp();
     if (rateAttempted && lifecycle.generationStillValid()) {
-        std::cout << "FW1814 experimental 96 kHz: restoring 48 kHz baseline\n";
+        std::cout << "FW1814 96 kHz: restoring 48 kHz baseline\n";
         const bool outputOk = fcp.setSignalRate(48000, 0x18, false);
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         const bool inputOk = fcp.setSignalRate(48000, 0x19, false);
@@ -508,17 +508,15 @@ cleanup:
 
 } // namespace
 
-int main(int argc, char** argv) {
-    const bool legacyExperimental =
-        argc == 2 && std::strcmp(argv[1], "--experimental-high-rate") == 0;
-    if (argc != 1 && !legacyExperimental) {
+int main(int argc, char**) {
+    if (argc != 1) {
         std::cerr << "usage: fw1814analog96\n";
         return 64;
     }
     gStopRequested = 0;
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
-    // Flush diagnostics immediately during this manual guarded prototype.
+    // Flush transport diagnostics immediately for launchd and manual runs.
     std::cout.setf(std::ios::unitbuf);
     std::cerr.setf(std::ios::unitbuf);
     std::cout << "macfw fw1814analog96 — 96 kHz analog full-duplex engine\n";
