@@ -338,7 +338,7 @@ Electrical loopback observations on the test Mac:
 | Rate | Fixed-ring baseline | Rolling, first hardware runs | Status |
 | --- | ---: | ---: | --- |
 | 88.2 kHz | about 167-175 ms | 21.4-21.5 ms | Playback and recording usable; occasional small artifacts under high host demand |
-| 96 kHz | about 78-89 ms | 10.5-12 ms | Loopback clean in initial runs; extended capture/listening test pending |
+| 96 kHz | about 78-89 ms | 10.5-12 ms | Playback and recording usable; occasional small artifacts under high host demand |
 
 The 88.2 kHz rolling logs showed advancing `tx-roll-packets`, zero rolling
 deadline misses, and no growth in `dbc-gap`, `reorder` or `stale` across the
@@ -353,9 +353,9 @@ These are experimental opt-ins, not released performance profiles:
 `MACFW_88_ROLLING_TX=1` and `MACFW_96_ROLLING_TX=1`. Each has an optional
 `MACFW_<rate>_ROLLING_TX_CYCLES` lead override. Do not enable dual-speed
 profiles or change capture prefill on the strength of short loopback runs.
-Next verify sustained playback and all-channel capture at 96 kHz, collect
-first/last active-recording counter windows at both rates, stress CPU/I/O,
-and then test repeated rate changes and reconnects.
+Both rates now have initial positive playback and recording reports. Collect
+first/last active-recording counter windows at both rates, investigate the
+small stress-related artifacts, and test repeated rate changes and reconnects.
 
 ## Reproduction commands
 
