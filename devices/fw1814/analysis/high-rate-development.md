@@ -1,5 +1,12 @@
 # FW1814 high-rate development
 
+> Historical development record. Early sections describe the opt-in state and
+> fixed-ring latency that preceded the validated 88.2/96 kHz rolling engines.
+> For current installation, rate support and profiles, see
+> [the FW1814 README](../README.md) and
+> [the rolling handover](single-speed-low-latency-handover.md).
+> The 176.4/192 kHz work remains experimental.
+
 ## Reference and current boundary
 
 The Linux [M-Audio special-firmware stream table](https://github.com/torvalds/linux/blob/master/sound/firewire/bebob/bebob_maudio.c)
