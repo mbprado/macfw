@@ -64,6 +64,11 @@ constexpr std::chrono::milliseconds kHalPlaybackPrearmTimeout(1000);
 constexpr std::chrono::milliseconds kCaptureQualificationQuiet(1500);
 constexpr std::chrono::milliseconds kCaptureQualificationTimeout(8000);
 
+bool rollingTxRequested() {
+    const char* value = std::getenv("MACFW_176_ROLLING_TX");
+    return value && value[0] != '\0' && value[0] != '0';
+}
+
 volatile std::sig_atomic_t gStopRequested = 0;
 volatile std::sig_atomic_t gQualificationFailed = 0;
 void signalHandler(int) { gStopRequested = 1; }
@@ -153,6 +158,11 @@ bool run() {
 
         macfw::fw1814::transport::BlockingPcmStream176400 streamer(
             tx, pcm, initialCycle, firstCycle, kTxHalfPackets);
+        const bool rollingTx = rollingTxRequested();
+        if (rollingTx && !streamer.enableRolling(96, 48)) {
+            std::cerr << "FW1814 176.4 kHz rolling TX setup failed\n";
+            goto cleanup;
+        }
         if (!streamer.valid() || !streamer.prime()) {
             std::cerr << "FW1814 playback stream prime failed\n";
             goto cleanup;
@@ -160,6 +170,9 @@ bool run() {
         std::cout << "FW1814 playback TX ring: " << kTxPackets
                   << " packets / " << kTxHalfPackets
                   << "-packet halves (160 ms / 80 ms)\n";
+        if (rollingTx)
+            std::cout << "FW1814 176.4 kHz EXPERIMENTAL rolling TX: "
+                         "96-cycle live lead, 48-cycle deadline guard\n";
         std::cout << "FW1814 capture RX ring: " << kCaptureSlots
                   << " packets / 32-packet publication chunks\n";
 
@@ -337,6 +350,12 @@ bool run() {
                 if ((*device.nativeHandle())->GetCycleTime(
                         device.nativeHandle(), &nowCycleTime) == kIOReturnSuccess)
                     streamer.service(cycleCount(nowCycleTime));
+                if (!streamer.healthy()) {
+                    std::cerr << "FW1814 176.4 kHz rolling TX deadline missed; "
+                                 "stopping before stale DMA playback\n";
+                    audioFinished.store(true, std::memory_order_release);
+                    return;
+                }
 
                 if (releasePlayback.load(std::memory_order_acquire) &&
                     !firstNonzeroTxLogged &&
@@ -405,6 +424,8 @@ bool run() {
                               << " tx-peak=" << txStats.peakSample
                               << " tx-late=" << txStats.lateCyclePolls
                               << " tx-danger=" << txStats.dangerousCyclePolls
+                              << " tx-roll-packets=" << txStats.rollingPacketsRefilled
+                              << " tx-roll-miss=" << txStats.rollingDeadlineMisses
                               << " tx-max-gap=" << txStats.maxCycleDelta
                               << " tx-max-behind=" << txStats.maxHalvesBehind
                               << " pcm-underrun=" << pcm.underrunFrames()
