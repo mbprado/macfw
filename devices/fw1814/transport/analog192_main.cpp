@@ -296,11 +296,13 @@ bool run() {
             return writtenTotal;
         };
 
+        AudioServicePeriodControl performance(kAudioServicePeriodNs);
         std::cout << "FW1814 experimental 192 kHz analog engine starting\n"
                   << "    CoreAudio-facing outputs: Analog 1-4\n"
                   << "    CoreAudio-facing inputs:  Analog 1-2\n"
                   << "    digital/MIDI/headphone levels: deferred\n"
-                  << "    audio service: dedicated Mach-paced thread (250 us)\n"
+                  << "    audio service: dedicated Mach-paced thread ("
+                  << performance.periodNs() / 1000 << " us)\n"
                   << "    Ctrl-C to stop\n";
 
         std::atomic<bool> audioFinished{false};
@@ -309,7 +311,7 @@ bool run() {
         std::thread audioThread([&] {
             requestInteractiveQos("FW1814 audio service thread");
             requestAudioTimeConstraint();
-            MachPacer pacer(kAudioServicePeriodNs);
+            MachPacer pacer(performance.periodNs());
             if (!pacer.valid()) {
                 std::cerr << "FW1814 Mach pacing setup failed\n";
                 audioFinished.store(true, std::memory_order_release);
@@ -331,6 +333,11 @@ bool run() {
             std::chrono::steady_clock::time_point captureQuietSince{};
 
             while (!gStopRequested) {
+                if (pacer.intervalNanoseconds() != performance.periodNs() &&
+                    !pacer.setIntervalNanoseconds(performance.periodNs())) {
+                    std::cerr << "FW1814 cannot apply audio service period\n";
+                    break;
+                }
                 pacer.wait();
 
                 if (rateKicked.load(std::memory_order_acquire))
@@ -635,7 +642,7 @@ bool run() {
                 lifecycle.generationStillValid();
         }
         if (startupOk) {
-            if (!control.start(device, kRate))
+            if (!control.start(device, kRate, &performance))
                 std::cerr << "warning: FW1814 control socket unavailable\n";
             // Only the audio thread reads this ring. Establish the guarded
             // reserve before notifying the supervisor that transport is ready.
