@@ -437,6 +437,28 @@ The 44.1 kHz live PCM reserve and dual-speed READY reserve overrides remain
 independent of that fallback. Hardware revalidation after this default flip
 is pending; it uses the previously tested rolling paths.
 
+### Quad-speed rolling TX trial (hardware validation pending)
+
+176.4 and 192 kHz retain their existing startup, FCP kicks, capture
+qualification, physical NuDCL allocations (1280 and 2560 packets), and
+four-channel AM824 packet metadata. The new playback path is opt-in with
+`MACFW_176_ROLLING_TX=1` or `MACFW_192_ROLLING_TX=1`, independently.
+It begins with a 96-cycle live TX lead and 48-cycle guard, preserves the
+4096-cycle startup lead, advances DBC/SYT continuously across arbitrary
+refill chunks and ring wrap, and stops the engine on a missed rolling
+deadline. The original half-ring TX path remains the default and can be
+selected with an unset variable or `=0`.
+
+The first hardware pass should test one quad mode at a time: establish
+baseline loopback and startup logs with rolling disabled; enable rolling
+for that rate; confirm playback, physical capture, first loud packet,
+`tx-roll-packets` increasing and `tx-roll-miss=0`; repeat cold starts,
+quad-to-single and single-to-quad changes, then stress playback and capture.
+At 176.4 kHz watch the variable 44.1-family DBC/SYT cadence through ring
+wrap; at 192 kHz watch its 3-data/1-NODATA phase and the capture
+qualification counters. The high-rate preload and capture admission are
+separate experiments after the rolling TX path has been validated.
+
 ## Reproduction commands
 
 Installed profile state:
