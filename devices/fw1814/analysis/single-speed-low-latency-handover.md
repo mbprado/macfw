@@ -357,6 +357,26 @@ Both rates now have initial positive playback and recording reports. Collect
 first/last active-recording counter windows at both rates, investigate the
 small stress-related artifacts, and test single/dual-family rate changes and reconnects. Repeated GUI switching among 44.1, 48, 88.2 and 96 kHz was reported clean with no apparent issue; the user found the rolling dual-speed paths more reliable than the previous fixed-refill architecture. This is an observational result, not yet a quantified long-duration transition stress test. Quad-speed 176.4/192 kHz was not included in these tests and remains separate future work.
 
+### Experimental dual-speed profile validation
+
+After the rolling paths are clean at the fixed 250 us cadence, set
+`MACFW_DUAL_PERFORMANCE_PROFILES=1` in the FW1814 transport launchd plist
+and reinstall the experimental engine so launchd loads the setting. This
+exposes the existing persistent live Aggressive (250 us), Balanced (375 us)
+and Conservative (500 us) profile control for 88.2 and 96 kHz. The profile
+only changes Mach service cadence; rolling lead/guard, startup distance,
+packet formation, PCM reserve and capture prefill remain unchanged.
+Without this opt-in, both dual-speed engines retain fixed 250 us service.
+
+Validate each profile with playback, all-channel capture and electrical
+loopback at both rates. Check the active period with
+`fw1814ctl performance-profile get`, and compare first/last rolling misses,
+DBC/reorder/stale and wake-lateness counters during active recording.
+Switch profiles while audio is running, then restart the interface to check
+that the saved selection returns. The manual
+`MACFW_AUDIO_SERVICE_PERIOD_US` override remains authoritative; remove
+it for profile comparison. Do not enable profiles for 176.4/192 kHz.
+
 ## Reproduction commands
 
 Installed profile state:
