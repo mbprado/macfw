@@ -503,9 +503,10 @@ as 44.1–96 kHz: aggressive 250 us, balanced 375 us, conservative 500 us;
 physical loopback: aggressive 11.39 ms, balanced 10.84 ms, conservative
 12.30 ms. The user reports playback and capture remain good. One
 control-socket connection failed transiently and succeeded immediately
-on retry; inspect service restarts if it recurs. The supplied profile
-measurements do not include 192 kHz, which still needs its own profile
-regression record.
+on retry; inspect service restarts if it recurs. 192 kHz hardware tests also confirmed the three live settings and physical
+loopback: aggressive 8.60 ms, balanced 9.27 ms, conservative 9.10 ms,
+with 950 device-latency frames per HAL scope. The user reports playback
+and capture good overall in both quad modes.
 
 ## Reproduction commands
 
