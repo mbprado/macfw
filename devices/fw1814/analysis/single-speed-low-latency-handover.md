@@ -482,6 +482,25 @@ recalibrate it only after choosing a default geometry. Keep 192 kHz opt-in.
 The high-rate preload and capture admission are separate experiments after
 the rolling TX path has been validated.
 
+### Quad rolling and performance promotion
+
+After sustained playback and capture at both quad rates, and 192 kHz
+physical loopbacks of 9.73 and 10.06 ms using the 1280-packet ring,
+rolling TX is now the default at 176.4 and 192 kHz. The 192 kHz rolling
+path defaults to 1280 packets; `MACFW_192_ROLLING_RING_PACKETS=2560`
+selects the previous physical ring for comparison. Per-rate
+`MACFW_176_ROLLING_TX=0` and `MACFW_192_ROLLING_TX=0` retain the old
+half-ring paths. An occasional 176.4 kHz capture qualification retry
+remains possible and restarts safely through the existing supervisor.
+
+The HAL estimates use physical loopback calibration: 893 frames per
+input/output scope at 176.4 kHz (about 10.12 ms round trip), and 950
+frames per scope at 192 kHz (about 9.90 ms). These describe the default
+rolling configurations, not live queue depth or the explicit fallback.
+Both quad engines now use the same persistent live performance profiles
+as 44.1–96 kHz: aggressive 250 us, balanced 375 us, conservative 500 us;
+the quad profile behavior still requires hardware regression tests.
+
 ## Reproduction commands
 
 Installed profile state:
