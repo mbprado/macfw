@@ -57,7 +57,7 @@ void signalHandler(int) { gStopRequested = 1; }
 
 bool rollingTxRequested() {
     const char* value = std::getenv("MACFW_96_ROLLING_TX");
-    return value && std::strcmp(value, "1") == 0;
+    return !value || std::strcmp(value, "0") != 0;
 }
 
 std::size_t rollingTxLeadPackets() {
@@ -167,7 +167,7 @@ bool run() {
                   << " packets / " << kTxHalfPackets
                   << "-packet halves (80 ms / 40 ms)\n";
         if (rollingTx)
-            std::cout << "FW1814 experimental 96 kHz rolling TX: "
+            std::cout << "FW1814 96 kHz rolling TX: "
                       << rollingLead << "-cycle live lead, "
                       << rollingGuard << "-cycle deadline guard\n";
         std::cout << "FW1814 capture RX ring: " << kCaptureSlots
@@ -239,19 +239,14 @@ bool run() {
         std::vector<std::int32_t> mapped(
             4096 * macfw::fw1814::kPlaybackPcmPositions, 0);
 
-        const char* profileEnv = std::getenv("MACFW_DUAL_PERFORMANCE_PROFILES");
-        const bool profileExperiment = profileEnv &&
-            std::strcmp(profileEnv, "1") == 0;
         AudioServicePeriodControl performance(kAudioServicePeriodNs);
 
-        std::cout << "FW1814 experimental 96 kHz analog engine starting\n"
+        std::cout << "FW1814 96 kHz analog engine starting\n"
                   << "    CoreAudio-facing outputs: Analog 1-4\n"
                   << "    CoreAudio-facing inputs:  Analog 1-8\n"
                   << "    digital/MIDI/headphone levels: deferred\n"
                   << "    audio service: dedicated Mach-paced thread ("
-                  << (profileExperiment ? performance.periodNs() : kAudioServicePeriodNs) / 1000
-                  << " us)" << (profileExperiment ? " [experimental profiles]" : "")
-                  << "\n"
+                  << performance.periodNs() / 1000 << " us)\n"
                   << "    Ctrl-C to stop\n";
 
         std::atomic<bool> audioFinished{false};
@@ -260,8 +255,7 @@ bool run() {
         std::thread audioThread([&] {
             requestInteractiveQos("FW1814 audio service thread");
             requestAudioTimeConstraint();
-            MachPacer pacer(profileExperiment ? performance.periodNs() :
-                                               kAudioServicePeriodNs);
+            MachPacer pacer(performance.periodNs());
             if (!pacer.valid()) {
                 std::cerr << "FW1814 Mach pacing setup failed\n";
                 audioFinished.store(true, std::memory_order_release);
@@ -276,8 +270,7 @@ bool run() {
             AudioLoopTimingStats loopTiming;
 
             while (!gStopRequested) {
-                if (profileExperiment &&
-                    pacer.intervalNanoseconds() != performance.periodNs() &&
+                if (pacer.intervalNanoseconds() != performance.periodNs() &&
                     !pacer.setIntervalNanoseconds(performance.periodNs())) {
                     std::cerr << "FW1814 cannot apply audio service period\n";
                     break;
@@ -441,8 +434,7 @@ bool run() {
                 lifecycle.generationStillValid();
         }
         if (startupOk) {
-            if (!control.start(device, kRate,
-                               profileExperiment ? &performance : nullptr))
+            if (!control.start(device, kRate, &performance))
                 std::cerr << "warning: FW1814 control socket unavailable\n";
             // Only the audio thread reads this ring. Before releasing its HAL
             // producer, top up a short silence reserve if a slow FCP exchange
