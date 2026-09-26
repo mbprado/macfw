@@ -108,9 +108,7 @@ fw1814-hal:
 fw1814-runtime:
 	$(MAKE) -C devices/fw1814 runtime
 fw1814-experimental96: fw1814
-	$(MAKE) -C devices/fw1814/transport analog96-experimental
 fw1814-experimental88: fw1814
-	$(MAKE) -C devices/fw1814/transport analog88-experimental
 fw1814-experimental176: fw1814
 	$(MAKE) -C devices/fw1814/transport analog176-experimental
 fw1814-experimental192: fw1814
