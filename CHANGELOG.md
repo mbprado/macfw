@@ -16,6 +16,9 @@ The project uses the `x.y.zzz` version format described in [`RELEASES.md`](RELEA
 
 ### Changed
 
+- FW1814 rolling 88.2 kHz now uses a 512-frame READY silence target; this
+  removed the extra PCM queue observed after rate changes in Logic.
+
 - FW1814 88.2/96 kHz rolling TX and live profiles are active in the normal
   source install; legacy experimental install targets remain aliases.
 - 176.4/192 kHz quad-speed engines remain experimental.
