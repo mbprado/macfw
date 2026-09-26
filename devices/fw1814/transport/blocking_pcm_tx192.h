@@ -349,6 +349,7 @@ public:
         std::uint64_t framesSilenced = 0;
         std::uint64_t nonzeroFrames = 0;
         std::int32_t peakSample = 0;
+        std::uint64_t firstLoudHostTime = 0;
         std::uint64_t lateCyclePolls = 0;
         std::uint64_t dangerousCyclePolls = 0;
         UInt32 maxCycleDelta = 0;
