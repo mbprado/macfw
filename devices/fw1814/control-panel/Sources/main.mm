@@ -246,7 +246,7 @@ static AudioObjectID FindDevice(void){
     NSDictionary *r=[self ctl:@[@"performance-profile",@"get"]];
     if([r[@"status"] integerValue]){self.performanceProfile.enabled=NO;self.performanceProfile.selectedSegment=-1;self.performanceNote.stringValue=@"Transport profile unavailable.";return;}
     NSString *s=[r[@"output"] lowercaseString];
-    if([s containsString:@"apply to 44.1/48"]){self.performanceProfile.enabled=NO;self.performanceProfile.selectedSegment=-1;self.performanceNote.stringValue=@"Profiles apply at 44.1/48 kHz. High-rate engines retain their validated fixed cadence.";return;}
+    if([s containsString:@"apply to 44.1/48"]){self.performanceProfile.enabled=NO;self.performanceProfile.selectedSegment=-1;self.performanceNote.stringValue=@"Profiles apply at 44.1/48/88.2/96 kHz. Quad-rate engines retain their fixed cadence.";return;}
     self.performanceProfile.selectedSegment=[s containsString:@"aggressive"]?0:([s containsString:@"conservative"]?2:1);
     BOOL overridden=[s containsString:@"environment override: active"];
     self.performanceProfile.enabled=!overridden;
