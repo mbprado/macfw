@@ -17,6 +17,8 @@ static NSArray<NSString*> *ALL(void){return @[@"sw1/2",@"sw3/4",@"analog1/2",@"a
 static NSArray<NSString*> *PAIR(void){return @[@"1/2",@"3/4"];}
 static NSArray<NSString*> *HP(void){return @[@"1",@"2"];}
 static NSArray<NSString*> *TITLE(void){return @[@"SW Return 1/2",@"SW Return 3/4",@"Analog Inputs 1/2",@"Analog Inputs 3/4",@"Analog Inputs 5/6",@"Analog Inputs 7/8"];}
+static const double kRates[] = {44100.0, 48000.0, 88200.0, 96000.0, 176400.0, 192000.0};
+static NSArray<NSString*> *RATE_LABELS(void){return @[@"44.1 kHz", @"48 kHz", @"88.2 kHz", @"96 kHz", @"176.4 kHz", @"192 kHz"];}
 
 static NSDictionary *Run(NSString *path, NSArray<NSString*> *args){
     if(![[NSFileManager defaultManager] isExecutableFileAtPath:path])
@@ -67,7 +69,10 @@ static AudioObjectID FindDevice(void){
 @property(nonatomic,strong) NSTextField *status;
 @property(nonatomic,strong) NSTextView *diagnostics;
 @property(nonatomic,strong) NSSegmentedControl *rate;
+@property(nonatomic,strong) NSSegmentedControl *performanceProfile;
+@property(nonatomic,strong) NSTextField *performanceNote;
 @property(nonatomic,strong) NSTextField *deviceStatus;
+@property(nonatomic,strong) NSTextField *auxNote;
 @property(nonatomic,assign) BOOL refreshing;
 @property(nonatomic,strong) NSMutableArray<NSButton*> *routes;
 @property(nonatomic,strong) NSMutableArray<NSPopUpButton*> *outputSources;
@@ -161,7 +166,7 @@ static AudioObjectID FindDevice(void){
         NSPopUpButton *p=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(18,y+3,130,27) pullsDown:NO];[p addItemsWithTitles:@[@"Mixer 1/2",@"Mixer 3/4",@"AUX"]];p.tag=i;p.target=self;p.action=@selector(hpSource:);[v addSubview:p];[self.hpSources addObject:p];y-=115;}
 }
 - (void)buildAux{
-    NSView *v=[self scroll:[self tab:@"AUX" id:@"aux"] height:720];[v addSubview:Lbl(@"Independent stereo AUX sends. Select AUX on an output or headphone to hear this bus.",NSMakeRect(18,684,880,20))];CGFloat y=590;
+    NSView *v=[self scroll:[self tab:@"AUX" id:@"aux"] height:720];self.auxNote=Lbl(@"Independent stereo AUX sends. Select AUX on an output or headphone to hear this bus.",NSMakeRect(18,684,880,20));[v addSubview:self.auxNote];CGFloat y=590;
     for(NSInteger i=0;i<6;++i){[self stereo:v y:y title:[NSString stringWithFormat:@"%@ send",TITLE()[i]] index:i action:@selector(auxLevel:) mute:@selector(auxMute:) store:self.auxRows];y-=82;}
     [self stereo:v y:12 title:@"AUX master" index:0 action:@selector(auxMasterLevel:) mute:@selector(auxMasterMute:) store:self.auxMasterRows];
 }
@@ -169,8 +174,13 @@ static AudioObjectID FindDevice(void){
     NSView *v=[self tab:@"Device" id:@"device"];[v addSubview:Hdr(@"M-Audio FireWire 1814",NSMakeRect(28,550,350,24))];
     [v addSubview:Lbl(@"Sample-rate changes use the normal CoreAudio device lifecycle.",NSMakeRect(28,520,650,20))];
     self.deviceStatus=Lbl(@"CoreAudio device: checking…",NSMakeRect(28,465,600,24));self.deviceStatus.font=[NSFont monospacedDigitSystemFontOfSize:13 weight:NSFontWeightMedium];[v addSubview:self.deviceStatus];
-    self.rate=[[NSSegmentedControl alloc] initWithFrame:NSMakeRect(28,410,240,30)];self.rate.segmentCount=2;[self.rate setLabel:@"44.1 kHz" forSegment:0];[self.rate setLabel:@"48 kHz" forSegment:1];self.rate.target=self;self.rate.action=@selector(rateChanged:);[v addSubview:self.rate];
-    NSTextField *note=Lbl(@"Initial release scope: validated 44.1/48 kHz analog engine. Digital I/O, MIDI, and higher rates remain deferred.",NSMakeRect(28,342,850,42));note.maximumNumberOfLines=2;note.textColor=NSColor.secondaryLabelColor;[v addSubview:note];
+    self.rate=[[NSSegmentedControl alloc] initWithFrame:NSMakeRect(28,410,620,30)];self.rate.segmentCount=6;NSArray *labels=RATE_LABELS();for(NSInteger i=0;i<6;++i)[self.rate setLabel:labels[i] forSegment:i];self.rate.target=self;self.rate.action=@selector(rateChanged:);[v addSubview:self.rate];
+    NSTextField *note=Lbl(@"All six analog sample rates are available. Digital I/O, MIDI, and headphone-specific paths remain deferred.",NSMakeRect(28,342,850,42));note.maximumNumberOfLines=2;note.textColor=NSColor.secondaryLabelColor;[v addSubview:note];
+    [v addSubview:Hdr(@"Transport performance",NSMakeRect(28,282,300,24))];
+    self.performanceProfile=[[NSSegmentedControl alloc] initWithFrame:NSMakeRect(28,238,480,30)];self.performanceProfile.segmentCount=3;
+    [self.performanceProfile setLabel:@"Aggressive" forSegment:0];[self.performanceProfile setLabel:@"Balanced" forSegment:1];[self.performanceProfile setLabel:@"Conservative" forSegment:2];
+    self.performanceProfile.target=self;self.performanceProfile.action=@selector(performanceProfileChanged:);[v addSubview:self.performanceProfile];
+    self.performanceNote=Lbl(@"Checking transport profile…",NSMakeRect(28,178,850,45));self.performanceNote.maximumNumberOfLines=2;self.performanceNote.textColor=NSColor.secondaryLabelColor;[v addSubview:self.performanceNote];
 }
 - (void)buildDiagnostics{
     NSView *v=[self tab:@"Diagnostics" id:@"diagnostics"];
@@ -199,6 +209,10 @@ static AudioObjectID FindDevice(void){
 - (void)refreshRoutes{
     for(NSInteger i=0;i<6;++i)for(NSInteger b=0;b<2;++b){NSArray *a=i<2?@[@"mixer-route",@"get",SW()[i],PAIR()[b]]:@[@"input-mixer-route",@"get",ANA()[i-2],PAIR()[b]];
         NSDictionary *r=[self ctl:a];if([r[@"status"] integerValue])continue;NSString *s=[r[@"output"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if(i>=2){
+            NSRange newline=[s rangeOfString:@"\n"];
+            if(newline.location!=NSNotFound)s=[s substringToIndex:newline.location];
+        }
         self.routes[i*2+b].state=[s hasSuffix:@": on"]?NSControlStateValueOn:NSControlStateValueOff;}
 }
 - (void)refreshSources{
@@ -210,12 +224,39 @@ static AudioObjectID FindDevice(void){
     for(NSInteger i=0;i<4;++i){NSDictionary *r=[self ctl:@[@"input-monitor-pan",@"get",ANA()[i]]];int16_t l=0,q=0;if([r[@"status"] integerValue]||!RawPan(r[@"output"],&l,&q))continue;
         NSInteger lv=lround(-100.0*l/32768.0),rv=lround(-100.0*q/32768.0);NSDictionary *row=self.panRows[i];[row[@"left"] setIntegerValue:lv];[row[@"right"] setIntegerValue:rv];[self panLabel:row[@"leftValue"] value:lv];[self panLabel:row[@"rightValue"] value:rv];}
 }
+- (void)setAuxAvailable:(BOOL)available{
+    for(NSPopUpButton *p in self.outputSources)[p itemAtIndex:1].enabled=available;
+    for(NSPopUpButton *p in self.hpSources)[p itemAtIndex:2].enabled=available;
+    for(NSDictionary *row in self.auxRows)for(NSString *key in @[@"left",@"right",@"link",@"mute"])[row[key] setEnabled:available];
+    for(NSDictionary *row in self.auxMasterRows)for(NSString *key in @[@"left",@"right",@"link",@"mute"])[row[key] setEnabled:available];
+    self.auxNote.stringValue=available
+        ? @"Independent stereo AUX sends. Select AUX on an output or headphone to hear this bus."
+        : @"The FW1814 disables its AUX bus at 176.4/192 kHz. Saved AUX settings are retained for lower rates.";
+    self.auxNote.textColor=available?NSColor.labelColor:NSColor.systemOrangeColor;
+}
 - (void)refreshDevice{
     AudioObjectID d=FindDevice();if(d==kAudioObjectUnknown){self.deviceStatus.stringValue=@"CoreAudio device: unavailable";self.rate.enabled=NO;self.rate.selectedSegment=-1;return;}
     AudioObjectPropertyAddress a{kAudioDevicePropertyNominalSampleRate,kAudioObjectPropertyScopeGlobal,kAudioObjectPropertyElementMain};Float64 rate=0;UInt32 n=sizeof(rate);
     if(AudioObjectGetPropertyData(d,&a,0,nullptr,&n,&rate)!=noErr){self.deviceStatus.stringValue=@"CoreAudio device: rate unavailable";self.rate.enabled=NO;return;}
     self.deviceStatus.stringValue=[NSString stringWithFormat:@"CoreAudio device: connected • %.0f Hz",rate];self.rate.enabled=YES;
-    self.rate.selectedSegment=std::fabs(rate-44100.0)<1?0:(std::fabs(rate-48000.0)<1?1:-1);
+    self.rate.selectedSegment=-1;for(NSInteger i=0;i<6;++i)if(std::fabs(rate-kRates[i])<1){self.rate.selectedSegment=i;break;}
+    [self setAuxAvailable:rate<176400.0];
+}
+- (void)refreshPerformanceProfile{
+    NSDictionary *r=[self ctl:@[@"performance-profile",@"get"]];
+    if([r[@"status"] integerValue]){self.performanceProfile.enabled=NO;self.performanceProfile.selectedSegment=-1;self.performanceNote.stringValue=@"Transport profile unavailable.";return;}
+    NSString *s=[r[@"output"] lowercaseString];
+    if([s containsString:@"apply to 44.1/48"]){self.performanceProfile.enabled=NO;self.performanceProfile.selectedSegment=-1;self.performanceNote.stringValue=@"Profiles apply at 44.1/48/88.2/96 kHz. Quad-rate engines retain their fixed cadence.";return;}
+    self.performanceProfile.selectedSegment=[s containsString:@"aggressive"]?0:([s containsString:@"conservative"]?2:1);
+    BOOL overridden=[s containsString:@"environment override: active"];
+    self.performanceProfile.enabled=!overridden;
+    self.performanceNote.stringValue=overridden
+        ? @"MACFW_AUDIO_SERVICE_PERIOD_US is active and overrides this control. Remove the launchd override to use GUI profiles."
+        : (self.performanceProfile.selectedSegment==0
+            ? @"250 µs • lowest latency and highest transport CPU use."
+            : self.performanceProfile.selectedSegment==1
+                ? @"375 µs • recommended balance of latency and transport CPU use."
+                : @"500 µs • lower transport CPU use with additional latency.");
 }
 - (void)refreshDiagnostics{
     NSMutableString *s=[NSMutableString stringWithFormat:@"macfw FW1814 Control %s build %s\n%@\n\n",macfw::fw1814::build::kVersion,macfw::fw1814::build::kGitSha,[NSDate date]];
@@ -227,7 +268,7 @@ static AudioObjectID FindDevice(void){
     [self refreshRoutes];[self refreshSources];[self refreshLevels:self.swRows command:@"software-return-level" args:SW()];
     [self refreshLevels:self.inputRows command:@"input-monitor-level" args:ANA()];[self refreshLevels:self.outputRows command:@"output-volume" args:PAIR()];
     [self refreshLevels:self.hpRows command:@"headphone-volume" args:HP()];[self refreshLevels:self.auxRows command:@"aux-send-level" args:ALL()];
-    [self refreshLevels:self.auxMasterRows command:@"aux-output-volume" args:@[]];[self refreshPans];[self refreshDevice];[self refreshDiagnostics];
+    [self refreshLevels:self.auxMasterRows command:@"aux-output-volume" args:@[]];[self refreshPans];[self refreshDevice];[self refreshPerformanceProfile];[self refreshDiagnostics];
     self.status.stringValue=@"FW1814 controls ready • changes save automatically";self.status.textColor=NSColor.labelColor;self.refreshing=NO;
 }
 - (void)routeChanged:(NSButton*)s{
@@ -235,8 +276,8 @@ static AudioObjectID FindDevice(void){
     NSArray *a=i<2?@[@"mixer-route",@"set",SW()[i],PAIR()[b],state]:@[@"input-mixer-route",@"set",ANA()[i-2],PAIR()[b],state];
     NSDictionary *r=[self ctl:a];[self report:r ok:@"Routing updated and saved"];if([r[@"status"] integerValue])s.state=s.state==NSControlStateValueOn?NSControlStateValueOff:NSControlStateValueOn;
 }
-- (void)outputSource:(NSPopUpButton*)s{NSDictionary *r=[self ctl:@[@"output-source",@"set",PAIR()[s.tag],s.indexOfSelectedItem?@"aux":@"mixer"]];[self report:r ok:@"Analog output source updated and saved"];}
-- (void)hpSource:(NSPopUpButton*)s{NSArray *a=@[@"mixer1/2",@"mixer3/4",@"aux"];NSDictionary *r=[self ctl:@[@"headphone-source",@"set",HP()[s.tag],a[s.indexOfSelectedItem]]];[self report:r ok:@"Headphone source updated and saved"];}
+- (void)outputSource:(NSPopUpButton*)s{NSDictionary *r=[self ctl:@[@"output-source",@"set",PAIR()[s.tag],s.indexOfSelectedItem?@"aux":@"mixer"]];[self report:r ok:@"Analog output source updated and saved"];if([r[@"status"] integerValue])[self refreshSources];}
+- (void)hpSource:(NSPopUpButton*)s{NSArray *a=@[@"mixer1/2",@"mixer3/4",@"aux"];NSDictionary *r=[self ctl:@[@"headphone-source",@"set",HP()[s.tag],a[s.indexOfSelectedItem]]];[self report:r ok:@"Headphone source updated and saved"];if([r[@"status"] integerValue])[self refreshSources];}
 - (NSString*)db:(NSInteger)v{return [NSString stringWithFormat:@"%ld",(long)v];}
 - (void)commitLevel:(NSControl*)c rows:(NSMutableArray*)rows command:(NSString*)cmd args:(NSArray*)args{
     NSInteger i=c.tag/2,ch=c.tag%2;if(i>=(NSInteger)rows.count)return;NSDictionary *row=rows[i];NSSlider *l=row[@"left"],*r=row[@"right"];
@@ -280,11 +321,18 @@ static AudioObjectID FindDevice(void){
     self.status.stringValue=@"Applying live monitor pan…";self.status.textColor=NSColor.labelColor;
 }
 - (void)rateChanged:(NSSegmentedControl*)s{
-    AudioObjectID d=FindDevice();if(d==kAudioObjectUnknown){NSBeep();[self refreshDevice];return;}Float64 rate=s.selectedSegment?48000:44100;
+    AudioObjectID d=FindDevice();if(d==kAudioObjectUnknown){NSBeep();[self refreshDevice];return;}if(s.selectedSegment<0||s.selectedSegment>=6){[self refreshDevice];return;}Float64 rate=kRates[s.selectedSegment];
     AudioObjectPropertyAddress a{kAudioDevicePropertyNominalSampleRate,kAudioObjectPropertyScopeGlobal,kAudioObjectPropertyElementMain};Boolean settable=false;
     OSStatus st=AudioObjectIsPropertySettable(d,&a,&settable);if(st==noErr&&settable)st=AudioObjectSetPropertyData(d,&a,0,nullptr,sizeof(rate),&rate);
     if(st!=noErr||!settable){self.status.stringValue=[NSString stringWithFormat:@"CoreAudio rejected rate change (OSStatus %d)",(int)st];self.status.textColor=NSColor.systemRedColor;NSBeep();[self refreshDevice];return;}
     self.status.stringValue=@"Sample-rate change requested through CoreAudio…";s.enabled=NO;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{s.enabled=YES;[self refresh:nil];});
+}
+- (void)performanceProfileChanged:(NSSegmentedControl*)s{
+    if(s.selectedSegment<0||s.selectedSegment>2){[self refreshPerformanceProfile];return;}
+    NSArray *profiles=@[@"aggressive",@"balanced",@"conservative"];
+    NSDictionary *r=[self ctl:@[@"performance-profile",@"set",profiles[s.selectedSegment]]];
+    [self report:r ok:@"Transport performance profile applied and saved"];
+    [self refreshPerformanceProfile];
 }
 - (void)resetDefaults:(id)s{(void)s;NSAlert *a=[NSAlert new];a.messageText=@"Reset FW1814 controls?";a.informativeText=@"This replaces saved routing and levels with the macfw defaults.";[a addButtonWithTitle:@"Reset"];[a addButtonWithTitle:@"Cancel"];
     if([a runModal]!=NSAlertFirstButtonReturn)return;NSDictionary *r=Run(kState,@[@"reset"]);[self report:r ok:@"FW1814 defaults applied and saved"];if(![r[@"status"] integerValue])[self refresh:nil];}

@@ -4,6 +4,7 @@
 #include <IOKit/firewire/IOFireWireLibIsoch.h>
 
 #include <cstddef>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <sys/mman.h>
@@ -36,10 +37,34 @@ public:
                                                    std::uint8_t dbs,
                                                    std::uint8_t pcmChannels,
                                                    std::size_t packetCount = 128) {
+        return create(device, firstCycle, dbs, pcmChannels, 8, 0x02,
+                      packetCount);
+    }
+
+    static BlockingSilenceTransmitRing create96k(FireWireDevice& device,
+                                                   UInt32 firstCycle,
+                                                   std::uint8_t dbs,
+                                                   std::uint8_t pcmChannels,
+                                                   std::size_t packetCount = 128,
+                                                   std::uint8_t tonePosition = 0xff) {
+        return create(device, firstCycle, dbs, pcmChannels, 16, 0x04,
+                      packetCount, tonePosition);
+    }
+
+private:
+    static BlockingSilenceTransmitRing create(FireWireDevice& device,
+                                               UInt32 firstCycle,
+                                               std::uint8_t dbs,
+                                               std::uint8_t pcmChannels,
+                                               std::uint8_t events,
+                                               std::uint8_t fdf,
+                                               std::size_t packetCount,
+                                               std::uint8_t tonePosition = 0xff) {
         BlockingSilenceTransmitRing ring;
         auto native = device.nativeHandle();
         if (!native || dbs == 0 || pcmChannels >= dbs ||
-            dbs > kMaxDbs || packetCount == 0 || (packetCount % 128) != 0)
+            dbs > kMaxDbs || packetCount == 0 || (packetCount % 128) != 0 ||
+            (tonePosition != 0xff && tonePosition >= pcmChannels))
             return ring;
 
         ring.packetCount_ = packetCount;
@@ -56,6 +81,7 @@ public:
         std::memset(ring.storage_, 0, ring.mappedBytes_);
 
         std::uint8_t dbc = 0;
+        std::uint64_t sampleIndex = 0;
         for (std::size_t i = 0; i < packetCount; ++i) {
             const std::uint8_t phase = static_cast<std::uint8_t>(i & 3u);
             const UInt32 cycle = static_cast<UInt32>(
@@ -69,7 +95,8 @@ public:
                 // Blocking-mode empty packet. Keep the current FDF and mark
                 // absence of timing information with SYT=0xffff, matching the
                 // already hardware-proven macfw blocking transmitter behavior.
-                putBe32(payload + 4, 0x9002ffffu);
+                putBe32(payload + 4, 0x90000000u |
+                         (static_cast<std::uint32_t>(fdf) << 16) | 0xffffu);
                 ring.storage_[i].length = 8;
                 continue;
             }
@@ -77,22 +104,34 @@ public:
             const std::uint32_t sytOffset =
                 static_cast<std::uint32_t>(phase) * 1024u;
             const std::uint16_t syt = computeSyt(cycle, sytOffset);
-            putBe32(payload + 4,
-                    0x90020000u | static_cast<std::uint32_t>(syt));
+            putBe32(payload + 4, 0x90000000u |
+                    (static_cast<std::uint32_t>(fdf) << 16) | syt);
 
             std::size_t offset = 8;
-            for (std::size_t event = 0; event < 8; ++event) {
+            for (std::size_t event = 0; event < events; ++event) {
+                // 128 cycles contain 1536 samples at 96 kHz. Eight complete
+                // 500 Hz periods fit this static DCL loop without a seam.
+                std::uint32_t toneWord = 0x40000000u;
+                if (tonePosition != 0xff) {
+                    const double radians = 6.2831853071795864769 * 500.0 *
+                        static_cast<double>(sampleIndex) / 96000.0;
+                    const auto sample = static_cast<std::int32_t>(
+                        std::lround(std::sin(radians) * 529285.0));
+                    toneWord |= static_cast<std::uint32_t>(sample) & 0x00ffffffu;
+                }
                 for (std::size_t ch = 0; ch < pcmChannels; ++ch) {
-                    putBe32(payload + offset, 0x40000000u);
+                    putBe32(payload + offset,
+                            ch == tonePosition ? toneWord : 0x40000000u);
                     offset += 4;
                 }
                 for (std::size_t ch = pcmChannels; ch < dbs; ++ch) {
                     putBe32(payload + offset, 0x80000000u);
                     offset += 4;
                 }
+                ++sampleIndex;
             }
             ring.storage_[i].length = static_cast<UInt32>(offset);
-            dbc = static_cast<std::uint8_t>(dbc + 8u);
+            dbc = static_cast<std::uint8_t>(dbc + events);
         }
 
         ring.pool_ = (*native)->CreateNuDCLPool(
@@ -151,6 +190,7 @@ public:
         return ring;
     }
 
+public:
     explicit operator bool() const { return localPort_ != nullptr; }
     IOFireWireLibLocalIsochPortRef nativeLocalPort() const { return localPort_; }
     UInt32 firstCycle() const { return firstCycle_; }
@@ -159,7 +199,7 @@ public:
 private:
     static constexpr UInt32 kCyclesPerSecond = 8000;
     static constexpr std::size_t kMaxDbs = 32;
-    static constexpr std::size_t kMaxPacketBytes = 8 + 8 * kMaxDbs * 4;
+    static constexpr std::size_t kMaxPacketBytes = 8 + 16 * kMaxDbs * 4;
     static constexpr std::uint32_t kTicksPerCycle = 3072u;
     static constexpr std::uint32_t kTicksPerSecond = 24576000u;
     static constexpr std::uint32_t kTransferDelayTicks =

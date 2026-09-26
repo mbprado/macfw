@@ -8,11 +8,18 @@ BUS_RESET_DIR := ../../../common/tools/firewirebusreset
 LIBMACFW := ../../fw410/lib/libmacfw.a
 LIBMACFW_INCLUDE := ../../fw410/lib/include
 BOOT_TOOL := fwboot1814
+FIRMWARE_RESET_TOOL := fw1814firmwarereset
 INIT_TOOL := fw1814init
 CAPTURE48_TOOL := fw1814capture48
 DUALCMP_TOOL := fw1814capture48_dualcmp
 DUALCMP_WAIT_TOOL := fw1814capture48_dualcmp_wait
 DUPLEX_BLOCKING_TOOL := fw1814capture48_duplex_blocking
+DUPLEX96_TOOL := fw1814capture96_duplex_blocking
+DUPLEX88_TOOL := fw1814capture88_duplex_blocking
+DUPLEX176_TOOL := fw1814capture176_duplex_blocking
+DUPLEX192_TOOL := fw1814capture192_duplex_blocking
+TONE96_TOOL := fw1814tone96
+TONE96_LIVE_TOOL := fw1814tone96_live
 OUTPUT_WATCH_TOOL := fw1814capture48_output_watch
 TEARDOWN_WATCH_TOOL := fw1814teardown_watch
 CLIENT_CLOSE_WATCH_TOOL := fw1814client_close_watch
@@ -22,27 +29,36 @@ ROUTE_ANALOG_TOOL := fw1814route_stream_to_analog
 CONTROL_DIR := control/fw1814ctl
 STATE_CONTROL_DIR := control/fw1814state
 DEVICE_PROBE_TOOL := fw1814deviceprobe
+AUDIO_LOOPBACK_TOOL := fw1814audioloopback
 
 .PHONY: all runtime fingerprint probe boot-tool boot-check boot \
+	firmware-reset-tool firmware-reset-check firmware-reset \
 	bebob-probe bus-reset-tool bus-reset-check bus-reset operational-probe \
-	init-tool init-check init-48 init-44 \
+	init-tool init-check init-48 init-44 init-88-check init-96-check init-176-check init-192-check \
 	capture48-tool capture48-check capture48 capture48-raw \
 	dualcmp-tool dualcmp-check dualcmp dualcmp-raw \
 	dualcmp-wait-tool dualcmp-wait-check dualcmp-wait dualcmp-wait-raw \
 	duplex-blocking-tool duplex-blocking-check duplex-blocking duplex-blocking-raw \
+	duplex96-tool duplex96-check duplex96 duplex96-raw \
+	duplex88-tool duplex88-check duplex88 duplex88-raw \
+	duplex176-tool duplex176-check duplex176 duplex176-raw \
+	duplex192-tool duplex192-check duplex192 duplex192-raw schedule88-check schedule-quad-check receive88-cycle-check \
+	tone96-tool tone96-check tone96 tone96-raw \
+	tone96-live-tool tone96-live-check tone96-live \
 	output-watch-tool output-watch-check output-watch output-watch-raw \
 	teardown-watch-tool teardown-watch-check teardown-watch \
 	client-close-watch-tool client-close-watch-check client-close-watch \
 	stream-client-close-watch-tool stream-client-close-watch-check stream-client-close-watch \
 	playback-map-tool playback-map-check playback-map \
-	route-analog-tool route-analog-check route-analog control-tool control-state-tool device-probe-tool clean
+	route-analog-tool route-analog-check route-analog audio-loopback-tool audio-loopback \
+	control-tool control-state-tool device-probe-tool clean
 
 all: probe bebob-probe bus-reset-tool boot-tool init-tool capture48-tool dualcmp-tool dualcmp-wait-tool \
 	duplex-blocking-tool output-watch-tool teardown-watch-tool \
 	client-close-watch-tool stream-client-close-watch-tool playback-map-tool \
 	route-analog-tool control-tool control-state-tool
 
-runtime: boot-tool init-tool bus-reset-tool control-tool control-state-tool device-probe-tool
+runtime: boot-tool firmware-reset-tool init-tool bus-reset-tool control-tool control-state-tool device-probe-tool
 
 probe:
 	$(MAKE) -C $(PROBE_DIR)
@@ -60,6 +76,19 @@ boot-check: boot-tool
 
 boot: boot-tool
 	./$(BOOT_TOOL) --execute
+
+# Built into the installed runtime for the supervisor's guarded 176.4-kHz
+# recovery path. Direct execution still requires both explicit safety options.
+firmware-reset-tool: $(FIRMWARE_RESET_TOOL)
+
+$(FIRMWARE_RESET_TOOL): fw1814firmwarereset.cpp
+	$(CXX) $(CXXFLAGS) $< $(FRAMEWORKS) -o $@
+
+firmware-reset-check: firmware-reset-tool
+	./$(FIRMWARE_RESET_TOOL)
+
+firmware-reset: firmware-reset-tool
+	./$(FIRMWARE_RESET_TOOL) --execute --experimental-firmware-reset
 
 bebob-probe:
 	$(MAKE) -C $(BEBOB_PROBE_DIR)
@@ -89,6 +118,22 @@ init-48: init-tool
 
 init-44: init-tool
 	./$(INIT_TOOL) 44100 --execute
+
+# Read-only preflight for high-rate CONTROL diagnostics. Execution requires
+# an explicit --experimental-high-rate option with the transport stopped.
+init-88-check: init-tool
+	./$(INIT_TOOL) 88200
+
+init-96-check: init-tool
+	./$(INIT_TOOL) 96000
+
+# Read-only 176.4-kHz identity check; CONTROL requires both explicit opt-ins.
+init-176-check: init-tool
+	./$(INIT_TOOL) 176400
+
+# Read-only 192-kHz identity check; CONTROL requires both explicit opt-ins.
+init-192-check: init-tool
+	./$(INIT_TOOL) 192000
 
 $(LIBMACFW):
 	$(MAKE) -C ../../fw410/lib libmacfw.a
@@ -157,6 +202,123 @@ duplex-blocking: duplex-blocking-tool
 
 duplex-blocking-raw: duplex-blocking-tool
 	./$(DUPLEX_BLOCKING_TOOL) --execute --raw
+
+# Experimental 96 kHz duplex packet probe. This is not part of the normal
+# build or production transport; execution requires an explicit target.
+duplex96-tool: $(DUPLEX96_TOOL)
+
+$(DUPLEX96_TOOL): fw1814capture96_duplex_nodata.cpp fw1814_blocking_tx.h $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814capture96_duplex_nodata.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+duplex96-check: duplex96-tool
+	./$(DUPLEX96_TOOL)
+
+duplex96: duplex96-tool
+	./$(DUPLEX96_TOOL) --execute --experimental-high-rate
+
+duplex96-raw: duplex96-tool
+	./$(DUPLEX96_TOOL) --execute --experimental-high-rate --raw
+
+# Guarded 88.2 kHz duplex probe with a live 640/320-slot TX refill. Like the
+# 96 kHz probe, it is excluded from the default build and installed service.
+duplex88-tool: $(DUPLEX88_TOOL)
+
+$(DUPLEX88_TOOL): fw1814capture88_duplex_nodata.cpp fw1814_capture88_pump.h ../transport/blocking_pcm_tx88.h $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814capture88_duplex_nodata.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+duplex88-check: duplex88-tool
+	./$(DUPLEX88_TOOL)
+
+duplex88: duplex88-tool
+	./$(DUPLEX88_TOOL) --execute --experimental-high-rate
+
+duplex88-raw: duplex88-tool
+	./$(DUPLEX88_TOOL) --execute --experimental-high-rate --raw
+
+# Silent 176.4-kHz packet probe. Separate from normal builds and services;
+# a second explicit opt-in is required before any ISO or CONTROL writes.
+duplex176-tool: $(DUPLEX176_TOOL)
+
+$(DUPLEX176_TOOL): fw1814capture176_duplex_nodata.cpp fw1814_capture_quad_pump.h ../transport/blocking_pcm_tx176.h $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814capture176_duplex_nodata.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+duplex176-check: duplex176-tool
+	./$(DUPLEX176_TOOL)
+
+duplex176: duplex176-tool
+	./$(DUPLEX176_TOOL) --execute --experimental-high-rate --experimental-quad-rate
+
+duplex176-raw: duplex176-tool
+	./$(DUPLEX176_TOOL) --execute --experimental-high-rate --experimental-quad-rate --raw
+
+# Silent 192-kHz packet probe. Separate from normal builds and services;
+# both high-rate opt-ins are required before any ISO or CONTROL writes.
+duplex192-tool: $(DUPLEX192_TOOL)
+
+$(DUPLEX192_TOOL): fw1814capture192_duplex_nodata.cpp fw1814_capture_quad_pump.h ../transport/blocking_pcm_tx192.h $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814capture192_duplex_nodata.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+duplex192-check: duplex192-tool
+	./$(DUPLEX192_TOOL)
+
+duplex192: duplex192-tool
+	./$(DUPLEX192_TOOL) --execute --experimental-high-rate --experimental-quad-rate
+
+duplex192-raw: duplex192-tool
+	./$(DUPLEX192_TOOL) --execute --experimental-high-rate --experimental-quad-rate --raw
+
+# Offline proof that all immutable NuDCL send lengths match through the full
+# base-44.1 scheduler phase and that DBC continues through ring reuse.
+schedule88-check: test_88200_schedule.cpp
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) $< -o /tmp/macfw-fw1814-schedule88-check
+	/tmp/macfw-fw1814-schedule88-check
+
+# Offline blocking packet-length and DBC check; does not access FireWire.
+schedule-quad-check: test_quad_rate_schedule.cpp
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) $< -o /tmp/macfw-fw1814-schedule-quad-check
+	/tmp/macfw-fw1814-schedule-quad-check
+
+receive88-cycle-check: test_receive_cycle88.cpp fw1814_receive_cycle.h
+	$(CXX) $(CXXFLAGS) $< -o /tmp/macfw-fw1814-receive88-cycle-check
+	/tmp/macfw-fw1814-receive88-cycle-check
+
+# Experimental 96 kHz, phase-aligned 500 Hz tone in one playback position.
+# Uses the proven duplex probe's FCP reply matching and restore checks.
+tone96-tool: $(TONE96_TOOL)
+
+$(TONE96_TOOL): fw1814tone96.cpp fw1814_blocking_tx.h $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814tone96.cpp $(LIBMACFW) $(FRAMEWORKS) -o $@
+
+tone96-check: tone96-tool
+	@if [ -z "$(POSITION)" ]; then echo "usage: make tone96-check POSITION=0..5"; exit 64; fi
+	./$(TONE96_TOOL) --position $(POSITION)
+
+tone96: tone96-tool
+	@if [ -z "$(POSITION)" ]; then echo "usage: make tone96 POSITION=0..5"; exit 64; fi
+	./$(TONE96_TOOL) --position $(POSITION) --execute --experimental-high-rate
+
+tone96-raw: tone96-tool
+	@if [ -z "$(POSITION)" ]; then echo "usage: make tone96-raw POSITION=0..5"; exit 64; fi
+	./$(TONE96_TOOL) --position $(POSITION) --execute --experimental-high-rate --raw
+
+# Live PCM refill probe: frequencies need not fit the 128-cycle static ring.
+# FCP waits service the refill loop; this does not install a 96 kHz HAL.
+# The archive lives in a separate Makefile. Refresh it before checking the
+# executable's timestamp or a changed library object can leave an old tool.
+tone96-live-tool:
+	$(MAKE) -C ../../fw410/lib libmacfw.a
+	$(MAKE) $(TONE96_LIVE_TOOL)
+
+$(TONE96_LIVE_TOOL): fw1814tone96_live.cpp fw1814_pcm96_tx.h fw1814_pcm96_stream.h fw1814_capture96_pump.h fw1814_file96.h $(LIBMACFW)
+	$(CXX) -I$(LIBMACFW_INCLUDE) $(CXXFLAGS) fw1814tone96_live.cpp $(LIBMACFW) $(FRAMEWORKS) -framework AudioToolbox -o $@
+
+tone96-live-check: tone96-live-tool
+	@if [ -z "$(POSITION)" ]; then echo "usage: make tone96-live-check POSITION=0..5 FREQUENCY=440"; exit 64; fi
+	./$(TONE96_LIVE_TOOL) --position $(POSITION) --frequency $(or $(FREQUENCY),440)
+
+tone96-live: tone96-live-tool
+	@if [ -z "$(POSITION)" ]; then echo "usage: make tone96-live POSITION=0..5 FREQUENCY=440"; exit 64; fi
+	./$(TONE96_LIVE_TOOL) --position $(POSITION) --frequency $(or $(FREQUENCY),440) --execute --experimental-high-rate
 
 # Safety diagnostic for the observed generation change during duplex startup.
 # It starts the same correct blocking streams, sends OUTPUT 48 kHz only, and
@@ -251,6 +413,17 @@ route-analog-check: route-analog-tool
 route-analog: route-analog-tool
 	./$(ROUTE_ANALOG_TOOL) --execute
 
+# Full-duplex CoreAudio impulse loopback diagnostic. Selects the M-Audio FW1814,
+# reports the actual AUHAL playback rate, and measures electrical round-trip
+# latency from output channel 1 to input channel 1 using host timestamps.
+audio-loopback-tool: $(AUDIO_LOOPBACK_TOOL)
+
+$(AUDIO_LOOPBACK_TOOL): fw1814audioloopback.cpp
+	$(CXX) $(CXXFLAGS) $< -framework AudioUnit -framework CoreAudio -framework CoreFoundation -o $@
+
+audio-loopback: audio-loopback-tool
+	./$(AUDIO_LOOPBACK_TOOL)
+
 control-tool:
 	$(MAKE) -C $(CONTROL_DIR)
 
@@ -268,4 +441,4 @@ clean:
 	$(MAKE) -C $(BUS_RESET_DIR) clean
 	$(MAKE) -C $(CONTROL_DIR) clean
 	$(MAKE) -C $(STATE_CONTROL_DIR) clean
-	rm -f $(BOOT_TOOL) $(INIT_TOOL) $(DEVICE_PROBE_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) $(PLAYBACK_MAP_TOOL) $(ROUTE_ANALOG_TOOL) fw1814capture48_duplex_nodata
+	rm -f $(BOOT_TOOL) $(FIRMWARE_RESET_TOOL) $(INIT_TOOL) $(DEVICE_PROBE_TOOL) $(AUDIO_LOOPBACK_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(DUPLEX96_TOOL) $(TONE96_TOOL) $(TONE96_LIVE_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) $(PLAYBACK_MAP_TOOL) $(ROUTE_ANALOG_TOOL) fw1814capture48_duplex_nodata

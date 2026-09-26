@@ -51,7 +51,7 @@ Current cumulative macOS hardware-test status:
 
 Apple Silicon is not currently supported. See [`COMPATIBILITY.md`](COMPATIBILITY.md) and [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) for the evidence-based compatibility status.
 
-The FW1814 implementation has hardware-validated analog full-duplex CoreAudio operation, 44.1/48 kHz switching, reconnect recovery, persistent analog mixer/routing controls and physical headphone encoder volume reflected in its native AppKit control panel. Its runtime remains isolated from the FW410. The default source installer selects the connected interface, `install-force` installs both stacks, and the unified `.pkg` contains both payloads but installs only the connected interface(s). See [`devices/fw1814/README.md`](devices/fw1814/README.md) for its current scope.
+The FW1814 implementation has hardware-tested analog full-duplex CoreAudio at 44.1, 48, 88.2 and 96 kHz, including rate switching, restart recovery, low-latency rolling TX and live transport profiles. Persistent analog mixer/routing controls and physical headphone encoder volume are reflected in its native AppKit control panel. The 176.4/192 kHz quad-speed modes remain experimental. Its runtime remains isolated from the FW410. The default source installer selects the connected interface, `install-force` installs both stacks, and the unified `.pkg` contains both payloads but installs only the connected interface(s). See [`devices/fw1814/README.md`](devices/fw1814/README.md) for its current scope.
 
 macOS Tahoe 26 is not currently supported because Apple removed the built-in FireWire stack on which macfw depends. Future Tahoe support may become possible through integration with an alternative stack such as [`ASFireWire`](https://github.com/mrmidi/ASFireWire), but that path is experimental and has not been integrated or validated with macfw.
 
@@ -118,7 +118,8 @@ The current AppKit control panel includes:
 - **Headphones** — source, L/R volume and five mixer-output pair enables;
 - **AUX** — software-return/AUX output levels;
 - **Inputs** — live four-channel capture meters;
-- **Device** — transport/CoreAudio state and 44.1/48 kHz selection;
+- **Device** — transport/CoreAudio state, sample-rate selection and persistent
+  FW1814 Aggressive/Balanced/Conservative transport profiles;
 - **Info** — component/runtime identity and support diagnostics.
 
 The Device sample-rate selector uses the normal CoreAudio nominal-sample-rate property and HAL configuration-change lifecycle. It does not bypass CoreAudio or call FireWire rate-control probes directly.
@@ -126,7 +127,9 @@ The Device sample-rate selector uses the normal CoreAudio nominal-sample-rate pr
 The FW1814 control panel follows the same transport-owned architecture and
 covers its validated analog surface: two software returns, four analog input
 pairs, two analog output pairs, two digital-volume headphone outputs, AUX
-sends/master, persistent state, diagnostics and 44.1/48 kHz selection.
+sends/master, persistent state, diagnostics and 44.1/48/88.2/96 kHz selection.
+At those rates its Device tab exposes 250/375/500 µs service profiles,
+trading transport CPU wakeups against latency.
 
 ## Main mixer discovery
 
@@ -235,7 +238,7 @@ Major completed FW410 areas now include:
 
 Deferred work includes unresolved mixer strip level/pan/mute/AUX-send semantics, calibrated CoreAudio latency reporting, MIDI, named presets, optional menu-bar controls, broader hardware coverage, and signing/notarization.
 
-The FW1814 has separately reached hardware-validated analog CoreAudio playback/capture, 44.1/48 kHz switching, reconnect recovery, persistent analog routing/mixer controls and its first native control panel. The next major sequence is higher sample rates, then digital I/O and MIDI when direct comparison with both original M-Audio panels is available.
+The FW1814 has reached hardware-tested analog playback/capture and switching at 44.1, 48, 88.2 and 96 kHz, with rolling TX, reconnect recovery, persistent routing/mixer controls and a native control panel. Quad-speed 176.4/192 kHz development remains separate, followed by digital I/O and MIDI when direct comparison with both original M-Audio panels is available.
 
 ## Release documentation
 

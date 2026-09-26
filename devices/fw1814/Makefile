@@ -1,6 +1,6 @@
 PREFIX ?= /Library/Application Support/macfw/fw1814
 
-.PHONY: all clean install-check install uninstall hal runtime all-tools tools gui
+.PHONY: all clean install-check install install-experimental96 install-experimental88 install-experimental176 install-experimental192 uninstall hal runtime all-tools tools gui
 
 all: hal runtime gui
 
@@ -22,8 +22,13 @@ install-check:
 	    [ ! -x transport/fw1814supervisor ] || \
 	    [ ! -x transport/fw1814analog48 ] || \
 	    [ ! -x transport/fw1814analog44 ] || \
+	    [ ! -x transport/fw1814analog88 ] || \
+	    [ ! -x transport/fw1814analog96 ] || \
+	    [ ! -x transport/fw1814analog176 ] || \
+	    [ ! -x transport/fw1814analog192 ] || \
 	    [ ! -x tools/fw1814init ] || \
 	    [ ! -x tools/fwboot1814 ] || \
+	    [ ! -x tools/fw1814firmwarereset ] || \
 	    [ ! -x tools/fw1814deviceprobe ] || \
 	    [ ! -x ../../common/tools/firewirebusreset/firewirebusreset ] || \
 	    [ ! -x tools/control/fw1814ctl/fw1814ctl ] || \
@@ -41,6 +46,33 @@ install: install-check
 	bash service/install-service.sh --check-only
 	$(MAKE) -C hal install
 	bash service/install-service.sh
+	$(MAKE) -C control-panel install
+
+# Compatibility aliases: 88.2/96 kHz are included in the normal install.
+install-experimental96 install-experimental88: install
+
+install-experimental176: install-check
+	@if [ "$$(id -u)" -ne 0 ]; then \
+		echo "error: experimental FW1814 install must be run as root" >&2; exit 1; \
+	fi
+	@if [ ! -x transport/fw1814analog176 ]; then \
+		echo "error: build the 176.4 kHz engine with 'make fw1814-experimental176' first" >&2; exit 1; \
+	fi
+	MACFW_INSTALL_EXPERIMENTAL176=1 bash service/install-service.sh --check-only
+	$(MAKE) -C hal install
+	MACFW_INSTALL_EXPERIMENTAL176=1 bash service/install-service.sh
+	$(MAKE) -C control-panel install
+
+install-experimental192: install-check
+	@if [ "$$(id -u)" -ne 0 ]; then \
+		echo "error: experimental FW1814 install must be run as root" >&2; exit 1; \
+	fi
+	@if [ ! -x transport/fw1814analog192 ]; then \
+		echo "error: build the 192 kHz engine with 'make fw1814-experimental192' first" >&2; exit 1; \
+	fi
+	MACFW_INSTALL_EXPERIMENTAL192=1 bash service/install-service.sh --check-only
+	$(MAKE) -C hal install
+	MACFW_INSTALL_EXPERIMENTAL192=1 bash service/install-service.sh
 	$(MAKE) -C control-panel install
 
 uninstall:

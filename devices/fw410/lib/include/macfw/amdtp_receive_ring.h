@@ -16,6 +16,7 @@ public:
         UInt32 timestamp = 0;
         std::uint8_t* payload = nullptr;
         std::size_t capacity = 0;
+        bool metadataByteSwapped = false;
 
         std::size_t packetLength() const {
             return static_cast<std::size_t>(isoHeader >> 16);

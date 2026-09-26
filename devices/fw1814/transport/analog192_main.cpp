@@ -1,0 +1,902 @@
+#include "../fcp_control.h"
+#include "../special_mixer.h"
+#include "blocking_pcm_tx192.h"
+#include "../tools/fw1814_capture_quad_pump.h"
+#include "duplex_lifecycle.h"
+#include "engine_ready.h"
+#include "fw1814_control_server.h"
+
+#include "playback_pump.h"
+#include "realtime_service.h"
+#include "shared_io.h"
+
+#include "macfw/amdtp_receive_ring.h"
+#include "macfw/firewire_device.h"
+#include "macfw/pcm_ring_buffer.h"
+
+#include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/firewire/IOFireWireLib.h>
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <csignal>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <thread>
+#include <vector>
+
+namespace {
+
+constexpr const char* kProduct = "FW 1814";
+constexpr unsigned kRate = 192000;
+constexpr UInt32 kCaptureMaxPacket = 392;
+constexpr UInt32 kPlaybackMaxPacket = 648;
+// Keep publication chunks at 32 slots; use a deeper ring for service jitter.
+constexpr std::size_t kCaptureSlots = 256;
+// Use a longer ring than the standalone probe so a scheduling delay cannot
+// consume the next half before the audio service refills it.
+constexpr std::size_t kValidatedTxPackets = 2560;
+constexpr std::size_t kShortRollingTxPackets = 1280;
+// At 192 kHz each 1280-cycle half contains 960 data packets with 32 PCM
+// frames each.
+constexpr std::size_t kFramesPerTxHalf = 960 * 32;
+constexpr std::size_t kPcmCapacityFrames = 524288;
+constexpr std::size_t kCapturePrefillFrames = 512;
+constexpr std::size_t kQuadPlaybackPcmPositions = 4;
+constexpr UInt32 kCycleLead = 4096;
+constexpr UInt32 kCyclesPerSecond = 8000;
+constexpr std::uint64_t kAudioServicePeriodNs = 250000;
+// Start with silent PCM through the duplex rate kick. This initial reserve
+// follows the 96-kHz prototype; hardware testing must validate its latency.
+constexpr std::size_t kSilentStartupFrames = 8 * kRate / 5;
+constexpr std::size_t kReadySilenceFrames = 4 * kFramesPerTxHalf;
+// Match the roughly 43-46 ms live-release reserve used by the stable
+// 88.2/96 kHz engines without changing the validated 1280/640 TX geometry.
+constexpr std::size_t kReleaseSilenceFrames = 8192;
+constexpr std::chrono::milliseconds kHalPlaybackPrearmTimeout(1000);
+// Quad-rate input must remain quiet beyond the two-second supervisor settle;
+// otherwise the first unstable metadata group can reach CoreAudio just after
+// the engine announces readiness.
+constexpr std::chrono::milliseconds kCaptureQualificationQuiet(2500);
+constexpr std::chrono::milliseconds kCaptureQualificationTimeout(10000);
+// Keep the output muted after capture qualifies.  The 192 kHz device can
+// still be audibly unstable for a short interval after packet metadata has
+// settled, so give its analog/clock path a separate warmup window.
+constexpr std::chrono::milliseconds kOutputWarmup(1500);
+
+bool rollingTxRequested() {
+    const char* value = std::getenv("MACFW_192_ROLLING_TX");
+    return !value || value[0] != '0';
+}
+
+bool shortRollingRingRequested() {
+    const char* value = std::getenv("MACFW_192_ROLLING_RING_PACKETS");
+    return !value || std::strcmp(value, "2560") != 0;
+}
+
+volatile std::sig_atomic_t gStopRequested = 0;
+volatile std::sig_atomic_t gQualificationFailed = 0;
+void signalHandler(int) { gStopRequested = 1; }
+
+UInt32 cycleCount(UInt32 cycleTime) {
+    return (cycleTime >> 12) & 0x1fffu;
+}
+
+bool run() {
+    using namespace macfw::fw1814::transport;
+
+    if (access("/tmp/macfw-fw1814-control.sock", F_OK) == 0) {
+        std::cerr << "Stop the installed FW1814 supervisor before this experimental engine\n";
+        return false;
+    }
+
+    SharedPlaybackReader playbackShared;
+    if (!playbackShared.open()) {
+        std::cerr << "FW1814 playback shared ring unavailable; "
+                     "install the guarded 192 kHz HAL and open the CoreAudio device\n";
+        return false;
+    }
+    if (playbackShared.ring()->sampleRate.load(std::memory_order_acquire) != kRate) {
+        std::cerr << "FW1814 playback shared ring is not set to 192000 Hz\n";
+        return false;
+    }
+    playbackShared.discardBacklog();
+
+    SharedCaptureWriter captureShared;
+    if (!captureShared.open(kRate))
+        return false;
+
+    auto device = macfw::FireWireDevice::findByProductName(kProduct);
+    if (!device) {
+        std::cerr << "No operational FW 1814 unit found\n";
+        return false;
+    }
+    if (device.open() != kIOReturnSuccess) {
+        std::cerr << "FW1814 open failed\n";
+        return false;
+    }
+
+    bool ok = false;
+    bool playbackActive = false;
+    bool rateAttempted = false;
+    macfw::fw1814::FcpControl fcp;
+    DuplexLifecycle lifecycle;
+    Fw1814ControlServer control;
+    IsochCallbackRunLoopThread isochCallbackThread;
+
+    if (!macfw::fw1814::applyStraightAnalogPlaybackRouting(device))
+        goto cleanup;
+
+    // The standalone hardware test established that 192 kHz must be armed
+    // before CMP/ISO starts. Attach only the general callback path here so
+    // FCP remains available for guarded cleanup if later resource setup fails.
+    if (!lifecycle.attachDevice(device) || !lifecycle.addCallbackDispatcher()) {
+        std::cerr << "FW1814 pre-ISO callback dispatcher setup failed\n";
+        goto cleanup;
+    }
+    if (!fcp.arm(device)) {
+        std::cerr << "FW1814 pre-ISO FCP response handler setup failed\n";
+        goto cleanup;
+    }
+    {
+        unsigned currentRate = 0;
+        if (!fcp.readInputRate(currentRate, false) || currentRate != 48000) {
+            std::cerr << "FW1814 authoritative INPUT rate is " << currentRate
+                      << " Hz; expected the supervisor's settled 48 kHz baseline\n";
+            goto cleanup;
+        }
+        rateAttempted = true;
+        std::cout << "FW1814 pre-arming OUTPUT 192000 Hz before ISO\n";
+        if (!fcp.setSignalRate(kRate, 0x18, false))
+            goto cleanup;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::cout << "FW1814 pre-arming INPUT 192000 Hz before ISO\n";
+        if (!fcp.setSignalRate(kRate, 0x19, false))
+            goto cleanup;
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        unsigned armedRate = 0;
+        if (!fcp.readInputRate(armedRate, false) || armedRate != kRate) {
+            std::cerr << "FW1814 pre-ISO INPUT rate readback is " << armedRate
+                      << " Hz; refusing ISO startup\n";
+            goto cleanup;
+        }
+    }
+
+    {
+        macfw::PcmRingBuffer pcm(kPcmCapacityFrames,
+                                 kQuadPlaybackPcmPositions);
+        std::vector<std::int32_t> silence(
+            kSilentStartupFrames * kQuadPlaybackPcmPositions, 0);
+        if (!pcm.valid() || pcm.write(silence.data(), kSilentStartupFrames) !=
+                kSilentStartupFrames) {
+            std::cerr << "FW1814 192 kHz silent warmup preload failed\n";
+            goto cleanup;
+        }
+        auto rx = macfw::AmdtpReceiveRing::create(
+            device, kCaptureSlots, kCaptureMaxPacket);
+        // The startup PCM preload and RX allocation can take appreciable
+        // time. Anchor the 4096-cycle transmit lead only after they finish,
+        // as the working standalone tone probe does.
+        UInt32 cycleTime = 0;
+        if ((*device.nativeHandle())->GetCycleTime(device.nativeHandle(), &cycleTime) !=
+            kIOReturnSuccess) {
+            std::cerr << "FW1814 GetCycleTime failed\n";
+            goto cleanup;
+        }
+        const UInt32 initialCycle = cycleCount(cycleTime);
+        const CFAbsoluteTime cycleAnchorTime = CFAbsoluteTimeGetCurrent();
+        const auto startupMs = [&] {
+            return (CFAbsoluteTimeGetCurrent() - cycleAnchorTime) * 1000.0;
+        };
+        const UInt32 firstCycle = (initialCycle + kCycleLead) % kCyclesPerSecond;
+        const bool rollingTx = rollingTxRequested();
+        const std::size_t txPackets = rollingTx && shortRollingRingRequested()
+            ? kShortRollingTxPackets : kValidatedTxPackets;
+        const std::size_t txHalfPackets = txPackets / 2;
+        auto tx = macfw::fw1814::transport::BlockingPcmTransmitRing192000::create(
+            device, firstCycle, txPackets);
+        if (!pcm.valid() || !rx || !tx) {
+            std::cerr << "FW1814 PCM/ISO ring creation failed\n";
+            goto cleanup;
+        }
+
+        macfw::fw1814::transport::BlockingPcmStream192000 streamer(
+            tx, pcm, initialCycle, firstCycle, txHalfPackets);
+        if (rollingTx && !streamer.enableRolling(96, 48)) {
+            std::cerr << "FW1814 192 kHz rolling TX setup failed\n";
+            goto cleanup;
+        }
+        if (!streamer.valid() || !streamer.prime()) {
+            std::cerr << "FW1814 playback stream prime failed\n";
+            goto cleanup;
+        }
+        std::cout << "FW1814 playback TX ring: " << txPackets
+                  << " packets / " << txHalfPackets
+                  << "-packet halves (" << txPackets / 8 << " ms / "
+                  << txHalfPackets / 8 << " ms)\n";
+        if (rollingTx)
+            std::cout << "FW1814 192 kHz EXPERIMENTAL rolling TX: "
+                         "96-cycle live lead, 48-cycle deadline guard\n";
+        std::cout << "FW1814 capture RX ring: " << kCaptureSlots
+                  << " packets / 32-packet publication chunks\n";
+
+        if (!lifecycle.prepare(device, rx, tx.nativeLocalPort(),
+                               kCaptureMaxPacket, kPlaybackMaxPacket)) {
+            std::cerr << "FW1814 duplex lifecycle prepare failed\n";
+            goto cleanup;
+        }
+        // FCP/general callbacks are already active from the pre-ISO rate arm.
+        // Isoch callbacks move to their own user-interactive thread below.
+        if (!isochCallbackThread.prepare()) {
+            std::cerr << "FW1814 dedicated isoch callback thread setup failed\n";
+            goto cleanup;
+        }
+
+        unsigned currentRate = 0;
+        if (!fcp.readInputRate(currentRate, false) || currentRate != kRate) {
+            std::cerr << "FW1814 authoritative INPUT rate is " << currentRate
+                      << " Hz after pre-ISO arm; refusing ISO startup\n";
+            goto cleanup;
+        }
+
+        if (!lifecycle.startIsoch(isochCallbackThread.runLoop())) {
+            std::cerr << "FW1814 duplex ISO/CMP start failed\n";
+            goto cleanup;
+        }
+        UInt32 startedCycleTime = 0;
+        if ((*device.nativeHandle())->GetCycleTime(device.nativeHandle(),
+                                                    &startedCycleTime) != kIOReturnSuccess) {
+            std::cerr << "FW1814 GetCycleTime after ISO start failed\n";
+            goto cleanup;
+        }
+        const double isoStartDelayMs =
+            (CFAbsoluteTimeGetCurrent() - cycleAnchorTime) * 1000.0;
+        std::cout << "FW1814 192 kHz TX cycle anchor: " << initialCycle
+                  << " first=" << firstCycle
+                  << " at-ISO-start=" << cycleCount(startedCycleTime)
+                  << " setup-ms=" << isoStartDelayMs << '\n';
+        if (isoStartDelayMs >= 450.0) {
+            std::cerr << "FW1814 192 kHz TX lead nearly expired before audio servicing; "
+                         "refusing rate kick\n";
+            goto cleanup;
+        }
+        isochCallbackThread.startPumping();
+
+        std::cout << "FW1814 duplex ISO started: playback ch="
+                  << lifecycle.playbackChannel()
+                  << " capture ch=" << lifecycle.captureChannel() << '\n';
+        std::cout << "FW1814 isoch callback dispatcher: dedicated run-loop thread\n";
+        // Start TX servicing before the special FCP kick. The FCP response
+        // loop and 100 ms INPUT delay must not starve the 80 ms TX halves.
+        std::atomic<bool> rateKicked{false};
+        std::atomic<bool> releasePlayback{false};
+        std::atomic<bool> captureQualified{false};
+        std::atomic<std::int64_t> playbackReleaseNs{0};
+
+        macfw::fw1814::experimental::CapturePump192000 capturePump;
+        PlaybackPumpStats playbackPumpStats;
+        std::vector<float> audio(
+            4096 * macfw::fw1814::hal::kOutputChannels, 0.0f);
+        std::vector<std::int32_t> mapped(
+            4096 * kQuadPlaybackPcmPositions, 0);
+        const auto writeSilenceFrames = [&](std::size_t frames) {
+            std::size_t writtenTotal = 0;
+            const auto silenceCapacity =
+                silence.size() / macfw::fw1814::hal::kOutputChannels;
+            while (writtenTotal < frames) {
+                const auto chunk = std::min(frames - writtenTotal, silenceCapacity);
+                const auto written = pcm.write(silence.data(), chunk);
+                if (written == 0)
+                    break;
+                writtenTotal += written;
+            }
+            return writtenTotal;
+        };
+
+        AudioServicePeriodControl performance(kAudioServicePeriodNs);
+        std::cout << "FW1814 experimental 192 kHz analog engine starting\n"
+                  << "    CoreAudio-facing outputs: Analog 1-4\n"
+                  << "    CoreAudio-facing inputs:  Analog 1-2\n"
+                  << "    digital/MIDI/headphone levels: deferred\n"
+                  << "    audio service: dedicated Mach-paced thread ("
+                  << performance.periodNs() / 1000 << " us)\n"
+                  << "    Ctrl-C to stop\n";
+
+        std::atomic<bool> audioFinished{false};
+        bool audioOk = false;
+
+        std::thread audioThread([&] {
+            requestInteractiveQos("FW1814 audio service thread");
+            requestAudioTimeConstraint();
+            MachPacer pacer(performance.periodNs());
+            if (!pacer.valid()) {
+                std::cerr << "FW1814 Mach pacing setup failed\n";
+                audioFinished.store(true, std::memory_order_release);
+                return;
+            }
+
+            bool captureReady = false;
+            bool captureQualificationStarted = false;
+            bool firstSharedReadLogged = false;
+            bool firstNonzeroTxLogged = false;
+            const bool verbose = std::getenv("MACFW_VERBOSE") != nullptr;
+            CFAbsoluteTime lastGenerationCheck = CFAbsoluteTimeGetCurrent();
+            CFAbsoluteTime lastStatus = lastGenerationCheck;
+            std::uint64_t lastCaptureFrames = 0;
+            std::uint64_t qualificationStartFrames = 0;
+            std::uint64_t lastCaptureFaults = 0;
+            unsigned qualificationRetries = 0;
+            std::chrono::steady_clock::time_point qualificationStartedAt{};
+            std::chrono::steady_clock::time_point captureQuietSince{};
+
+            while (!gStopRequested) {
+                if (pacer.intervalNanoseconds() != performance.periodNs() &&
+                    !pacer.setIntervalNanoseconds(performance.periodNs())) {
+                    std::cerr << "FW1814 cannot apply audio service period\n";
+                    break;
+                }
+                pacer.wait();
+
+                if (rateKicked.load(std::memory_order_acquire))
+                    capturePump.service(rx, *captureShared.ring());
+                if (!releasePlayback.load(std::memory_order_acquire) &&
+                    !captureQualified.load(std::memory_order_acquire)) {
+                    // Capture qualification can outlast the initial silent
+                    // reserve. Keep TX fed while playback is held so the
+                    // device never sees an underrun before release.
+                    auto queued = pcm.availableFrames();
+                    const auto silenceCapacity =
+                        silence.size() / macfw::fw1814::hal::kOutputChannels;
+                    while (queued < kReadySilenceFrames) {
+                        const auto topUpFrames = std::min(
+                            kReadySilenceFrames - queued, silenceCapacity);
+                        const auto written = pcm.write(silence.data(), topUpFrames);
+                        if (written == 0)
+                            break;
+                        queued += written;
+                    }
+                }
+                if (releasePlayback.load(std::memory_order_acquire)) {
+                    const auto framesBefore = playbackPumpStats.framesRead;
+                    drainPlaybackQuad(*playbackShared.ring(), pcm, audio, mapped,
+                                      &playbackPumpStats);
+                    if (!firstSharedReadLogged &&
+                        playbackPumpStats.framesRead != framesBefore) {
+                        const auto released =
+                            playbackReleaseNs.load(std::memory_order_acquire);
+                        const auto now = std::chrono::duration_cast<
+                            std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch())
+                                             .count();
+                        std::cout << "FW1814 192 kHz first shared playback read: "
+                                  << (now - released) / 1000000
+                                  << " ms after release\n";
+                        firstSharedReadLogged = true;
+                    }
+                }
+
+                UInt32 nowCycleTime = 0;
+                if ((*device.nativeHandle())->GetCycleTime(
+                        device.nativeHandle(), &nowCycleTime) == kIOReturnSuccess)
+                    streamer.service(cycleCount(nowCycleTime));
+                if (!streamer.healthy()) {
+                    std::cerr << "FW1814 192 kHz rolling TX deadline missed; "
+                                 "stopping before stale DMA playback\n";
+                    audioFinished.store(true, std::memory_order_release);
+                    return;
+                }
+
+                if (releasePlayback.load(std::memory_order_acquire) &&
+                    !firstNonzeroTxLogged &&
+                    streamer.stats().nonzeroFrames != 0) {
+                    const auto released =
+                        playbackReleaseNs.load(std::memory_order_acquire);
+                    const auto now = std::chrono::duration_cast<
+                        std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                                         .count();
+                    std::cout << "FW1814 192 kHz first nonzero TX: "
+                              << (now - released) / 1000000
+                              << " ms after release\n";
+                    firstNonzeroTxLogged = true;
+                }
+
+                if (rateKicked.load(std::memory_order_acquire))
+                    capturePump.service(rx, *captureShared.ring());
+
+                if (rateKicked.load(std::memory_order_acquire) &&
+                    !captureQualified.load(std::memory_order_acquire)) {
+                    const auto qualificationNow =
+                        std::chrono::steady_clock::now();
+                    const auto& rxStats = capturePump.stats();
+                    const auto captureFrames = captureShared.ring()->decodedFrames.load(
+                        std::memory_order_acquire);
+                    const auto captureFaults =
+                        captureShared.ring()->invalidLabels.load(
+                            std::memory_order_acquire) +
+                        captureShared.ring()->malformedPackets.load(
+                            std::memory_order_acquire) +
+                        rxStats.metadataByteSwaps +
+                        rxStats.dbcDiscontinuities +
+                        rxStats.timestampRegressions +
+                        rxStats.reorderedPackets +
+                        rxStats.stalePackets;
+
+                    if (!captureQualificationStarted) {
+                        captureQualificationStarted = true;
+                        qualificationStartedAt = qualificationNow;
+                        captureQuietSince = qualificationNow;
+                        qualificationStartFrames = captureFrames;
+                        lastCaptureFaults = captureFaults;
+                        std::cout << "FW1814 192 kHz capture qualification: "
+                                     "waiting for 1500 ms clean input\n";
+                    } else {
+                        if (captureFaults != lastCaptureFaults) {
+                            captureQuietSince = qualificationNow;
+                            lastCaptureFaults = captureFaults;
+                        }
+                        const bool enoughCapture =
+                            captureFrames - qualificationStartFrames >= kRate;
+                        const bool quietLongEnough =
+                            qualificationNow - captureQuietSince >=
+                            kCaptureQualificationQuiet;
+                        if (enoughCapture && quietLongEnough) {
+                            captureQualified.store(true, std::memory_order_release);
+                            // Only the latest clean prefill may reach CoreAudio.
+                            const auto w = captureShared.ring()->writeFrame.load(
+                                std::memory_order_acquire);
+                            captureShared.ring()->readFrame.store(
+                                w, std::memory_order_release);
+                            std::cout << "FW1814 192 kHz capture qualified: "
+                                      << captureFrames - qualificationStartFrames
+                                      << " frames observed; startup faults="
+                                      << captureFaults << '\n';
+                        } else if (qualificationNow - qualificationStartedAt >=
+                                   kCaptureQualificationTimeout &&
+                                   qualificationRetries < 1) {
+                            ++qualificationRetries;
+                            // Keep the ISO engine alive across a transient
+                            // metadata phase. Discard everything observed so
+                            // far and establish a fresh clean-input window;
+                            // the supervisor must not tear down the TX path
+                            // merely to retry RX qualification.
+                            const auto write = captureShared.ring()->writeFrame.load(
+                                std::memory_order_acquire);
+                            captureShared.ring()->readFrame.store(
+                                write, std::memory_order_release);
+                            qualificationStartedAt = qualificationNow;
+                            captureQuietSince = qualificationNow;
+                            qualificationStartFrames = captureFrames;
+                            lastCaptureFaults = captureFaults;
+                            std::cout << "FW1814 192 kHz capture qualification: "
+                                         "transient startup faults; restarting "
+                                         "qualification in place (attempt "
+                                      << (qualificationRetries + 1) << "/2)\n";
+                        } else if (qualificationNow - qualificationStartedAt >=
+                                   kCaptureQualificationTimeout) {
+                            std::cerr << "FW1814 192 kHz capture qualification "
+                                         "FAILED after 8000 ms: faults="
+                                      << captureFaults
+                                      << " invalid="
+                                      << captureShared.ring()->invalidLabels.load(
+                                             std::memory_order_relaxed)
+                                      << " malformed="
+                                      << captureShared.ring()->malformedPackets.load(
+                                             std::memory_order_relaxed)
+                                      << " metadata-swaps="
+                                      << rxStats.metadataByteSwaps
+                                      << " dbc-gap="
+                                      << rxStats.dbcDiscontinuities
+                                      << " ts-regress="
+                                      << rxStats.timestampRegressions
+                                      << " reorder=" << rxStats.reorderedPackets
+                                      << " stale=" << rxStats.stalePackets
+                                      << "; requesting stream retry\n";
+                            gQualificationFailed = 1;
+                            audioFinished.store(true, std::memory_order_release);
+                            return;
+                        }
+                    }
+                }
+
+                if (captureQualified.load(std::memory_order_acquire) &&
+                    captureShared.ring()->active.load(std::memory_order_acquire) == 0) {
+                    const bool resumed = captureReady;
+                    captureReady = false;
+                    if (captureShared.activateForConsumer(kCapturePrefillFrames)) {
+                        captureReady = true;
+                        std::cout << (resumed ? "FW1814 capture consumer resumed; "
+                                              "fresh capture enabled\n"
+                                              : "FW1814 capture consumer detected; "
+                                                "live capture enabled\n");
+                    }
+                }
+
+                const CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+                if (now - lastGenerationCheck >= 0.25) {
+                    if (!lifecycle.generationStillValid()) {
+                        std::cerr << "FW1814 FireWire generation changed during streaming; "
+                                     "requesting engine restart\n";
+                        audioFinished.store(true, std::memory_order_release);
+                        return;
+                    }
+                    lastGenerationCheck = now;
+                }
+
+                if (verbose && now - lastStatus >= 2.0) {
+                    const auto captureFrames =
+                        captureShared.ring()->decodedFrames.load(std::memory_order_acquire);
+                    const auto& txStats = streamer.stats();
+                    const auto& rxStats = capturePump.stats();
+                    const auto* pb = playbackShared.ring();
+                    const auto outSharedFrames =
+                        macfw::fw1814::hal::availableFrames(*pb);
+                    const auto outTransportFrames =
+                        outSharedFrames + pcm.availableFrames();
+                    const auto inTransportFrames =
+                        macfw::fw1814::hal::capture::availableFrames(
+                            *captureShared.ring());
+                    std::cout << "FW1814 out-shared="
+                              << outSharedFrames
+                              << " pcm=" << pcm.availableFrames()
+                              << " transport-out=" << outTransportFrames
+                              << " (" << outTransportFrames * 1000 / kRate
+                              << " ms)"
+                              << " tx-audio=" << txStats.framesFromBuffer
+                              << " tx-silence=" << txStats.framesSilenced
+                              << " tx-nonzero=" << txStats.nonzeroFrames
+                              << " marker-pb=" << playbackPumpStats.firstLoudHostTime
+                              << " marker-tx=" << txStats.firstLoudHostTime
+                              << " marker-cap=" << rxStats.firstLoudHostTime
+                              << " tx-peak=" << txStats.peakSample
+                              << " tx-late=" << txStats.lateCyclePolls
+                              << " tx-danger=" << txStats.dangerousCyclePolls
+                              << " tx-roll-packets=" << txStats.rollingPacketsRefilled
+                              << " tx-roll-miss=" << txStats.rollingDeadlineMisses
+                              << " tx-max-gap=" << txStats.maxCycleDelta
+                              << " tx-max-behind=" << txStats.maxHalvesBehind
+                              << " pcm-underrun=" << pcm.underrunFrames()
+                              << " pb-read=" << playbackPumpStats.framesRead
+                              << " hal-calls=" << pb->doIOCalls.load(std::memory_order_relaxed)
+                              << " hal-frames=" << pb->doIOFrames.load(std::memory_order_relaxed)
+                              << " hal-drop=" << pb->droppedFrames.load(std::memory_order_relaxed)
+                              << " in-peak=" << playbackPumpStats.peakAbs
+                              << " clip=" << playbackPumpStats.clippedSamples
+                              << " nonfinite=" << playbackPumpStats.nonFiniteSamples
+                              << " | capture=" << captureFrames
+                              << " (delta " << (captureFrames - lastCaptureFrames) << ')'
+                              << " queued="
+                              << inTransportFrames
+                              << " (" << inTransportFrames * 1000 / kRate
+                              << " ms)"
+                              << " cap-drop=" << captureShared.ring()->droppedFrames.load(std::memory_order_relaxed)
+                              << " cap-active=" << captureShared.ring()->active.load(std::memory_order_relaxed)
+                              << " cap-qualified="
+                              << captureQualified.load(std::memory_order_relaxed)
+                              << " hal-in-reads=" << captureShared.ring()->halReadCalls.load(std::memory_order_relaxed)
+                              << " hal-in-frames=" << captureShared.ring()->halFramesFromRing.load(std::memory_order_relaxed)
+                              << " hal-in-zero=" << captureShared.ring()->halZeroFilledFrames.load(std::memory_order_relaxed)
+                              << " hal-in-underrun=" << captureShared.ring()->halUnderrunEvents.load(std::memory_order_relaxed)
+                              << " rx-touched=" << rx.touchedCount() << '/' << rx.packetCount()
+                              << " chunks=" << rxStats.completedChunks
+                              << " malformed=" << captureShared.ring()->malformedPackets.load()
+                              << " invalid=" << captureShared.ring()->invalidLabels.load()
+                              << " nodata=" << rxStats.noDataPackets
+                              << " dbc-gap=" << rxStats.dbcDiscontinuities
+                              << " duplicates=" << rxStats.duplicateSlots
+                              << " incomplete=" << rxStats.incompleteGroups
+                              << " recovered=" << rxStats.recoveredGroups
+                              << " overwritten=" << rxStats.overwrittenGroups
+                              << " salvaged=" << rxStats.salvagedGroups
+                              << " skipped-slots=" << rxStats.skippedSlots
+                              << " first-incomplete-slot=" << rxStats.firstIncompleteSlot
+                              << " ts-regress=" << rxStats.timestampRegressions
+                              << " metadata-swaps=" << rxStats.metadataByteSwaps
+                              << " reorder=" << rxStats.reorderedPackets
+                              << " stale=" << rxStats.stalePackets << '\n';
+                    lastCaptureFrames = captureFrames;
+                    lastStatus = now;
+                }
+            }
+
+            audioOk = true;
+            audioFinished.store(true, std::memory_order_release);
+        });
+
+        // The dedicated audio thread services TX throughout both CONTROL
+        // transactions and the post-kick silent warmup.
+        bool startupOk = true;
+        std::cout << "FW1814 192 kHz TX lead: 4096 cycles; waiting 550 ms\n";
+        const CFAbsoluteTime firstCycleDeadline = CFAbsoluteTimeGetCurrent() + 0.550;
+        while (CFAbsoluteTimeGetCurrent() < firstCycleDeadline && !gStopRequested &&
+               !audioFinished.load(std::memory_order_acquire))
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+        if (gStopRequested || audioFinished.load(std::memory_order_acquire))
+            startupOk = false;
+        if (startupOk) {
+            std::cout << "FW1814 startup timeline: OUTPUT 192000 Hz at "
+                      << startupMs() << " ms after ISO anchor\n";
+            startupOk = fcp.setSignalRate(kRate, 0x18, false);
+        }
+        if (startupOk) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            std::cout << "FW1814 startup timeline: INPUT 192000 Hz at "
+                      << startupMs() << " ms after ISO anchor\n";
+            startupOk = fcp.setSignalRate(kRate, 0x19, false);
+        }
+        if (startupOk) {
+            // Capture remains mostly NODATA during the first half-second after
+            // INPUT CONTROL. Service the RX ring immediately so its short DMA
+            // window cannot overwrite, but keep the consumer inactive until
+            // qualification completes.
+            rateKicked.store(true, std::memory_order_release);
+            std::cout << "FW1814 startup timeline: RX qualification enabled at "
+                      << startupMs() << " ms after ISO anchor\n";
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            startupOk = !gStopRequested &&
+                !audioFinished.load(std::memory_order_acquire) &&
+                lifecycle.generationStillValid();
+        }
+        if (startupOk) {
+            if (!control.start(device, kRate, &performance))
+                std::cerr << "warning: FW1814 control socket unavailable\n";
+            // Only the audio thread reads this ring. Establish the guarded
+            // reserve before notifying the supervisor that transport is ready.
+            const auto queued = pcm.availableFrames();
+            if (queued < kReadySilenceFrames) {
+                const auto topUpFrames = kReadySilenceFrames - queued;
+                if (writeSilenceFrames(topUpFrames) != topUpFrames) {
+                    std::cerr << "FW1814 192 kHz ready silence top-up failed\n";
+                    startupOk = false;
+                } else {
+                    std::cout << "FW1814 192 kHz ready silence top-up: "
+                              << topUpFrames << " frames\n";
+                }
+            }
+            std::cout << "FW1814 192 kHz playback reserve at READY: "
+                      << pcm.availableFrames() << " frames ("
+                      << pcm.availableFrames() * 1000 / kRate << " ms); "
+                      << "pre-ready TX underrun=" << pcm.underrunFrames()
+                      << " frames\n";
+        }
+        if (startupOk) {
+            signalEngineReady();
+            // The supervisor now restores the saved mixer state through the
+            // control socket. Keep transmitting silence until its final
+            // CONTROL READY handshake so live CoreAudio cannot overlap the
+            // register-write sequence at quad rate.
+            while (!control.controlStateReady() && !gStopRequested &&
+                   !audioFinished.load(std::memory_order_acquire)) {
+                control.service();
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+            }
+            startupOk = !gStopRequested &&
+                !audioFinished.load(std::memory_order_acquire) &&
+                lifecycle.generationStillValid();
+        }
+        if (startupOk) {
+            // Arm the HAL before releasing the playback pump. A full firmware
+            // reboot can make CoreAudio resume later than the transport, so
+            // wait for its first fresh callback instead of consuming the
+            // entire PCM safety reserve while the shared ring is still empty.
+            playbackShared.discardBacklog();
+            auto* playbackRing = playbackShared.ring();
+            const auto prearmStart = std::chrono::steady_clock::now();
+            playbackRing->active.store(1, std::memory_order_release);
+            playbackActive = true;
+            while (macfw::fw1814::hal::availableFrames(*playbackRing) == 0 &&
+                   !gStopRequested &&
+                   !audioFinished.load(std::memory_order_acquire) &&
+                   std::chrono::steady_clock::now() - prearmStart <
+                       kHalPlaybackPrearmTimeout) {
+                control.service();
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+            }
+            const auto prearmMs = std::chrono::duration_cast<
+                std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - prearmStart).count();
+            const auto prearmFrames =
+                macfw::fw1814::hal::availableFrames(*playbackRing);
+            if (prearmFrames != 0) {
+                std::cout << "FW1814 192 kHz HAL playback pre-arm: "
+                          << prearmFrames << " frames after " << prearmMs
+                          << " ms\n";
+            } else {
+                std::cout << "FW1814 192 kHz HAL playback pre-arm: "
+                          << "no active client after " << prearmMs
+                          << " ms; continuing guarded release\n";
+            }
+            startupOk = !gStopRequested &&
+                !audioFinished.load(std::memory_order_acquire) &&
+                lifecycle.generationStillValid();
+        }
+        if (startupOk) {
+            // Keep CoreAudio playback silent until the input side has shown a
+            // clean 192 kHz window. The output side can remain audibly corrupt
+            // long after capture is clean, so reassert its signal format below
+            // before releasing live audio.
+            const auto qualificationWaitStart = std::chrono::steady_clock::now();
+            std::uint64_t qualificationSilenceFrames = 0;
+            std::cout << "FW1814 192 kHz playback hold: waiting for clean "
+                         "capture qualification\n";
+            while (!captureQualified.load(std::memory_order_acquire) &&
+                   !gStopRequested &&
+                   !audioFinished.load(std::memory_order_acquire)) {
+                const auto queued = pcm.availableFrames();
+                if (queued < kReadySilenceFrames) {
+                    const auto topUpFrames = kReadySilenceFrames - queued;
+                    qualificationSilenceFrames +=
+                        writeSilenceFrames(topUpFrames);
+                }
+                control.service();
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+            }
+            const auto qualificationWaitMs = std::chrono::duration_cast<
+                std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - qualificationWaitStart).count();
+            if (captureQualified.load(std::memory_order_acquire)) {
+                std::cout << "FW1814 192 kHz playback hold complete after "
+                          << qualificationWaitMs << " ms; silence top-up="
+                          << qualificationSilenceFrames << " frames; TX underrun="
+                          << pcm.underrunFrames() << " frames\n";
+            }
+            startupOk = !gStopRequested &&
+                !audioFinished.load(std::memory_order_acquire) &&
+                lifecycle.generationStillValid() &&
+                captureQualified.load(std::memory_order_acquire);
+        }
+        if (startupOk) {
+            const auto outputWarmupStart = std::chrono::steady_clock::now();
+            std::uint64_t outputWarmupSilenceFrames = 0;
+            std::cout << "FW1814 192 kHz output warmup: holding muted TX for "
+                      << kOutputWarmup.count() << " ms\n";
+            while (std::chrono::steady_clock::now() - outputWarmupStart <
+                       kOutputWarmup &&
+                   !gStopRequested &&
+                   !audioFinished.load(std::memory_order_acquire)) {
+                const auto queued = pcm.availableFrames();
+                if (queued < kReadySilenceFrames) {
+                    const auto topUpFrames = kReadySilenceFrames - queued;
+                    outputWarmupSilenceFrames += writeSilenceFrames(topUpFrames);
+                }
+                control.service();
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+            }
+            const auto outputWarmupMs = std::chrono::duration_cast<
+                std::chrono::milliseconds>(std::chrono::steady_clock::now() -
+                                           outputWarmupStart).count();
+            std::cout << "FW1814 192 kHz output warmup complete after "
+                      << outputWarmupMs << " ms; silence top-up="
+                      << outputWarmupSilenceFrames << " frames\n";
+            startupOk = !gStopRequested &&
+                !audioFinished.load(std::memory_order_acquire) &&
+                lifecycle.generationStillValid();
+        }
+        if (startupOk) {
+            // The four-half READY reserve protects the rate kick and control
+            // restore, but carrying all of it into live playback adds up to
+            // 320 ms before the first CoreAudio frame. Let silent TX consume
+            // the excess now that restore and HAL pre-arm have completed.
+            const auto releaseDrainStart = std::chrono::steady_clock::now();
+            while (pcm.availableFrames() > kReleaseSilenceFrames &&
+                   !gStopRequested &&
+                   !audioFinished.load(std::memory_order_acquire)) {
+                control.service();
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+            }
+            const auto releaseDrainMs = std::chrono::duration_cast<
+                std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - releaseDrainStart).count();
+            std::cout << "FW1814 192 kHz playback-release drain: "
+                      << pcm.availableFrames() << " frames after "
+                      << releaseDrainMs << " ms\n";
+            // CoreAudio continues producing while the protected PCM reserve
+            // drains. Those frames belong to the muted startup interval and
+            // would otherwise become a new live-playback latency backlog.
+            const auto staleSharedFrames =
+                macfw::fw1814::hal::availableFrames(*playbackShared.ring());
+            playbackShared.discardBacklog();
+            std::cout << "FW1814 192 kHz playback-release shared discard: "
+                      << staleSharedFrames << " frames\n";
+            startupOk = !gStopRequested &&
+                !audioFinished.load(std::memory_order_acquire) &&
+                lifecycle.generationStillValid();
+        }
+        if (startupOk) {
+            const auto queued = pcm.availableFrames();
+            if (queued < kReleaseSilenceFrames) {
+                const auto topUpFrames = kReleaseSilenceFrames - queued;
+                if (writeSilenceFrames(topUpFrames) != topUpFrames) {
+                    std::cerr << "FW1814 192 kHz playback-release silence top-up failed\n";
+                    startupOk = false;
+                } else {
+                    std::cout << "FW1814 192 kHz playback-release silence top-up: "
+                              << topUpFrames << " frames\n";
+                }
+            }
+        }
+        if (startupOk) {
+            std::cout << "FW1814 192 kHz playback release reserve: "
+                      << pcm.availableFrames() << " frames ("
+                      << pcm.availableFrames() * 1000 / kRate << " ms)\n";
+            const auto releaseNs = std::chrono::duration_cast<
+                std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            playbackReleaseNs.store(releaseNs, std::memory_order_release);
+            releasePlayback.store(true, std::memory_order_release);
+            std::cout << "FW1814 192 kHz analog engine ONLINE\n";
+        }
+
+        // Keep the FireWire general callback dispatcher alive independently of
+        // the realtime audio service. This is the same scheduling separation
+        // used by the released FW410 runtime.
+        while (startupOk && !gStopRequested &&
+               !audioFinished.load(std::memory_order_acquire)) {
+            control.service();
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+        }
+
+        gStopRequested = 1;
+        audioThread.join();
+        ok = startupOk && audioOk;
+    }
+
+cleanup:
+    control.reset();
+    if (playbackActive)
+        playbackShared.ring()->active.store(0, std::memory_order_release);
+
+    const bool restoreOk = lifecycle.stopIsochAndRestoreCmp();
+    if (rateAttempted && lifecycle.generationStillValid()) {
+        std::cout << "FW1814 experimental 192 kHz: restoring 48 kHz baseline\n";
+        const bool outputOk = fcp.setSignalRate(48000, 0x18, false);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        const bool inputOk = fcp.setSignalRate(48000, 0x19, false);
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        unsigned restoredRate = 0;
+        const bool rateOk = fcp.readInputRate(restoredRate, false) &&
+                            restoredRate == 48000;
+        std::cout << "FW1814 48 kHz restore: "
+                  << (outputOk && inputOk && rateOk ? "PASS" : "FAIL") << '\n';
+        if (!outputOk || !inputOk || !rateOk) ok = false;
+    } else if (rateAttempted) {
+        std::cerr << "FW1814 generation changed; skip stale rate restore\n";
+        ok = false;
+    }
+    fcp.reset();
+    lifecycle.removeDispatchers();
+    isochCallbackThread.stop();
+    lifecycle.stop();
+
+    if (!restoreOk && ok) ok = false;
+    device.close();
+    if (gQualificationFailed)
+        return 2;
+    return ok;
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    const bool legacyExperimental =
+        argc == 3 && std::strcmp(argv[1], "--experimental-high-rate") == 0 &&
+        std::strcmp(argv[2], "--experimental-quad-rate") == 0;
+    if (argc != 1 && !legacyExperimental) {
+        std::cerr << "usage: fw1814analog192\n";
+        return 64;
+    }
+    gStopRequested = 0;
+    gQualificationFailed = 0;
+    std::signal(SIGINT, signalHandler);
+    std::signal(SIGTERM, signalHandler);
+    // Flush diagnostics immediately during this manual guarded prototype.
+    std::cout.setf(std::ios::unitbuf);
+    std::cerr.setf(std::ios::unitbuf);
+    std::cout << "macfw fw1814analog192 — 192 kHz analog full-duplex engine\n";
+    const bool success = run();
+    return gQualificationFailed ? 2 : (success ? 0 : 1);
+}

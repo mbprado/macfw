@@ -155,7 +155,7 @@ Then install the already-built FW1814 HAL, supervised runtime and control panel 
 sudo make fw1814-install
 ```
 
-The current FW1814 scope exposes Analog Outputs 1-4 and Analog Inputs 1-8 at 44.1 and 48 kHz. Rate switching, reconnect restoration, persistent analog routing/mixer controls and the native AppKit control panel are hardware-validated. S/PDIF, ADAT, higher rates and MIDI remain under development.
+The FW1814 analog profile exposes Analog Outputs 1-4 and Analog Inputs 1-8 at 44.1, 48, 88.2 and 96 kHz. These modes have hardware-tested playback, recording, rate switching and restart recovery. The 88.2/96 kHz engines use guarded rolling TX and support the persistent live Aggressive, Balanced and Conservative service profiles. Occasional small artifacts remain possible under heavy host load. The 176.4/192 kHz quad-speed engines remain experimental; S/PDIF, ADAT and MIDI remain under development.
 
 The first routing-control API is available through the transport-owned socket. It reports the exact write-only routing baseline cached by the active engine without issuing new FireWire writes:
 
@@ -163,6 +163,8 @@ The first routing-control API is available through the transport-owned socket. I
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" routing get
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" capabilities get
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" engine get
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" performance-profile get
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" performance-profile set balanced
 ```
 
 Do not run standalone FireWire probes while the supervised engine is active; the transport must remain the sole FireWire owner.
@@ -259,6 +261,21 @@ AUX bus. Its physical headphone encoders adjust saved volume and the panel
 updates the sliders while open. Both panels use the standard CoreAudio
 nominal-sample-rate property for Device-tab rate changes rather than calling
 FireWire rate-control probes directly.
+
+The FW1814 Device tab provides three persistent transport profiles:
+**Aggressive** (250 µs), **Balanced** (375 µs), and **Conservative** (500 µs).
+They apply live at 44.1, 48, 88.2 and 96 kHz and survive rate changes and
+transport restarts through the normal control-state path. Quad-speed
+176.4/192 kHz engines retain their fixed cadence. Advanced installations may
+set `MACFW_AUDIO_SERVICE_PERIOD_US` between 250 and 2000; that explicit
+launchd value overrides and disables the GUI selector until removed.
+
+After selecting a different FW1814 sample rate in the Device tab, allow the
+new engine to report ONLINE and the CoreAudio stream to settle before making a
+latency measurement. The GUI uses the standard asynchronous CoreAudio rate
+property; an immediate probe can still sample the transition even though the
+new transport starts correctly. Repeating the probe after a few seconds should
+be preferred over changing transport tuning from one anomalous result.
 
 ## Control architecture and persistence
 

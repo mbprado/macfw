@@ -78,6 +78,23 @@ inline std::size_t availableFrames(const SharedCaptureRing& ring) {
     return static_cast<std::size_t>(w - r);
 }
 
+// Called by the HAL reader on experimental high-rate paths. When no client reads for long
+// enough, the producer fills the ring and drops all subsequent (new) frames.
+// Keeping even a small part of that full ring would replay old audio before
+// fresh samples. Suspend reads, discard the whole backlog, and let the
+// transport prefill again from current capture packets before reactivation.
+inline bool suspendStaleCapture(SharedCaptureRing& ring,
+                                std::size_t maxQueuedFrames) {
+    const auto w = ring.writeFrame.load(std::memory_order_acquire);
+    const auto r = ring.readFrame.load(std::memory_order_acquire);
+    const auto queued = static_cast<std::size_t>(w - r);
+    if (queued <= maxQueuedFrames) return false;
+    ring.active.store(0, std::memory_order_release);
+    ring.readFrame.store(w, std::memory_order_release);
+    ring.droppedFrames.fetch_add(queued, std::memory_order_relaxed);
+    return true;
+}
+
 inline void observeQueueDepth(SharedCaptureRing& ring, std::uint64_t queued) {
     auto minQueued = ring.halMinQueuedFrames.load(std::memory_order_relaxed);
     while (queued < minQueued &&
@@ -128,6 +145,35 @@ inline std::size_t read(SharedCaptureRing& ring,
         const std::size_t src = static_cast<std::size_t>((r + i) % kCapacityFrames) * kInputChannels;
         const std::size_t dst = i * kInputChannels;
         for (std::size_t ch = 0; ch < kInputChannels; ++ch)
+            interleaved[dst + ch] = ring.samples[src + ch];
+    }
+    ring.readFrame.store(r + n, std::memory_order_release);
+    return n;
+}
+
+// The shared-memory ABI remains eight-channel so released low/high-rate
+// engines can coexist. Quad-rate hardware exposes only its first two PCM
+// positions; compact those physical inputs for CoreAudio without changing
+// the persistent ring layout.
+inline std::size_t readFirstChannels(SharedCaptureRing& ring,
+                                     float* interleaved,
+                                     std::size_t frames,
+                                     std::size_t channels) {
+    if (!interleaved || frames == 0 || channels == 0 ||
+        channels > kInputChannels)
+        return 0;
+    const auto r = ring.readFrame.load(std::memory_order_relaxed);
+    const auto w = ring.writeFrame.load(std::memory_order_acquire);
+    const std::size_t available = static_cast<std::size_t>(w - r);
+    observeQueueDepth(ring, available);
+    const std::size_t n = frames < available ? frames : available;
+    if (n < frames)
+        ring.halUnderrunEvents.fetch_add(1, std::memory_order_relaxed);
+    for (std::size_t i = 0; i < n; ++i) {
+        const std::size_t src =
+            static_cast<std::size_t>((r + i) % kCapacityFrames) * kInputChannels;
+        const std::size_t dst = i * channels;
+        for (std::size_t ch = 0; ch < channels; ++ch)
             interleaved[dst + ch] = ring.samples[src + ch];
     }
     ring.readFrame.store(r + n, std::memory_order_release);

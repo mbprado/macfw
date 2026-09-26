@@ -1,0 +1,560 @@
+# FW1814 single-speed low-latency handover
+
+## Purpose
+
+This document hands over the hardware-validated low-latency work completed for
+the FW1814's **single-speed** modes: 44.1 and 48 kHz. It records not only the
+final settings, but the reasoning, failed approaches, diagnostics and safety
+rules that should guide the next phase: adapting the same architecture to the
+**dual-speed** 88.2 and 96 kHz engines.
+
+In this document, single-speed and dual-speed are AMDTP/BeBoB speed families.
+They do not mean simplex/duplex audio: the validated 44.1/48 kHz paths are
+full-duplex.
+
+## Validated result
+
+Both released single-speed engines now provide stable CoreAudio playback and
+capture, usable software monitoring and live-selectable scheduling profiles.
+Representative electrical loopback results on the FW1814 test Mac were:
+
+| Rate | Profile/test state | Timestamp round trip | Callback wall time |
+| --- | --- | ---: | ---: |
+| 48 kHz | Aggressive, settled engine | about 12-14 ms | about 16-20 ms |
+| 44.1 kHz | Aggressive | about 21-23 ms | about 26-30 ms |
+| 44.1 kHz | Balanced | about 25.6 ms | about 30.5 ms |
+
+The exact number varies with CoreAudio callback alignment and capture-queue
+position. Clean audio, monotonic counters and zero deadline misses matter more
+than any single loopback result.
+
+Longer listening tests found clean playback at both rates. Capture can produce
+rare small artifacts under deliberate CPU or I/O stress, particularly with
+several active channels, but normal use is stable. This remaining sensitivity
+is a scheduling/headroom issue rather than sustained CPU exhaustion.
+
+## Final single-speed architecture
+
+### Keep the proven allocation, shorten only the live horizon
+
+The successful design separates the physical NuDCL allocation from the amount
+of audio scheduled ahead of the FireWire cursor:
+
+- playback retains the proven 640-packet ring and 320-packet halves;
+- rolling TX maintains a 96-cycle live lead, equal to 12 ms at 8000 FireWire
+  cycles per second;
+- the deadline guard is half the live lead: 48 cycles, or 6 ms;
+- missing the safe refill window is fatal to the engine; it stops before
+  reusing unsafe slots instead of continuing with potentially corrupt audio;
+- capture retains 256 receive slots.
+
+This distinction is fundamental. Reducing the allocated TX ring to 128 packets
+looked attractive and measured low latency, but later produced cracked audio.
+Restoring the 640-packet allocation recovered stability. Rolling refill then
+delivered low latency without sacrificing the proven allocation geometry.
+
+### The 96-cycle boundary is a DMA visibility requirement
+
+A 64-cycle rolling lead stayed operational but still measured roughly 88-90
+ms at 48 kHz. The updated packets were apparently written too late for the
+active DMA pass and waited for the next 640-packet ring rotation. Moving the
+lead to 96 cycles reduced round trip to the expected low-latency range.
+
+Increasing the lead blindly is not a latency fix: the scheduled horizon itself
+adds delay, and a large value can merely hide a missed-window problem. Treat
+the smallest repeatably visible lead as a hardware/DMA boundary and retain a
+separate guard behind it.
+
+### Startup lead is not live latency
+
+The engine may need substantially more headroom while allocating rings,
+connecting CMP, starting ISO and performing device control transactions. This
+startup-only distance must not be confused with the steady rolling horizon:
+
+- 48 kHz uses a 256-cycle scheduled startup lead;
+- 44.1 kHz uses a 1024-cycle rolling startup lead;
+- both converge to the independent 96-cycle live rolling horizon.
+
+An early 44.1 kHz attempt used too little startup headroom and repeatedly
+exited with `scheduled first cycle is no longer safely ahead`, triggering
+supervisor recovery and bus resets. Raising only the startup lead fixed the
+reboot loop without increasing steady-state monitoring latency.
+
+### Preserve rate-family packet formation
+
+48 kHz uses its fixed blocking packet formation. Native 44.1 kHz uses the
+Linux/ALSA-derived variable blocking cadence and maintains its scheduler state
+across rolling refills. The low-latency architecture is shared, but the packet
+formation is not.
+
+Do not implement 88.2/96 kHz by copying 48 kHz packet contents. Reuse the
+allocation/horizon/guard/service model around the already validated
+dual-speed packet generators.
+
+The Linux FireWire/BeBoB implementation was used as a protocol reference, not
+as a source of macOS buffering constants. At 44.1/48 kHz the device-to-host
+stream is 10 PCM plus one MIDI position and the host-to-device stream is six
+PCM plus one MIDI position. Linux's blocking AMDTP scheduler supports the
+native 44.1-family cadence and the continuously recycled queue model. macOS
+NuDCL visibility, callback timing and safe scheduling distance still had to be
+measured independently on the FW1814 hardware.
+
+### Playback admission and capture publication are separate controls
+
+At 44.1 kHz, rolling operation bypasses the legacy two-second live PCM preload.
+The final live playback reserve is 512 frames. The large internal PCM capacity
+and validated startup silence remain available for safe initialization, but
+they are not held in front of live CoreAudio audio during steady operation.
+
+Capture consumer activation is independent:
+
+- 48 kHz retains the established 512-frame capture prefill;
+- 44.1 kHz rolling operation uses a 256-frame capture prefill;
+- a stopped consumer's backlog is discarded before a fresh prefill, avoiding
+  replay of stale capture audio when the client returns.
+
+Queue depth printed by `fw1814audioloopback` is a snapshot, not a direct
+latency decomposition. In particular, `transport_capture_frames` can exceed
+the measured electrical round trip because producer/consumer positions are
+sampled after the impulse test.
+
+## Real-time service model
+
+The isoch callback dispatcher and the PCM/capture/TX service loop have separate
+responsibilities:
+
+- a dedicated CFRunLoop thread services FireWire callbacks at
+  `QOS_CLASS_USER_INTERACTIVE`;
+- a dedicated Mach-paced audio thread services capture decode/publication,
+  playback SHM consumption and rolling TX refill;
+- the audio thread requests a Mach time-constraint policy and continues with
+  QoS if the request is unavailable;
+- the hot path avoids allocation and logging;
+- `AudioLoopTimingStats` records average/maximum loop, capture, playback and TX
+  time plus maximum wake lateness outside per-iteration logging.
+
+Observed service work was normally tens of microseconds per iteration, far
+below even the 250 us cadence. The engines used about 13% of one CPU core while
+the machine still had substantial total idle time. This showed that the main
+risk is wakeup latency and I/O scheduling jitter, not a shortage of aggregate
+CPU capacity. Splitting the tightly ordered capture/playback/TX work over more
+threads would add synchronization and does not solve the measured bottleneck.
+
+## Persistent performance profiles
+
+The validated engines expose three live profiles:
+
+| Profile | Service period | Intent |
+| --- | ---: | --- |
+| Aggressive | 250 us | Lowest latency and greatest starvation resistance |
+| Balanced | 375 us | Middle compromise for typical systems |
+| Conservative | 500 us | Fewer wakeups and lower CPU demand |
+
+The profile changes the service cadence, not packet geometry, TX lead, capture
+prefill or CoreAudio buffer size. `MachPacer` accepts a new period live, so the
+engine does not restart. The selected profile is persisted by `fw1814state`
+and restored through the existing transport-owned control socket.
+
+`MACFW_AUDIO_SERVICE_PERIOD_US=250..2000` remains an expert launchd override.
+When present it is authoritative and the GUI selector is disabled. The
+installer preserves the recognized tuning variables rather than silently
+removing them. Avoid leaving this override set during normal profile tests;
+otherwise GUI changes are remembered but cannot affect the active cadence.
+
+At the time of the single-speed handover, high-rate engines retained a fixed
+cadence pending A/B validation. That validation has since been completed for
+88.2/96 kHz; the promoted dual-speed result is recorded below. Quad-speed
+engines still retain their fixed cadence.
+
+## Implementation map and change sequence
+
+| Area | Main files | Responsibility |
+| --- | --- | --- |
+| 48 kHz engine | `transport/analog48_main.cpp`, `transport/pcm_stream48.h` | Rolling TX, capture/playback service and status counters |
+| 44.1 kHz engine | `transport/analog44_main.cpp`, `transport/blocking_pcm_tx44.h` | Native variable cadence, rolling TX, startup/live admission |
+| Shared real-time support | `transport/realtime_service.h` | QoS, time constraint, dynamic Mach pacing and timing statistics |
+| Capture SHM | `transport/shared_io.h` | Consumer detection, stale-backlog discard and fresh prefill |
+| Control socket | `transport/fw1814_control_server.h` | Live profile get/set and override state |
+| Persistent state | `tools/control/fw1814state/main.cpp` | Save, restore and reset profile selection |
+| CLI | `tools/control/fw1814ctl/main.cpp` | `performance-profile get/set` |
+| GUI | `control-panel/Sources/main.mm` | Device-tab profile selector and override-disabled state |
+| Measurement | `tools/fw1814audioloopback.cpp` | Rate readiness, impulse timing, markers and queue snapshots |
+| Installation | `service/install-service.sh` | Preserve recognized expert tuning across reinstall |
+
+The final profile integration was pushed to the experimental branch as remote
+commit `cc168e669ea4fb0a0ab95aa0e48be9c10e08e5d2`. Its immediate development
+sequence was:
+
+- `92b5237`: configurable service cadence at 44.1 kHz;
+- `2dea950`: the same cadence mechanism at 48 kHz;
+- `0efa408`: initial installer preservation attempt;
+- `7bcb489`: repair the installer update so it preserves only the intended
+  tuning keys correctly;
+- `cc168e6`: integrate persistent profiles, GUI/CLI/state control, loopback
+  readiness and documentation.
+
+The repaired commit supersedes the initial installer attempt; do not reproduce
+the `0efa408` behavior independently.
+
+The final single-speed launchd tuning used during validation was:
+
+```text
+MACFW_44_ROLLING_TX=1
+MACFW_44_ROLLING_TX_CYCLES=96
+MACFW_44_ROLLING_PCM_RESERVE_FRAMES=512
+MACFW_48_ROLLING_TX=1
+MACFW_48_ROLLING_TX_CYCLES=96
+MACFW_VERBOSE=1
+```
+
+`MACFW_AUDIO_SERVICE_PERIOD_US` should normally be absent so the persistent
+profile is authoritative.
+
+## Measurement and diagnostics
+
+### Loopback tool
+
+`devices/fw1814/tools/fw1814audioloopback` opens the FW1814 through AUHAL,
+emits one impulse and detects its electrical return. It reports:
+
+- CoreAudio device and stream latency properties;
+- timestamp-derived electrical round trip;
+- callback wall-clock round trip;
+- output/input marker times;
+- playback and capture SHM queue snapshots.
+
+After requesting a new rate, the tool waits for matching playback and capture
+SHM rates, active playback and advancing decoded capture frames before opening
+the measurement stream. One first 44.1 kHz impulse still failed to return in a
+transition stress test even though the following run was clean. Treat one
+immediate post-transition failure as a readiness/measurement event and repeat
+the probe before diagnosing transport corruption. This reduces the original
+readiness race but does not prove that the external electrical loop has already
+returned to a measurable state.
+
+### Verbose transport counters
+
+The most useful invariants are:
+
+- `tx-roll-packets` advances continuously;
+- `tx-roll-miss=0`;
+- `dbc-gap=0`, or no increase during the test;
+- `malformed=0`, `invalid=0`, `reorder=0`, `stale=0`;
+- `pcm` remains small during live playback instead of accumulating a large
+  reserve;
+- `queued` remains bounded while a capture consumer is active;
+- `rt-loop-us`, `rt-cap-us`, `rt-pb-us`, `rt-tx-us` and `rt-wake-max-us`
+  remain comfortably inside the rolling deadline guard.
+
+Counters are cumulative for one engine instance. When reading a log that
+contains several starts, identify the latest startup banner or counter reset;
+plain `grep ... | tail` can mix the end of an old instance with the beginning
+of a new one.
+
+Markers (`marker-pb`, `marker-tx`, `marker-cap` and the tool's output/input
+markers) were added to locate delay across HAL playback, TX and capture. They
+are diagnostic timestamps, not stable ABI.
+
+### GUI rate-change caveat
+
+The Device tab uses CoreAudio's nominal-rate property. A GUI selection can
+return before the supervisor has replaced the engine and the new CoreAudio
+stream has completely settled. One test performed immediately after GUI rate
+changes measured roughly 90-100 ms at 48 kHz. A clean 44.1 -> 48 kHz cycle and
+several subsequent tests returned 12-14 ms with zero rolling misses and zero
+DBC gaps. Matching source/installed binary hashes and fresh counter resets
+confirmed that no old transport was running.
+
+Do not tune the transport from a single immediate post-GUI measurement. Wait
+for the new engine ONLINE state, allow a short settling interval and repeat.
+A future GUI refinement may expose a `switching` state until the engine and
+CoreAudio path are both ready.
+
+## Applying the philosophy to dual-speed modes
+
+The following sequence records the original work plan. The completed 88.2/96 kHz
+results and remaining observations are documented in the promotion section below.
+
+The next phase should port the architecture in controlled layers, not copy all
+single-speed constants at once.
+
+1. **Freeze the current dual-speed baseline.** Record hashes, startup banners,
+   ring sizes, packet cadence, clean-audio behavior and fixed-cadence loopback
+   at both 88.2 and 96 kHz.
+2. **Add timing visibility first.** Reuse `AudioLoopTimingStats`, wake-lateness
+   reporting and loud-sample markers before changing latency.
+3. **Keep validated packet generation.** Preserve each dual-speed engine's
+   FDF, DBS, SYT interval, data/NODATA cadence, channel map and startup kick.
+4. **Separate allocation from live lead.** Keep the known-clean NuDCL ring and
+   add rolling refill around its validated packet builder. Do not shrink the
+   allocation as the first experiment.
+5. **Use a guarded lead sweep.** Start conservatively, then test candidate
+   leads while watching for the same one-ring-lap signature seen with 64 cycles
+   at 48 kHz. FireWire cycles remain 125 us, but audio frames per packet differ
+   at dual speed; compare both cycles and frames.
+6. **Keep startup lead independent.** If construction or the rate-kick control
+   path consumes the initial schedule, increase startup headroom only. Do not
+   inflate the steady rolling horizon.
+7. **Tune playback admission separately.** Reduce live PCM reserve only after
+   rolling TX is clean. Test silence-to-audio handoff as well as continuous
+   program audio.
+8. **Tune capture separately.** Establish a clean dual-speed prefill and verify
+   every exposed input. Stress CPU, I/O and window activity before reducing it.
+9. **Validate fixed cadences before profiles.** Test 250, 375 and 500 us as
+   explicit experiments at both rates. Only then expose profiles, and only if
+   their meaning remains consistent with single speed.
+10. **Exercise transitions last.** After each rate is stable alone, test
+    44.1/48 <-> 88.2/96 in both directions, repeated GUI changes, reconnect,
+    service restart and profile persistence.
+
+### Dual-speed acceptance criteria
+
+A dual-speed rolling mode is ready for integration only when:
+
+- repeated cold and warm starts produce clean playback and capture;
+- electrical loopback is repeatable and materially below the fixed-ring
+  baseline;
+- program audio and software monitoring remain clean for an extended run;
+- all active capture channels remain correctly ordered;
+- rolling deadline misses remain zero;
+- DBC gaps, malformed packets, invalid labels, reordering and stale-slot
+  counters do not grow during steady operation;
+- silence-to-audio and client stop/start do not replay stale capture or retain
+  an old playback reserve;
+- deliberate CPU/I/O/window stress does not cause persistent defects;
+- transitions do not leave a valid-looking but one-ring-late TX state;
+- an engine failure stops safely and the supervisor recovers without a reboot
+  loop.
+
+## Dual-speed rolling results and promotion (26 September 2026)
+
+The 88.2 and 96 kHz engines now use guarded rolling TX and live performance
+profiles by default in this branch. Their startup lead remains 4096 cycles,
+while the independent live horizon is 96 cycles with a 48-cycle deadline
+guard. The physical NuDCL allocations remain 1280 packets at 88.2 kHz and
+640 packets at 96 kHz. Both capture service calls remain in the audio loop.
+A missed rolling deadline stops the engine before unsafe slot reuse.
+
+The native 88.2 kHz variable blocking cadence, DBC and SYT advance
+continuously through arbitrary refill chunks and ring wrap. The 96 kHz
+16/16/16/NODATA phase and packet metadata remain unchanged. Fixed half-ring
+refill is available for diagnosis with `MACFW_88_ROLLING_TX=0` or
+`MACFW_96_ROLLING_TX=0`. Each rate also accepts an optional
+`MACFW_<rate>_ROLLING_TX_CYCLES` lead override.
+
+| Rate | Fixed-ring baseline | Initial rolling loopback | Hardware result |
+| --- | ---: | ---: | --- |
+| 88.2 kHz | about 167-175 ms | 21.4-21.5 ms | Playback and recording usable |
+| 96 kHz | about 78-89 ms | 10.5-12 ms | Playback and recording usable |
+
+The user observed occasional small artifacts under heavy host demand at both
+rates. The initial 88.2 kHz loopback logs showed advancing rolling packets,
+zero misses and no growth in DBC gaps, reorder or stale counters. Initial
+96 kHz logs had zero rolling misses; capture DBC and reorder counters rose in
+some snapshots and still warrant comparison during active recording. The
+first-loud markers at 88.2 kHz placed the TX write about 0.5 ms after
+playback SHM read and capture decode about 18.6 ms after TX write. These
+markers locate software events; a TX memory write does not establish the
+precise FireWire wire time.
+
+Repeated GUI switching among 44.1, 48, 88.2 and 96 kHz was reported clean,
+as was interface restart at each rate. The 96 kHz restart takes somewhat
+longer. The user found the rolling dual-speed paths more reliable than the
+previous fixed-refill architecture. Quad-speed 176.4/192 kHz was not
+included in those tests and remains separate work.
+
+Aggressive, Balanced and Conservative now set the dual-speed Mach service
+period live to 250, 375 and 500 us respectively. Profile changes and
+playback/recording were reported working at both rates. Six 96 kHz
+profile-loopback measurements ranged from about 13.3 to 15.7 ms with no
+clear latency ordering by profile; the profile changes only service cadence,
+not packet formation, ring geometry, rolling lead, PCM reserve or capture
+prefill. The persistent selection is restored by the existing state path.
+`MACFW_AUDIO_SERVICE_PERIOD_US` remains an authoritative expert override.
+
+A clean source checkout and complete uninstall/rebuild/reinstall were then
+tested on the FW1814 Mac. Playback and recording remained functional at
+44.1, 48, 88.2 and 96 kHz, with no regression reported. The user also
+observed that the small recording artifacts had decreased drastically and
+were nearly absent in this run. This is a listening observation, not a
+measured proof that all stress-related artifacts are gone.
+
+Remaining work: extended active-recording counter comparisons under host
+stress, longer all-channel capture checks and quad-speed development.
+The single-speed engines remain the regression baseline.
+
+### 88.2 kHz Logic rate-change reserve fix
+
+After Logic changed 96 -> 88.2 kHz, electrical loopback measured about
+66 ms while the PCM ring stayed near 4096 frames (about 46 ms) in
+successive status lines. The reported CoreAudio device latency was the
+same as a faster GUI-origin test, so that property did not account for
+the independent electrical measurement.
+
+With `MACFW_88_SHORT_READY_RESERVE=1`, the PCM queue was zero before
+READY top-up, then 512 frames (about 5.8 ms) at READY. With Logic active
+it stayed around 350-500 frames. Two physical loopbacks after the
+Logic-origin switch measured about 27 ms, close to the about 25 ms
+GUI-origin result. Rolling deadline misses and DBC gaps stayed zero;
+one capture underrun event appeared later in the supplied status window.
+The shorter READY top-up is now the default for rolling 88.2 kHz.
+`MACFW_88_SHORT_READY_RESERVE=0` restores the former 4096-frame target
+for A/B diagnosis; fixed half-ring TX also retains that target. The
+1.6-second startup silence preload and 4096-cycle startup lead remain
+unchanged.
+
+### 96 kHz Logic rate-change reserve fix
+
+After a Logic-origin switch from 88.2 to 96 kHz, electrical loopback
+measured about 52-54 ms while the playback PCM queue stayed near 4096
+frames (about 43 ms); a GUI-origin switch measured about 9 ms.
+With the opt-in `MACFW_96_SHORT_READY_RESERVE=1` trial the user reported
+improved latency. The trial shortens the initial silent PCM preload by
+3584 frames and targets 512 frames at READY, while retaining the
+4096-cycle TX startup lead. This is now the rolling-mode default;
+`MACFW_96_SHORT_READY_RESERVE=0` restores the previous preload and
+4096-frame READY target. The first supplied log with the new diagnostic
+showed `target=4096`, confirming that particular run had not enabled
+the trial. No precise post-trial 96 kHz loopback measurement was supplied
+at the time of promotion.
+
+The four validated modes use different reserve mechanisms: 44.1 kHz
+rolling TX defaults to a 512-frame live PCM reserve adjustable with
+`MACFW_44_ROLLING_PCM_RESERVE_FRAMES` (64..2048); 48 kHz does not
+perform a READY silence top-up; rolling 88.2 and 96 kHz default to
+512-frame READY targets with the per-rate `SHORT_READY_RESERVE=0`
+fallbacks. Preserve these distinct startup paths during further tuning.
+
+### Clean-install rolling TX defaults
+
+A clean uninstall removes the service plist, including previously saved
+`MACFW_44_ROLLING_TX=1` and `MACFW_48_ROLLING_TX=1` overrides. Both
+single-speed engines still had opt-in rolling TX code, so a subsequent
+install silently restored half-ring refill and its longer playback latency.
+The four validated 44.1/48/88.2/96 kHz engines now default to rolling TX.
+Per-rate `MACFW_<rate>_ROLLING_TX=0` restores half-ring refill for diagnosis.
+The 44.1 kHz live PCM reserve and dual-speed READY reserve overrides remain
+independent of that fallback. Hardware revalidation after this default flip
+is pending; it uses the previously tested rolling paths.
+
+### Quad-speed rolling TX trial (hardware validation pending)
+
+176.4 and 192 kHz retain their existing startup, FCP kicks, capture
+qualification, physical NuDCL allocations (1280 and 2560 packets), and
+four-channel AM824 packet metadata. The new playback path is opt-in with
+`MACFW_176_ROLLING_TX=1` or `MACFW_192_ROLLING_TX=1`, independently.
+It begins with a 96-cycle live TX lead and 48-cycle guard, preserves the
+4096-cycle startup lead, advances DBC/SYT continuously across arbitrary
+refill chunks and ring wrap, and stops the engine on a missed rolling
+deadline. The original half-ring TX path remains the default and can be
+selected with an unset variable or `=0`.
+
+The first hardware pass should test one quad mode at a time: establish
+baseline loopback and startup logs with rolling disabled; enable rolling
+for that rate; confirm playback, physical capture, first loud packet,
+`tx-roll-packets` increasing and `tx-roll-miss=0`; repeat cold starts,
+quad-to-single and single-to-quad changes, then stress playback and capture.
+At 176.4 kHz watch the variable 44.1-family DBC/SYT cadence through ring
+wrap; at 192 kHz watch its 3-data/1-NODATA phase and the capture
+qualification counters. 176.4 kHz had a successful physical loopback at 10.12 ms with zero rolling
+misses in the supplied sample; the user reports playback and capture fine.
+The 176.4 kHz HAL latency estimate is now 893 frames per scope (about
+10.12 ms combined), pending repeated calibration. At 192 kHz rolling TX
+had zero reported rolling misses but one electrical loopback took about
+185 ms and the next returned no impulse. The engine's 8192-frame
+playback-release reserve contributes about 43 ms, and it retains a long
+capture qualification/output warmup. Matching first-loud markers at SHM
+playback read, TX packet write, and capture decode were added to locate
+where the remaining delay or impulse loss occurs. In a repeated 192 kHz
+run, TX first-loud marker 171206345099099 and capture first-loud marker
+171206532350321 differed by about 187 ms, matching the electrical loopback.
+The quad playback pump's missing SHM marker was fixed. A further opt-in
+`MACFW_192_ROLLING_RING_PACKETS=1280` compares a 160-ms physical ring
+against the existing 2560-packet, 320-ms ring while preserving the 96-cycle
+rolling lead, startup lead, and capture qualification. This is a hardware
+experiment: the larger ring had previously been selected for scheduling
+headroom. Two physical loopbacks at the opt-in 1280-packet ring measured
+9.73 and 10.06 ms, compared with 187-188 ms on the default 2560-packet
+ring. This strongly implicates the longer DMA ring's live visibility/window,
+though packet markers and longer audio/capture stress tests are still needed.
+The CoreAudio 192 kHz latency estimate still describes the older path;
+recalibrate it only after choosing a default geometry. Keep 192 kHz opt-in.
+The high-rate preload and capture admission are separate experiments after
+the rolling TX path has been validated.
+
+### Quad rolling and performance promotion
+
+After sustained playback and capture at both quad rates, and 192 kHz
+physical loopbacks of 9.73 and 10.06 ms using the 1280-packet ring,
+rolling TX is now the default at 176.4 and 192 kHz. The 192 kHz rolling
+path defaults to 1280 packets; `MACFW_192_ROLLING_RING_PACKETS=2560`
+selects the previous physical ring for comparison. Per-rate
+`MACFW_176_ROLLING_TX=0` and `MACFW_192_ROLLING_TX=0` retain the old
+half-ring paths. An occasional 176.4 kHz capture qualification retry
+remains possible and restarts safely through the existing supervisor.
+
+The HAL estimates use physical loopback calibration: 893 frames per
+input/output scope at 176.4 kHz (about 10.12 ms round trip), and 950
+frames per scope at 192 kHz (about 9.90 ms). These describe the default
+rolling configurations, not live queue depth or the explicit fallback.
+Both quad engines now use the same persistent live performance profiles
+as 44.1–96 kHz: aggressive 250 us, balanced 375 us, conservative 500 us;
+176.4 kHz hardware tests confirmed all three profiles through set/get and
+physical loopback: aggressive 11.39 ms, balanced 10.84 ms, conservative
+12.30 ms. The user reports playback and capture remain good. One
+control-socket connection failed transiently and succeeded immediately
+on retry; inspect service restarts if it recurs. 192 kHz hardware tests also confirmed the three live settings and physical
+loopback: aggressive 8.60 ms, balanced 9.27 ms, conservative 9.10 ms,
+with 950 device-latency frames per HAL scope. The user reports playback
+and capture good overall in both quad modes.
+
+## Reproduction commands
+
+Installed profile state:
+
+```bash
+ctl="/Library/Application Support/macfw/fw1814/bin/fw1814ctl"
+state="/Library/Application Support/macfw/fw1814/bin/fw1814state"
+
+"$ctl" performance-profile get
+"$ctl" performance-profile set aggressive
+"$state" show | grep performance-profile
+```
+
+Loopback at the active released rates:
+
+```bash
+devices/fw1814/tools/fw1814audioloopback --rate 48000
+devices/fw1814/tools/fw1814audioloopback --rate 44100
+```
+
+Latest timing/counter windows:
+
+```bash
+log="/Library/Logs/macfw-fw1814-transport.log"
+grep "FW1814 out-shared=.*rt-loop-us=" "$log" | tail -5
+grep "FW1814-44 .*rt-loop-us=" "$log" | tail -5
+```
+
+Installed tuning and binary identity:
+
+```bash
+plist="/Library/LaunchDaemons/com.mbprado.macfw.fw1814.transport.plist"
+sudo /usr/libexec/PlistBuddy -c "Print :EnvironmentVariables" "$plist"
+shasum -a 256 \
+  devices/fw1814/transport/fw1814analog48 \
+  "/Library/Application Support/macfw/fw1814/bin/fw1814analog48"
+```
+
+## Stable baseline and deferred work
+
+The single-speed transport should now be treated as the regression baseline.
+Do not change its ring geometry, 96/48 live window, startup leads, PCM reserve,
+capture prefill or scheduling policy merely to simplify dual-speed code.
+Extract reusable machinery only where behavior remains explicit per rate
+family.
+
+Remaining single-speed polish is limited to extended rate-switch stress tests,
+possible GUI transition-state feedback and continued observation of rare
+capture artifacts under heavy host load. None currently blocks using the same
+architecture as the starting point for dual-speed latency work.

@@ -2,6 +2,7 @@
 
 #include "../special_mixer.h"
 #include "headphone_rotaries.h"
+#include "realtime_service.h"
 
 #include <array>
 #include <chrono>
@@ -37,11 +38,14 @@ public:
 
     ~Fw1814ControlServer() { reset(); }
 
-    bool start(FireWireDevice& device, unsigned sampleRate) {
+    bool start(FireWireDevice& device,
+               unsigned sampleRate,
+               AudioServicePeriodControl* performance = nullptr) {
         reset();
         device_ = &device;
         sampleRate_ = sampleRate;
         generation_ = device.generation();
+        performance_ = performance;
         restoringControlState_ = std::getenv("MACFW_ENGINE_READY_FD") != nullptr;
         routing_.loadStraightAnalogPlaybackPreset();
         softwareReturnLevelKnown_.fill(true);
@@ -111,6 +115,7 @@ public:
         device_ = nullptr;
         sampleRate_ = 0;
         generation_ = 0;
+        performance_ = nullptr;
         restoringControlState_ = false;
         routing_.loadStraightAnalogPlaybackPreset();
         softwareReturnLevelKnown_.fill(false);
@@ -170,7 +175,13 @@ public:
         }
     }
 
+    bool controlStateReady() const { return !restoringControlState_; }
+
 private:
+    bool auxRoutingAvailable() const {
+        return sampleRate_ != 176400 && sampleRate_ != 192000;
+    }
+
     void saveHeadphoneVolume(unsigned output, std::uint32_t word) {
         constexpr const char* helper =
             "/Library/Application Support/macfw/fw1814/bin/fw1814state";
@@ -429,7 +440,7 @@ private:
               " " + hex32(routing_.mixAnalogDigitalIn()) + "\n");
     }
 
-    void handleOutput(const std::string& command) {
+    void handleOutput(const std::string& command, bool restoreCommand) {
         using Model = macfw::fw1814::SpecialMixerRoutingModel;
         if (command == "OUTPUT GET") {
             std::string output = "OK";
@@ -474,6 +485,15 @@ private:
             return;
         }
 
+        if (source == 1 && !auxRoutingAvailable()) {
+            if (restoreCommand) {
+                reply("OK " + std::to_string(pair) + " 0\n");
+            } else {
+                reply("ERR aux-routing-unavailable-at-quad-rate\n");
+            }
+            return;
+        }
+
         Model desired = routing_;
         desired.setAnalogOutputSource(
             pairId, source == 0 ? Model::OutputSource::Mixer
@@ -491,7 +511,7 @@ private:
               std::to_string(source) + "\n");
     }
 
-    void handleHeadphone(const std::string& command) {
+    void handleHeadphone(const std::string& command, bool restoreCommand) {
         using Model = macfw::fw1814::SpecialMixerRoutingModel;
         using Source = macfw::fw1814::HeadphoneSource;
         const auto sourceIndex = [](Source source) {
@@ -540,6 +560,17 @@ private:
                       std::to_string(sourceIndex(
                           routing_.headphoneSource(outputId))) + " " +
                       hex32(routing_.srcHeadphoneOut()) + "\n");
+                return;
+            }
+
+
+            if (source == 2 && !auxRoutingAvailable()) {
+                if (restoreCommand) {
+                    reply("OK " + std::to_string(output) + " 0 " +
+                          hex32(routing_.srcHeadphoneOut()) + "\n");
+                } else {
+                    reply("ERR aux-routing-unavailable-at-quad-rate\n");
+                }
                 return;
             }
 
@@ -1254,6 +1285,10 @@ private:
             reply("OK routing-state=1 runtime-routing-set=1 "
                   "stream-mixer=1 analog-output-source=1 "
                   "headphone-source=all-persistent "
+                  "aux-routing=" +
+                  std::string(auxRoutingAvailable() ? "available" :
+                                                     "unavailable-quad-rate") +
+                  " "
                   "register-readback=0 state-cache=authoritative "
                   "analog-input-mixer=1 digital=deferred "
                   "analog-input-monitor-level=all-analog-persistent "
@@ -1267,12 +1302,51 @@ private:
                   "aux-software-return-sends=continuous-persistent "
                   "aux-analog-input-sends=continuous-persistent "
                   "aux-output-level=continuous-persistent "
+                  "performance-profiles=44.1/48/88.2/96/176.4/192-persistent-live "
                   "levels=deferred midi=deferred\n");
             return;
         }
         if (command == "ENGINE GET") {
             reply("OK " + std::to_string(sampleRate_) + " " +
                   std::to_string(generation_) + "\n");
+            return;
+        }
+        if (command == "PERFORMANCE_PROFILE GET") {
+            if (!performance_) {
+                reply("OK unavailable 0 0\n");
+                return;
+            }
+            reply("OK " + std::string(audioPerformanceProfileName(
+                      performance_->profile())) + " " +
+                  std::to_string(performance_->periodNs() / 1000) + " " +
+                  (performance_->environmentOverride() ? "1\n" : "0\n"));
+            return;
+        }
+        if (command.rfind("PERFORMANCE_PROFILE SET ", 0) == 0) {
+            const std::string name = command.substr(
+                std::strlen("PERFORMANCE_PROFILE SET "));
+            AudioPerformanceProfile profile{};
+            if (!parseAudioPerformanceProfile(name, profile)) {
+                reply("ERR invalid-performance-profile\n");
+                return;
+            }
+            if (performance_) {
+                performance_->setProfile(profile);
+                std::printf("FW1814 performance profile: %s (%llu us)%s\n",
+                            audioPerformanceProfileName(profile),
+                            static_cast<unsigned long long>(
+                                performance_->periodNs() / 1000),
+                            performance_->environmentOverride()
+                                ? " [environment override active]" : "");
+                reply("OK " + std::string(audioPerformanceProfileName(
+                          performance_->profile())) + " " +
+                      std::to_string(performance_->periodNs() / 1000) + " " +
+                      (performance_->environmentOverride() ? "1\n" : "0\n"));
+            } else {
+                // Keep accepting restored state if an engine without a live
+                // performance control is selected.
+                reply("OK unavailable 0 0\n");
+            }
             return;
         }
         if (command.rfind("MIXER ", 0) == 0) {
@@ -1320,11 +1394,11 @@ private:
             return;
         }
         if (command.rfind("OUTPUT ", 0) == 0) {
-            handleOutput(command);
+            handleOutput(command, restoreCommand);
             return;
         }
         if (command.rfind("HEADPHONE ", 0) == 0) {
-            handleHeadphone(command);
+            handleHeadphone(command, restoreCommand);
             return;
         }
         reply("ERR unknown-command\n");
@@ -1333,6 +1407,7 @@ private:
     FireWireDevice* device_ = nullptr;
     unsigned sampleRate_ = 0;
     UInt32 generation_ = 0;
+    AudioServicePeriodControl* performance_ = nullptr;
     bool restoringControlState_ = false;
     macfw::fw1814::SpecialMixerRoutingModel routing_{};
     std::array<bool, 2> softwareReturnLevelKnown_{{false, false}};

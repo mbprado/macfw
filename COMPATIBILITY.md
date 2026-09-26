@@ -26,6 +26,14 @@ The table is cumulative across development releases; not every operating-system 
 | Sequoia 15.x | validated | validated | validated | validated | validated | validated | validated | **Validated** | OpenCore LP |
 | Tahoe 26.x | not supported | not supported | not supported | not supported | not supported | not supported | not supported | **Blocked by missing native FireWire stack** | N/A |
 
+The FW1814 88.2/96 kHz rolling engines were additionally tested on the Intel
+macOS 12.7.4 development Mac: analog playback and recording worked, switching
+among 44.1/48/88.2/96 kHz and interface restart succeeded, and the three
+live service profiles changed successfully. Small artifacts were observed
+under heavy host demand. This development test does not extend the
+per-version installer validation in the table above to all four rates.
+The 176.4/192 kHz modes remain experimental.
+
 ## Hardware
 
  mac | Device | FW | Adapter | MacOS 12 | MacOS 13 | MacOS 14 | MacOS 15 | MacOS 26 | MacOS 27 | UEFI
@@ -35,7 +43,8 @@ The table is cumulative across development releases; not every operating-system 
 |MacBook Pro 12,1 | FW410 | Thunderbolt 2 | A1463 | O | O | O | O | X | X | Stock/OpenCore LP |
 |MacBook Pro 12,1 | FW1814 | Thunderbolt 2 | A1463 | O | O | O | O | X | X | Stock/OpenCore LP |
 |MacPro 6,1 | FW410 | Thunderbolt 2 | A1463 | O | O | O | O | X | X | Stock/OpenCore LP |
-|MacPro 6,1 | FW1814 | Thunderbolt 2 | A1463 | O | O | O | O | X | X | Stock/OpenCore LP |  
+|MacPro 6,1 | FW1814 | Thunderbolt 2 | A1463 | O | O | O | O | X | X | Stock/OpenCore LP | 
+|MacBook Pro 16,1| --- | Thunderbolt 4 | A1790 + A1463 | ? | ? | ? | ? | X | X | Stock | 
   
 
 The native control panel and transport/control architecture have been exercised on the validated development systems. The control-path rule is common across releases: the GUI/CLI use the active transport's Unix-socket IPC rather than opening FireWire independently.

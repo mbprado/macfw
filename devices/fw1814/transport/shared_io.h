@@ -145,6 +145,14 @@ public:
         const auto w = ring_->writeFrame.load(std::memory_order_acquire);
         const auto r = ring_->readFrame.load(std::memory_order_acquire);
         const std::size_t available = static_cast<std::size_t>(w - r);
+        if (ring_->sampleRate.load(std::memory_order_acquire) == 96000 &&
+            available > 4096) {
+            // The input may have run for seconds before the first HAL read.
+            // Start a fresh prefill instead of activating with old samples.
+            ring_->readFrame.store(w, std::memory_order_release);
+            ring_->droppedFrames.fetch_add(available, std::memory_order_relaxed);
+            return false;
+        }
         if (available < prefillFrames) return false;
         ring_->readFrame.store(w - prefillFrames, std::memory_order_release);
         ring_->active.store(1, std::memory_order_release);

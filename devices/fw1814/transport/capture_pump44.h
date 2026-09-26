@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <mach/mach_time.h>
 
 namespace macfw::fw1814::transport {
 
@@ -25,7 +26,9 @@ public:
         std::uint64_t reorderedPackets = 0;
         std::uint64_t stalePackets = 0;
         std::uint64_t completedChunks = 0;
+        std::uint64_t repeatedTerminalTimestamps = 0;
         std::uint64_t noDataPackets = 0;
+        std::uint64_t firstLoudHostTime = 0;
     };
 
     std::size_t service(const macfw::AmdtpReceiveRing& rx,
@@ -44,10 +47,21 @@ public:
             const std::uint64_t signature =
                 (static_cast<std::uint64_t>(terminal.timestamp) << 32) |
                 static_cast<std::uint64_t>(terminal.isoHeader);
-            if (!terminal.touched() || terminal.timestamp == 0 ||
-                signature == lastChunkSignature_[chunk])
+            if (!terminal.touched() || terminal.timestamp == 0)
                 continue;
 
+            // A DMA update can expose a changed terminal header with the old
+            // completion timestamp. That is not a new 32-packet publication:
+            // replaying it can decode more than 44100 frames per second.
+            if (terminal.timestamp == lastChunkTimestamp_[chunk]) {
+                if (signature != lastChunkSignature_[chunk]) {
+                    ++stats_.repeatedTerminalTimestamps;
+                    lastChunkSignature_[chunk] = signature;
+                }
+                continue;
+            }
+
+            lastChunkTimestamp_[chunk] = terminal.timestamp;
             lastChunkSignature_[chunk] = signature;
             ++stats_.completedChunks;
             totalFrames += processChunk(rx, begin, end, out);
@@ -217,6 +231,9 @@ private:
                     ++invalid;
                 }
                 decoded[base + physical] = static_cast<float>(raw / 8388608.0);
+                if (stats_.firstLoudHostTime == 0 &&
+                    (raw >= 1258291 || raw <= -1258291))
+                    stats_.firstLoudHostTime = mach_absolute_time();
             }
             p += kCaptureStreamPositions * 4;
         }
@@ -230,6 +247,7 @@ private:
     }
 
     std::array<std::uint64_t, 8> lastChunkSignature_{};
+    std::array<std::uint32_t, 8> lastChunkTimestamp_{};
     Stats stats_{};
     bool haveExpectedDbc_ = false;
     std::uint8_t expectedDbc_ = 0;

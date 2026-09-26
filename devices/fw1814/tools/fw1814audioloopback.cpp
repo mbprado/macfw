@@ -1,0 +1,80 @@
+#include <AudioUnit/AudioUnit.h>
+#include <CoreAudio/CoreAudio.h>
+#include <CoreFoundation/CoreFoundation.h>
+#include <cmath>
+#include <iostream>
+#include <string>
+#include <vector>
+#include <atomic>
+#include <fcntl.h>
+#include <mach/mach_time.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#include "../hal/include/macfw_fw1814_hal_shm.h"
+#include "../hal/include/macfw_fw1814_capture_shm.h"
+static void printTransportEstimate(double rate) {
+    int po = shm_open(macfw::fw1814::hal::kPlaybackShmName, O_RDONLY, 0);
+    int ci = shm_open(macfw::fw1814::hal::capture::kShmName, O_RDONLY, 0);
+    if (po < 0 || ci < 0) { std::cout << "transport estimate unavailable\n"; if (po >= 0) close(po); if (ci >= 0) close(ci); return; }
+    auto* p = static_cast<const macfw::fw1814::hal::SharedPlaybackRing*>(mmap(nullptr, sizeof(macfw::fw1814::hal::SharedPlaybackRing), PROT_READ, MAP_SHARED, po, 0));
+    auto* c = static_cast<const macfw::fw1814::hal::capture::SharedCaptureRing*>(mmap(nullptr, sizeof(macfw::fw1814::hal::capture::SharedCaptureRing), PROT_READ, MAP_SHARED, ci, 0));
+    if (p == MAP_FAILED || c == MAP_FAILED || !macfw::fw1814::hal::valid(*p) || !macfw::fw1814::hal::capture::valid(*c)) { std::cout << "transport estimate unavailable\n"; }
+    else { const auto pq = macfw::fw1814::hal::availableFrames(*p); const auto cq = macfw::fw1814::hal::capture::availableFrames(*c); std::cout << "transport_playback_frames=" << pq << " (" << pq * 1000.0 / rate << " ms)\n" << "transport_capture_frames=" << cq << " (" << cq * 1000.0 / rate << " ms)\n" << "transport_queue_sum_frames=" << pq + cq << " (" << (pq + cq) * 1000.0 / rate << " ms)\n"; }
+    if (p != MAP_FAILED) munmap(const_cast<macfw::fw1814::hal::SharedPlaybackRing*>(p), sizeof(*p)); if (c != MAP_FAILED) munmap(const_cast<macfw::fw1814::hal::capture::SharedCaptureRing*>(c), sizeof(*c)); close(po); close(ci);
+}
+
+static bool waitForFw1814Transport(double rate, double timeoutSeconds) {
+    const auto expected = static_cast<std::uint32_t>(std::llround(rate));
+    const auto deadline = CFAbsoluteTimeGetCurrent() + timeoutSeconds;
+    bool sawReady = false;
+    std::uint64_t firstDecodedFrame = 0;
+    while (CFAbsoluteTimeGetCurrent() < deadline) {
+        int po = shm_open(macfw::fw1814::hal::kPlaybackShmName, O_RDONLY, 0);
+        int ci = shm_open(macfw::fw1814::hal::capture::kShmName, O_RDONLY, 0);
+        if (po >= 0 && ci >= 0) {
+            auto* p = static_cast<const macfw::fw1814::hal::SharedPlaybackRing*>(
+                mmap(nullptr, sizeof(macfw::fw1814::hal::SharedPlaybackRing),
+                     PROT_READ, MAP_SHARED, po, 0));
+            auto* c = static_cast<const macfw::fw1814::hal::capture::SharedCaptureRing*>(
+                mmap(nullptr, sizeof(macfw::fw1814::hal::capture::SharedCaptureRing),
+                     PROT_READ, MAP_SHARED, ci, 0));
+            if (p != MAP_FAILED && c != MAP_FAILED &&
+                macfw::fw1814::hal::valid(*p) &&
+                macfw::fw1814::hal::capture::valid(*c) &&
+                p->sampleRate.load(std::memory_order_acquire) == expected &&
+                c->sampleRate.load(std::memory_order_acquire) == expected &&
+                p->active.load(std::memory_order_acquire) != 0) {
+                const auto decodedFrame =
+                    c->decodedFrames.load(std::memory_order_acquire);
+                if (!sawReady) {
+                    sawReady = true;
+                    firstDecodedFrame = decodedFrame;
+                } else if (decodedFrame > firstDecodedFrame) {
+                    munmap(const_cast<macfw::fw1814::hal::SharedPlaybackRing*>(p),
+                           sizeof(*p));
+                    munmap(const_cast<macfw::fw1814::hal::capture::SharedCaptureRing*>(c),
+                           sizeof(*c));
+                    close(po); close(ci);
+                    return true;
+                }
+            } else {
+                sawReady = false;
+            }
+            if (p != MAP_FAILED)
+                munmap(const_cast<macfw::fw1814::hal::SharedPlaybackRing*>(p),
+                       sizeof(*p));
+            if (c != MAP_FAILED)
+                munmap(const_cast<macfw::fw1814::hal::capture::SharedCaptureRing*>(c),
+                       sizeof(*c));
+        }
+        if (po >= 0) close(po);
+        if (ci >= 0) close(ci);
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, .02, false);
+    }
+    return false;
+}
+
+struct P { AudioUnit u{}; double rate{}; std::atomic<uint64_t> out{0},in{0}; std::atomic<bool> sent{false},got{false}; std::vector<float> b; uint64_t t0{},t1{},wall0{},wall1{}; uint64_t hp(){return 1000000000ull/(uint64_t)rate;}
+ static OSStatus outcb(void*r,AudioUnitRenderActionFlags*,const AudioTimeStamp*t,UInt32,UInt32 n,AudioBufferList*l){auto*p=(P*)r;auto*d=(float*)l->mBuffers[0].mData;auto b=p->out.fetch_add(n);for(UInt32 i=0;i<n;i++)d[i]=0;if(!p->sent&&b<=48000&&48000<b+n){d[48000-b]=.8f;p->wall0=mach_absolute_time();p->t0=t->mHostTime+(48000-b)*p->hp();p->sent=true;}return noErr;}
+ static OSStatus incb(void*r,AudioUnitRenderActionFlags*f,const AudioTimeStamp*t,UInt32,UInt32 n,AudioBufferList*){auto*p=(P*)r;AudioBufferList a{};a.mNumberBuffers=1;a.mBuffers[0].mNumberChannels=1;a.mBuffers[0].mDataByteSize=n*4;a.mBuffers[0].mData=p->b.data();auto e=AudioUnitRender(p->u,f,t,1,n,&a);if(e)return e;p->in+=n;if(!p->got)for(UInt32 i=0;i<n;i++)if(std::fabs(p->b[i])>.15){p->wall1=mach_absolute_time();p->t1=t->mHostTime+i*p->hp();p->got=true;break;}return noErr;}};
+int main(int argc,char**argv){double requestedRate=0;for(int i=1;i+1<argc;i++)if(std::string(argv[i])=="--rate")requestedRate=std::stod(argv[i+1]);AudioComponentDescription d{kAudioUnitType_Output,kAudioUnitSubType_HALOutput,kAudioUnitManufacturer_Apple,0,0};auto c=AudioComponentFindNext(nullptr,&d);if(!c)return 1;P p;if(AudioComponentInstanceNew(c,&p.u)!=noErr)return 1;UInt32 one=1;if(AudioUnitSetProperty(p.u,kAudioOutputUnitProperty_EnableIO,kAudioUnitScope_Input,1,&one,4)||AudioUnitSetProperty(p.u,kAudioOutputUnitProperty_EnableIO,kAudioUnitScope_Output,0,&one,4))return 1;AudioObjectPropertyAddress a{kAudioHardwarePropertyDevices,kAudioObjectPropertyScopeGlobal,kAudioObjectPropertyElementMain};UInt32 z=0;AudioObjectGetPropertyDataSize(kAudioObjectSystemObject,&a,0,nullptr,&z);std::vector<AudioDeviceID> ds(z/4);AudioObjectGetPropertyData(kAudioObjectSystemObject,&a,0,nullptr,&z,ds.data());AudioDeviceID dev=kAudioObjectUnknown;const std::string wanted = (argc > 2 && std::string(argv[1]) == "--device") ? argv[2] : "1814";for(auto id:ds){AudioObjectPropertyAddress n{kAudioObjectPropertyName,kAudioObjectPropertyScopeGlobal,kAudioObjectPropertyElementMain};CFStringRef s=nullptr;UInt32 q=8;if(!AudioObjectGetPropertyData(id,&n,0,nullptr,&q,&s)&&s){char x[128]{};CFStringGetCString(s,x,128,kCFStringEncodingUTF8);CFRelease(s);std::cout<<"device "<<id<<": "<<x<<"\n";if(std::string(x).find(wanted)!=std::string::npos)dev=id;}}if(dev==kAudioObjectUnknown){std::cerr<<"requested device not found\n";return 1;}for(auto scope:{kAudioObjectPropertyScopeInput,kAudioObjectPropertyScopeOutput}){AudioObjectPropertyAddress la{kAudioDevicePropertyLatency,scope,kAudioObjectPropertyElementMain};UInt32 v=0,ls=sizeof(v);auto e=AudioObjectGetPropertyData(dev,&la,0,nullptr,&ls,&v);std::cout<<"device_latency_"<<(scope==kAudioObjectPropertyScopeInput?"input":"output")<<"="<<(e==noErr?std::to_string(v):"unavailable")<<" frames\n";}for(auto scope:{kAudioObjectPropertyScopeInput,kAudioObjectPropertyScopeOutput}){AudioObjectPropertyAddress sa{kAudioDevicePropertyStreams,scope,kAudioObjectPropertyElementMain};UInt32 ss=0;if(AudioObjectGetPropertyDataSize(dev,&sa,0,nullptr,&ss)==noErr&&ss){std::vector<AudioStreamID> ids(ss/sizeof(AudioStreamID));if(AudioObjectGetPropertyData(dev,&sa,0,nullptr,&ss,ids.data())==noErr)for(auto sid:ids){AudioObjectPropertyAddress la{kAudioStreamPropertyLatency,kAudioObjectPropertyScopeGlobal,kAudioObjectPropertyElementMain};UInt32 sv=0,sz2=sizeof(sv);auto se=AudioObjectGetPropertyData(sid,&la,0,nullptr,&sz2,&sv);std::cout<<"stream_latency_"<<(scope==kAudioObjectPropertyScopeInput?"input":"output")<<"="<<(se==noErr?std::to_string(sv):"unavailable")<<" frames\n";}}}if(requestedRate>0){AudioObjectPropertyAddress ra{kAudioDevicePropertyNominalSampleRate,kAudioObjectPropertyScopeGlobal,kAudioObjectPropertyElementMain};Float64 currentRate=0;UInt32 rateSize=sizeof(currentRate);auto getStatus=AudioObjectGetPropertyData(dev,&ra,0,nullptr,&rateSize,&currentRate);if(getStatus!=noErr){std::cerr<<"could not read current sample rate: "<<getStatus<<"\n";return 1;}if(std::fabs(currentRate-requestedRate)<0.5){std::cerr<<"already running at requested rate "<<currentRate<<" Hz; skipping rate request\n";}else{auto rs=AudioObjectSetPropertyData(dev,&ra,0,nullptr,sizeof(requestedRate),&requestedRate);std::cerr<<"rate request status="<<rs<<" ("<<currentRate<<" -> "<<requestedRate<<" Hz)\n";if(rs!=noErr)return 1;if(wanted=="1814"){std::cerr<<"waiting for FW1814 transport readiness...\n";if(!waitForFw1814Transport(requestedRate,8.0)){std::cerr<<"FW1814 transport did not become ready at "<<requestedRate<<" Hz\n";return 1;}}else{auto until=CFAbsoluteTimeGetCurrent()+2.0;while(CFAbsoluteTimeGetCurrent()<until)CFRunLoopRunInMode(kCFRunLoopDefaultMode,.01,false);}}}AudioUnitSetProperty(p.u,kAudioOutputUnitProperty_CurrentDevice,kAudioUnitScope_Global,0,&dev,4);AudioStreamBasicDescription f{};z=sizeof(f);if(AudioUnitGetProperty(p.u,kAudioUnitProperty_StreamFormat,kAudioUnitScope_Output,0,&f,&z))return 1;p.rate=f.mSampleRate;p.b.resize(4096);std::cout<<"running at "<<p.rate<<" Hz\n";AudioStreamBasicDescription cfmt{p.rate,kAudioFormatLinearPCM,kAudioFormatFlagIsFloat|kAudioFormatFlagIsPacked|kAudioFormatFlagsNativeEndian,4,1,4,1,32,0};AudioUnitSetProperty(p.u,kAudioUnitProperty_StreamFormat,kAudioUnitScope_Input,0,&cfmt,sizeof(cfmt));AudioUnitSetProperty(p.u,kAudioUnitProperty_StreamFormat,kAudioUnitScope_Output,1,&cfmt,sizeof(cfmt));AURenderCallbackStruct o{P::outcb,&p},i{P::incb,&p};AudioUnitSetProperty(p.u,kAudioUnitProperty_SetRenderCallback,kAudioUnitScope_Input,0,&o,sizeof(o));AudioUnitSetProperty(p.u,kAudioOutputUnitProperty_SetInputCallback,kAudioUnitScope_Global,0,&i,sizeof(i));UInt32 m=4096;AudioUnitSetProperty(p.u,kAudioUnitProperty_MaximumFramesPerSlice,kAudioUnitScope_Global,0,&m,4);if(AudioUnitInitialize(p.u)||AudioOutputUnitStart(p.u))return 1;auto end=CFAbsoluteTimeGetCurrent()+6;while(CFAbsoluteTimeGetCurrent()<end&&!p.got)CFRunLoopRunInMode(kCFRunLoopDefaultMode,.01,false);AudioOutputUnitStop(p.u);AudioUnitUninitialize(p.u);AudioComponentInstanceDispose(p.u);if(!p.got){std::cout<<"impulse not returned\n";return 2;}double ns=(p.t1-p.t0)*1e-9;mach_timebase_info_data_t tb{};mach_timebase_info(&tb);double wallNs=p.wall1>p.wall0?static_cast<double>(p.wall1-p.wall0)*tb.numer/tb.denom:0.0;std::cout<<"round_trip_seconds="<<ns<<" round_trip_frames="<<ns*p.rate<<"\n";std::cout<<"callback_wall_seconds="<<wallNs*1e-9<<" callback_wall_frames="<<wallNs*1e-9*p.rate<<"\n";std::cout<<"marker-tool-out="<<p.wall0<<" marker-tool-in="<<p.wall1<<"\n";if(wanted == "1814") printTransportEstimate(p.rate); else std::cout<<"transport estimate skipped for non-FW1814 device\n";}
