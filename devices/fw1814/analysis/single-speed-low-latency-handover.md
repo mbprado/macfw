@@ -383,6 +383,26 @@ Remaining work: extended active-recording counter comparisons under host
 stress, longer all-channel capture checks and quad-speed development.
 The single-speed engines remain the regression baseline.
 
+### 88.2 kHz Logic rate-change reserve experiment
+
+After Logic changed 96 -> 88.2 kHz, electrical loopback measured about
+66 ms while the live PCM ring remained near 4096 frames (about 46 ms) in
+successive transport status lines. A GUI-origin rate change measured about
+27 ms with the same reported CoreAudio device latency of 7286 frames.
+The fixed latency property therefore does not, by itself, explain the
+difference in the independent electrical loopback measurement. The startup
+code tops PCM silence up to 4096 frames before live playback; an active
+Logic client can keep that backlog from draining.
+
+The opt-in `MACFW_88_SHORT_READY_RESERVE=1` tests a 512-frame READY
+top-up while retaining the existing 1.6-second startup preload and
+4096-cycle scheduled startup lead. The transport now logs the queue
+*before* READY top-up and the target to distinguish newly added silence
+from preload that was already queued. This option leaves the fixed
+half-ring path unchanged and is not promoted until hardware validation
+after a Logic-origin rate change. If PCM already exceeds 512 frames
+before top-up, the opt-in alone cannot discard that backlog.
+
 ## Reproduction commands
 
 Installed profile state:
