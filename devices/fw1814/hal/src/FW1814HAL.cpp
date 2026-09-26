@@ -45,7 +45,8 @@ constexpr UInt32 kReported96DeviceLatencyFrames = 672;
 constexpr UInt32 kReported88DeviceLatencyFrames = 1147;
 // Rolling 176.4 kHz electrical loopback measured about 10.1 ms.
 constexpr UInt32 kReported176DeviceLatencyFrames = 893;
-constexpr UInt32 kReported192DeviceLatencyFrames = 17018;
+// Rolling 192 kHz with the 1280-packet ring measured 9.73-10.06 ms.
+constexpr UInt32 kReported192DeviceLatencyFrames = 950;
 
 AudioServerPlugInHostRef gHost = nullptr;
 std::atomic<UInt32> gRefCount{1};
