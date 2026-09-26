@@ -155,7 +155,7 @@ Then install the already-built FW1814 HAL, supervised runtime and control panel 
 sudo make fw1814-install
 ```
 
-The current FW1814 scope exposes Analog Outputs 1-4 and Analog Inputs 1-8 at 44.1 and 48 kHz. Rate switching, reconnect restoration, persistent analog routing/mixer controls and the native AppKit control panel are hardware-validated. S/PDIF, ADAT, higher rates and MIDI remain under development.
+The FW1814 analog profile exposes Analog Outputs 1-4 and Analog Inputs 1-8 at 44.1, 48, 88.2 and 96 kHz. These modes have hardware-tested playback, recording, rate switching and restart recovery. The 88.2/96 kHz engines use guarded rolling TX and support the persistent live Aggressive, Balanced and Conservative service profiles. Occasional small artifacts remain possible under heavy host load. The 176.4/192 kHz quad-speed engines remain experimental; S/PDIF, ADAT and MIDI remain under development.
 
 The first routing-control API is available through the transport-owned socket. It reports the exact write-only routing baseline cached by the active engine without issuing new FireWire writes:
 
