@@ -21,7 +21,13 @@ The project uses the `x.y.zzz` version format described in [`RELEASES.md`](RELEA
 
 - FW1814 88.2/96 kHz rolling TX and live profiles are active in the normal
   source install; legacy experimental install targets remain aliases.
-- 176.4/192 kHz quad-speed engines remain experimental.
+- FW1814 176.4/192 kHz quad-speed engines now default to guarded rolling
+  transmit refill. The 192 kHz rolling path uses a 1280-packet TX ring;
+  per-rate environment overrides retain the earlier refill and ring paths.
+  The CoreAudio latency estimates are recalibrated to measured rolling
+  loopbacks. Both quad modes now support the persistent live Aggressive,
+  Balanced and Conservative service profiles. Quad startup and capture
+  qualification remain experimental.
 
 
 ## [0.04.003] — FW1814 headphone encoder fix — 2026-09-16
