@@ -38,8 +38,8 @@ constexpr UInt32 kPlaybackMaxPacket = 648;
 constexpr std::size_t kCaptureSlots = 256;
 // Use a longer ring than the standalone probe so a scheduling delay cannot
 // consume the next half before the audio service refills it.
-constexpr std::size_t kTxPackets = 2560;
-constexpr std::size_t kTxHalfPackets = 1280;
+constexpr std::size_t kValidatedTxPackets = 2560;
+constexpr std::size_t kShortRollingTxPackets = 1280;
 // At 192 kHz each 1280-cycle half contains 960 data packets with 32 PCM
 // frames each.
 constexpr std::size_t kFramesPerTxHalf = 960 * 32;
@@ -70,6 +70,11 @@ constexpr std::chrono::milliseconds kOutputWarmup(1500);
 bool rollingTxRequested() {
     const char* value = std::getenv("MACFW_192_ROLLING_TX");
     return value && value[0] != '\0' && value[0] != '0';
+}
+
+bool shortRollingRingRequested() {
+    const char* value = std::getenv("MACFW_192_ROLLING_RING_PACKETS");
+    return value && std::strcmp(value, "1280") == 0;
 }
 
 volatile std::sig_atomic_t gStopRequested = 0;
@@ -187,16 +192,19 @@ bool run() {
             return (CFAbsoluteTimeGetCurrent() - cycleAnchorTime) * 1000.0;
         };
         const UInt32 firstCycle = (initialCycle + kCycleLead) % kCyclesPerSecond;
+        const bool rollingTx = rollingTxRequested();
+        const std::size_t txPackets = rollingTx && shortRollingRingRequested()
+            ? kShortRollingTxPackets : kValidatedTxPackets;
+        const std::size_t txHalfPackets = txPackets / 2;
         auto tx = macfw::fw1814::transport::BlockingPcmTransmitRing192000::create(
-            device, firstCycle, kTxPackets);
+            device, firstCycle, txPackets);
         if (!pcm.valid() || !rx || !tx) {
             std::cerr << "FW1814 PCM/ISO ring creation failed\n";
             goto cleanup;
         }
 
         macfw::fw1814::transport::BlockingPcmStream192000 streamer(
-            tx, pcm, initialCycle, firstCycle, kTxHalfPackets);
-        const bool rollingTx = rollingTxRequested();
+            tx, pcm, initialCycle, firstCycle, txHalfPackets);
         if (rollingTx && !streamer.enableRolling(96, 48)) {
             std::cerr << "FW1814 192 kHz rolling TX setup failed\n";
             goto cleanup;
@@ -205,10 +213,10 @@ bool run() {
             std::cerr << "FW1814 playback stream prime failed\n";
             goto cleanup;
         }
-        std::cout << "FW1814 playback TX ring: " << kTxPackets
-                  << " packets / " << kTxHalfPackets
-                  << "-packet halves (" << kTxPackets / 8 << " ms / "
-                  << kTxHalfPackets / 8 << " ms)\n";
+        std::cout << "FW1814 playback TX ring: " << txPackets
+                  << " packets / " << txHalfPackets
+                  << "-packet halves (" << txPackets / 8 << " ms / "
+                  << txHalfPackets / 8 << " ms)\n";
         if (rollingTx)
             std::cout << "FW1814 192 kHz EXPERIMENTAL rolling TX: "
                          "96-cycle live lead, 48-cycle deadline guard\n";
