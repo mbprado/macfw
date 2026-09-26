@@ -63,7 +63,7 @@ bool rollingTxRequested() {
 
 bool shortReadyReserveRequested() {
     const char* value = std::getenv("MACFW_96_SHORT_READY_RESERVE");
-    return value && std::strcmp(value, "0") != 0;
+    return !value || std::strcmp(value, "0") != 0;
 }
 
 std::size_t rollingTxLeadPackets() {
@@ -128,8 +128,8 @@ bool run() {
     {
         macfw::PcmRingBuffer pcm(kPcmCapacityFrames,
                                  macfw::fw1814::kPlaybackPcmPositions);
-        // This guarded trial retains the long startup preload and 4096-cycle
-        // ISO lead while consuming 3584 fewer silent PCM frames before READY.
+        // Keep the long startup preload and 4096-cycle ISO lead while
+        // consuming 3584 fewer silent PCM frames before READY in rolling mode.
         const std::size_t startupFrames =
             rollingTxRequested() && shortReadyReserveRequested()
                 ? kSilentStartupFrames -
