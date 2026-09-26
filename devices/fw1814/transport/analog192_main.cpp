@@ -533,6 +533,9 @@ bool run() {
                               << " tx-audio=" << txStats.framesFromBuffer
                               << " tx-silence=" << txStats.framesSilenced
                               << " tx-nonzero=" << txStats.nonzeroFrames
+                              << " marker-pb=" << playbackPumpStats.firstLoudHostTime
+                              << " marker-tx=" << txStats.firstLoudHostTime
+                              << " marker-cap=" << rxStats.firstLoudHostTime
                               << " tx-peak=" << txStats.peakSample
                               << " tx-late=" << txStats.lateCyclePolls
                               << " tx-danger=" << txStats.dangerousCyclePolls
