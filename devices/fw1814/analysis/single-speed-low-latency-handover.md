@@ -456,8 +456,18 @@ for that rate; confirm playback, physical capture, first loud packet,
 quad-to-single and single-to-quad changes, then stress playback and capture.
 At 176.4 kHz watch the variable 44.1-family DBC/SYT cadence through ring
 wrap; at 192 kHz watch its 3-data/1-NODATA phase and the capture
-qualification counters. The high-rate preload and capture admission are
-separate experiments after the rolling TX path has been validated.
+qualification counters. 176.4 kHz had a successful physical loopback at 10.12 ms with zero rolling
+misses in the supplied sample; the user reports playback and capture fine.
+The 176.4 kHz HAL latency estimate is now 893 frames per scope (about
+10.12 ms combined), pending repeated calibration. At 192 kHz rolling TX
+had zero reported rolling misses but one electrical loopback took about
+185 ms and the next returned no impulse. The engine's 8192-frame
+playback-release reserve contributes about 43 ms, and it retains a long
+capture qualification/output warmup. Matching first-loud markers at SHM
+playback read, TX packet write, and capture decode were added to locate
+where the remaining delay or impulse loss occurs. Keep 192 kHz opt-in.
+The high-rate preload and capture admission are separate experiments after
+the rolling TX path has been validated.
 
 ## Reproduction commands
 
