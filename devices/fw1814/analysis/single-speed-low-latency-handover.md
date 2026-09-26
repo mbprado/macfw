@@ -403,6 +403,28 @@ for A/B diagnosis; fixed half-ring TX also retains that target. The
 1.6-second startup silence preload and 4096-cycle startup lead remain
 unchanged.
 
+### 96 kHz Logic rate-change reserve fix
+
+After a Logic-origin switch from 88.2 to 96 kHz, electrical loopback
+measured about 52-54 ms while the playback PCM queue stayed near 4096
+frames (about 43 ms); a GUI-origin switch measured about 9 ms.
+With the opt-in `MACFW_96_SHORT_READY_RESERVE=1` trial the user reported
+improved latency. The trial shortens the initial silent PCM preload by
+3584 frames and targets 512 frames at READY, while retaining the
+4096-cycle TX startup lead. This is now the rolling-mode default;
+`MACFW_96_SHORT_READY_RESERVE=0` restores the previous preload and
+4096-frame READY target. The first supplied log with the new diagnostic
+showed `target=4096`, confirming that particular run had not enabled
+the trial. No precise post-trial 96 kHz loopback measurement was supplied
+at the time of promotion.
+
+The four validated modes use different reserve mechanisms: 44.1 kHz
+rolling TX defaults to a 512-frame live PCM reserve adjustable with
+`MACFW_44_ROLLING_PCM_RESERVE_FRAMES` (64..2048); 48 kHz does not
+perform a READY silence top-up; rolling 88.2 and 96 kHz default to
+512-frame READY targets with the per-rate `SHORT_READY_RESERVE=0`
+fallbacks. Preserve these distinct startup paths during further tuning.
+
 ## Reproduction commands
 
 Installed profile state:
