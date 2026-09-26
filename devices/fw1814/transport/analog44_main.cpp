@@ -82,7 +82,7 @@ UInt32 cycleDelta(UInt32 newer, UInt32 older) {
 
 bool rollingTxRequested() {
     const char* value = std::getenv("MACFW_44_ROLLING_TX");
-    return value && value[0] != '\0' && value[0] != '0';
+    return !value || value[0] != '0';
 }
 
 std::size_t rollingTxLeadPackets() {
