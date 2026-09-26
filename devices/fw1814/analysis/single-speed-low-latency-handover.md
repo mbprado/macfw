@@ -322,60 +322,55 @@ A dual-speed rolling mode is ready for integration only when:
 - an engine failure stops safely and the supervisor recovers without a reboot
   loop.
 
-## Dual-speed rolling progress (26 September 2026)
+## Dual-speed rolling results and promotion (26 September 2026)
 
-The experimental branch now has separately opt-in rolling TX at 88.2 and 96 kHz.
-Both retain the fixed 250 us audio service cadence, both capture service calls,
-the 4096-cycle startup lead, and the proven physical NuDCL allocations (1280
-packets at 88.2 kHz; 640 at 96 kHz). The initial live lead is 96 cycles with
-a 48-cycle deadline guard. A missed deadline stops the engine before unsafe
-slot reuse. At 88.2 kHz the native variable blocking cadence, DBC and SYT
-state advance continuously through arbitrary refill chunks and ring wrap; at
-96 kHz the established 16/16/16/NODATA packet phase is preserved.
+The 88.2 and 96 kHz engines now use guarded rolling TX and live performance
+profiles by default in this branch. Their startup lead remains 4096 cycles,
+while the independent live horizon is 96 cycles with a 48-cycle deadline
+guard. The physical NuDCL allocations remain 1280 packets at 88.2 kHz and
+640 packets at 96 kHz. Both capture service calls remain in the audio loop.
+A missed rolling deadline stops the engine before unsafe slot reuse.
 
-Electrical loopback observations on the test Mac:
+The native 88.2 kHz variable blocking cadence, DBC and SYT advance
+continuously through arbitrary refill chunks and ring wrap. The 96 kHz
+16/16/16/NODATA phase and packet metadata remain unchanged. Fixed half-ring
+refill is available for diagnosis with `MACFW_88_ROLLING_TX=0` or
+`MACFW_96_ROLLING_TX=0`. Each rate also accepts an optional
+`MACFW_<rate>_ROLLING_TX_CYCLES` lead override.
 
-| Rate | Fixed-ring baseline | Rolling, first hardware runs | Status |
+| Rate | Fixed-ring baseline | Initial rolling loopback | Hardware result |
 | --- | ---: | ---: | --- |
-| 88.2 kHz | about 167-175 ms | 21.4-21.5 ms | Playback and recording usable; occasional small artifacts under high host demand |
-| 96 kHz | about 78-89 ms | 10.5-12 ms | Playback and recording usable; occasional small artifacts under high host demand |
+| 88.2 kHz | about 167-175 ms | 21.4-21.5 ms | Playback and recording usable |
+| 96 kHz | about 78-89 ms | 10.5-12 ms | Playback and recording usable |
 
-The 88.2 kHz rolling logs showed advancing `tx-roll-packets`, zero rolling
-deadline misses, and no growth in `dbc-gap`, `reorder` or `stale` across the
-supplied loopback window. In the 96 kHz initial run, rolling misses stayed
-zero, but capture `dbc-gap` and `reorder` counters rose in log snapshots;
-those counters require an active recording comparison before attributing them
-to rolling TX. The 88.2 kHz first-loud marker reached TX about 0.5 ms after
-playback SHM read, and capture about 18.6 ms after TX write. Markers locate
-software events; TX write is not proof of the exact FireWire wire time.
+The user observed occasional small artifacts under heavy host demand at both
+rates. The initial 88.2 kHz loopback logs showed advancing rolling packets,
+zero misses and no growth in DBC gaps, reorder or stale counters. Initial
+96 kHz logs had zero rolling misses; capture DBC and reorder counters rose in
+some snapshots and still warrant comparison during active recording. The
+first-loud markers at 88.2 kHz placed the TX write about 0.5 ms after
+playback SHM read and capture decode about 18.6 ms after TX write. These
+markers locate software events; a TX memory write does not establish the
+precise FireWire wire time.
 
-These are experimental opt-ins, not released performance profiles:
-`MACFW_88_ROLLING_TX=1` and `MACFW_96_ROLLING_TX=1`. Each has an optional
-`MACFW_<rate>_ROLLING_TX_CYCLES` lead override. Do not enable dual-speed
-profiles or change capture prefill on the strength of short loopback runs.
-Both rates now have initial positive playback and recording reports. Collect
-first/last active-recording counter windows at both rates, investigate the
-small stress-related artifacts, and quantify the remaining stress sensitivity. Repeated GUI switching among 44.1, 48, 88.2 and 96 kHz was reported clean with no apparent issue; the user found the rolling dual-speed paths more reliable than the previous fixed-refill architecture. This is an observational result, not yet a quantified long-duration transition stress test. Quad-speed 176.4/192 kHz was not included in these tests and remains separate future work. The interface was also restarted successfully at all four tested rates; 96 kHz takes somewhat longer to return, without an observed functional issue.
+Repeated GUI switching among 44.1, 48, 88.2 and 96 kHz was reported clean,
+as was interface restart at each rate. The 96 kHz restart takes somewhat
+longer. The user found the rolling dual-speed paths more reliable than the
+previous fixed-refill architecture. Quad-speed 176.4/192 kHz was not
+included in those tests and remains separate work.
 
-### Experimental dual-speed profile validation
+Aggressive, Balanced and Conservative now set the dual-speed Mach service
+period live to 250, 375 and 500 us respectively. Profile changes and
+playback/recording were reported working at both rates. Six 96 kHz
+profile-loopback measurements ranged from about 13.3 to 15.7 ms with no
+clear latency ordering by profile; the profile changes only service cadence,
+not packet formation, ring geometry, rolling lead, PCM reserve or capture
+prefill. The persistent selection is restored by the existing state path.
+`MACFW_AUDIO_SERVICE_PERIOD_US` remains an authoritative expert override.
 
-After the rolling paths are clean at the fixed 250 us cadence, set
-`MACFW_DUAL_PERFORMANCE_PROFILES=1` in the FW1814 transport launchd plist
-and reinstall the experimental engine so launchd loads the setting. This
-exposes the existing persistent live Aggressive (250 us), Balanced (375 us)
-and Conservative (500 us) profile control for 88.2 and 96 kHz. The profile
-only changes Mach service cadence; rolling lead/guard, startup distance,
-packet formation, PCM reserve and capture prefill remain unchanged.
-Without this opt-in, both dual-speed engines retain fixed 250 us service.
-
-Validate each profile with playback, all-channel capture and electrical
-loopback at both rates. Check the active period with
-`fw1814ctl performance-profile get`, and compare first/last rolling misses,
-DBC/reorder/stale and wake-lateness counters during active recording.
-Switch profiles while audio is running, then restart the interface to check
-that the saved selection returns. The manual
-`MACFW_AUDIO_SERVICE_PERIOD_US` override remains authoritative; remove
-it for profile comparison. Do not enable profiles for 176.4/192 kHz.
+Remaining work: extended active-recording counter comparisons under host
+stress, longer all-channel capture checks and quad-speed development.
+The single-speed engines remain the regression baseline.
 
 ## Reproduction commands
 
