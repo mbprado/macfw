@@ -1343,9 +1343,9 @@ private:
                       std::to_string(performance_->periodNs() / 1000) + " " +
                       (performance_->environmentOverride() ? "1\n" : "0\n"));
             } else {
-                // High-rate engines currently retain their validated fixed
-                // cadence. Accept restored state so the preference persists
-                // until a low-rate engine is selected.
+                // Quad-rate engines retain a fixed service cadence. Accept
+                // restored state so the preference persists until a
+                // profile-enabled engine is selected.
                 reply("OK unavailable 0 0\n");
             }
             return;
