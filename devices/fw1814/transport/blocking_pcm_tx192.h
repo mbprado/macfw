@@ -5,6 +5,7 @@
 #include "macfw/pcm_ring_buffer.h"
 
 #include <IOKit/firewire/IOFireWireLibIsoch.h>
+#include <mach/mach_time.h>
 
 #include <algorithm>
 #include <atomic>
@@ -30,6 +31,7 @@ public:
         std::size_t framesSilenced = 0;
         std::size_t nonzeroFrames = 0;
         std::int32_t peakSample = 0;
+        std::uint64_t firstLoudHostTime = 0;
     };
 
     BlockingPcmTransmitRing192000() = default;
@@ -178,6 +180,14 @@ public:
                 result.framesRequested += rr.framesRequested;
                 result.framesFromBuffer += rr.framesFromBuffer;
                 result.framesSilenced += rr.framesSilenced;
+                if (result.firstLoudHostTime == 0) {
+                    for (const auto sample : frames) {
+                        if (sample >= 6291456 || sample <= -6291456) {
+                            result.firstLoudHostTime = mach_absolute_time();
+                            break;
+                        }
+                    }
+                }
 
                 for (std::size_t event = 0; event < kEventsPerDataPacket; ++event) {
                     bool nonzero = false;
@@ -426,6 +436,8 @@ public:
             stats_.framesSilenced += rr.framesSilenced;
             stats_.nonzeroFrames += rr.nonzeroFrames;
             stats_.peakSample = std::max(stats_.peakSample, rr.peakSample);
+            if (stats_.firstLoudHostTime == 0 && rr.firstLoudHostTime != 0)
+                stats_.firstLoudHostTime = rr.firstLoudHostTime;
             ++lastHalfNumber_;
         }
     }
@@ -458,6 +470,8 @@ private:
             stats_.framesSilenced += refill.framesSilenced;
             stats_.nonzeroFrames += refill.nonzeroFrames;
             stats_.peakSample = std::max(stats_.peakSample, refill.peakSample);
+            if (stats_.firstLoudHostTime == 0 && refill.firstLoudHostTime != 0)
+                stats_.firstLoudHostTime = refill.firstLoudHostTime;
             firstPacket += chunk;
             packetCount -= chunk;
         }
