@@ -465,7 +465,15 @@ had zero reported rolling misses but one electrical loopback took about
 playback-release reserve contributes about 43 ms, and it retains a long
 capture qualification/output warmup. Matching first-loud markers at SHM
 playback read, TX packet write, and capture decode were added to locate
-where the remaining delay or impulse loss occurs. Keep 192 kHz opt-in.
+where the remaining delay or impulse loss occurs. In a repeated 192 kHz
+run, TX first-loud marker 171206345099099 and capture first-loud marker
+171206532350321 differed by about 187 ms, matching the electrical loopback.
+The quad playback pump's missing SHM marker was fixed. A further opt-in
+`MACFW_192_ROLLING_RING_PACKETS=1280` compares a 160-ms physical ring
+against the existing 2560-packet, 320-ms ring while preserving the 96-cycle
+rolling lead, startup lead, and capture qualification. This is a hardware
+experiment: the larger ring had previously been selected for scheduling
+headroom. Keep 192 kHz opt-in.
 The high-rate preload and capture admission are separate experiments after
 the rolling TX path has been validated.
 
