@@ -383,25 +383,25 @@ Remaining work: extended active-recording counter comparisons under host
 stress, longer all-channel capture checks and quad-speed development.
 The single-speed engines remain the regression baseline.
 
-### 88.2 kHz Logic rate-change reserve experiment
+### 88.2 kHz Logic rate-change reserve fix
 
 After Logic changed 96 -> 88.2 kHz, electrical loopback measured about
-66 ms while the live PCM ring remained near 4096 frames (about 46 ms) in
-successive transport status lines. A GUI-origin rate change measured about
-27 ms with the same reported CoreAudio device latency of 7286 frames.
-The fixed latency property therefore does not, by itself, explain the
-difference in the independent electrical loopback measurement. The startup
-code tops PCM silence up to 4096 frames before live playback; an active
-Logic client can keep that backlog from draining.
+66 ms while the PCM ring stayed near 4096 frames (about 46 ms) in
+successive status lines. The reported CoreAudio device latency was the
+same as a faster GUI-origin test, so that property did not account for
+the independent electrical measurement.
 
-The opt-in `MACFW_88_SHORT_READY_RESERVE=1` tests a 512-frame READY
-top-up while retaining the existing 1.6-second startup preload and
-4096-cycle scheduled startup lead. The transport now logs the queue
-*before* READY top-up and the target to distinguish newly added silence
-from preload that was already queued. This option leaves the fixed
-half-ring path unchanged and is not promoted until hardware validation
-after a Logic-origin rate change. If PCM already exceeds 512 frames
-before top-up, the opt-in alone cannot discard that backlog.
+With `MACFW_88_SHORT_READY_RESERVE=1`, the PCM queue was zero before
+READY top-up, then 512 frames (about 5.8 ms) at READY. With Logic active
+it stayed around 350-500 frames. Two physical loopbacks after the
+Logic-origin switch measured about 27 ms, close to the about 25 ms
+GUI-origin result. Rolling deadline misses and DBC gaps stayed zero;
+one capture underrun event appeared later in the supplied status window.
+The shorter READY top-up is now the default for rolling 88.2 kHz.
+`MACFW_88_SHORT_READY_RESERVE=0` restores the former 4096-frame target
+for A/B diagnosis; fixed half-ring TX also retains that target. The
+1.6-second startup silence preload and 4096-cycle startup lead remain
+unchanged.
 
 ## Reproduction commands
 
