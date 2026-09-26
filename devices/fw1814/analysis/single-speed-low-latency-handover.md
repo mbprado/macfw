@@ -499,7 +499,13 @@ frames per scope at 192 kHz (about 9.90 ms). These describe the default
 rolling configurations, not live queue depth or the explicit fallback.
 Both quad engines now use the same persistent live performance profiles
 as 44.1–96 kHz: aggressive 250 us, balanced 375 us, conservative 500 us;
-the quad profile behavior still requires hardware regression tests.
+176.4 kHz hardware tests confirmed all three profiles through set/get and
+physical loopback: aggressive 11.39 ms, balanced 10.84 ms, conservative
+12.30 ms. The user reports playback and capture remain good. One
+control-socket connection failed transiently and succeeded immediately
+on retry; inspect service restarts if it recurs. The supplied profile
+measurements do not include 192 kHz, which still needs its own profile
+regression record.
 
 ## Reproduction commands
 
