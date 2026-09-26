@@ -372,6 +372,13 @@ not packet formation, ring geometry, rolling lead, PCM reserve or capture
 prefill. The persistent selection is restored by the existing state path.
 `MACFW_AUDIO_SERVICE_PERIOD_US` remains an authoritative expert override.
 
+A clean source checkout and complete uninstall/rebuild/reinstall were then
+tested on the FW1814 Mac. Playback and recording remained functional at
+44.1, 48, 88.2 and 96 kHz, with no regression reported. The user also
+observed that the small recording artifacts had decreased drastically and
+were nearly absent in this run. This is a listening observation, not a
+measured proof that all stress-related artifacts are gone.
+
 Remaining work: extended active-recording counter comparisons under host
 stress, longer all-channel capture checks and quad-speed development.
 The single-speed engines remain the regression baseline.
