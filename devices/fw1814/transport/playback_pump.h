@@ -115,6 +115,9 @@ inline std::size_t pumpPlaybackQuad(
              ++physical) {
             double raw = static_cast<double>(
                 audio[frame * macfw::fw1814::hal::kOutputChannels + physical]);
+            if (stats && stats->firstLoudHostTime == 0 &&
+                std::isfinite(raw) && std::fabs(raw) >= 0.75)
+                stats->firstLoudHostTime = mach_absolute_time();
             if (stats) {
                 ++stats->samplesSeen;
                 if (!std::isfinite(raw)) {
