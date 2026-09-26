@@ -210,6 +210,13 @@ public:
         return result;
     }
 
+    // Advance packet cadence without touching live DMA slots.
+    void advanceState(macfw::am824::Playback44100State& state,
+                      UInt32& cycle, std::size_t packets) const {
+        for (std::size_t i = 0; i < packets; ++i, ++cycle)
+            buildSilencePacket(cycle % kCyclesPerSecond, state);
+    }
+
     explicit operator bool() const { return localPort_ != nullptr; }
     IOFireWireLibLocalIsochPortRef nativeLocalPort() const { return localPort_; }
     UInt32 firstCycle() const { return firstCycle_; }
@@ -330,6 +337,9 @@ class BlockingPcmStream176400 {
 public:
     struct Stats {
         std::uint64_t halvesRefilled = 0;
+        std::uint64_t rollingRefills = 0;
+        std::uint64_t rollingPacketsRefilled = 0;
+        std::uint64_t rollingDeadlineMisses = 0;
         std::uint64_t dataPacketsRefilled = 0;
         std::uint64_t framesFromBuffer = 0;
         std::uint64_t framesSilenced = 0;
@@ -358,6 +368,17 @@ public:
                pcm_->channelCount() == BlockingPcmTransmitRing176400::pcmChannels() &&
                (tx_->packetCount() == 640 || tx_->packetCount() == 1280) &&
                tx_->packetCount() == halfPackets_ * 2;
+    }
+
+    bool enableRolling(std::size_t leadPackets, std::size_t guardPackets) {
+        if (!valid() || leadPackets == 0 ||
+            leadPackets >= tx_->packetCount() || guardPackets == 0 ||
+            guardPackets >= leadPackets)
+            return false;
+        rollingEnabled_ = true;
+        rollingLeadPackets_ = leadPackets;
+        rollingGuardPackets_ = guardPackets;
+        return true;
     }
 
     bool prime() {
@@ -390,6 +411,10 @@ public:
         }
 
         const std::uint64_t sinceStart = cyclesObserved_ - leadCycles_;
+        if (rollingEnabled_) {
+            serviceRolling(sinceStart);
+            return;
+        }
         const std::uint64_t halfNumber = sinceStart / halfPackets_;
         stats_.maxHalvesBehind = std::max(
             stats_.maxHalvesBehind, halfNumber - lastHalfNumber_);
@@ -412,12 +437,65 @@ public:
 
     const Stats& stats() const { return stats_; }
     bool streamReached() const { return streamReached_; }
+    bool healthy() const { return rollingHealthy_; }
 
 private:
     static constexpr UInt32 kCyclesPerSecond = 8000;
 
     static UInt32 cycleDelta(UInt32 newer, UInt32 older) {
         return (newer + kCyclesPerSecond - older) % kCyclesPerSecond;
+    }
+
+    bool refillRolling(std::uint64_t firstPacket, std::size_t packetCount) {
+        while (packetCount != 0) {
+            const std::size_t slot = static_cast<std::size_t>(
+                firstPacket % tx_->packetCount());
+            const std::size_t chunk = std::min(
+                packetCount, tx_->packetCount() - slot);
+            const auto refill = tx_->refill(*pcm_, slot, chunk,
+                                            nextState_, nextCycle_);
+            if (refill.packetsVisited != chunk)
+                return false;
+            ++stats_.rollingRefills;
+            stats_.rollingPacketsRefilled += refill.packetsVisited;
+            stats_.dataPacketsRefilled += refill.dataPacketsRefilled;
+            stats_.framesFromBuffer += refill.framesFromBuffer;
+            stats_.framesSilenced += refill.framesSilenced;
+            stats_.nonzeroFrames += refill.nonzeroFrames;
+            stats_.peakSample = std::max(stats_.peakSample, refill.peakSample);
+            firstPacket += chunk;
+            packetCount -= chunk;
+        }
+        return true;
+    }
+
+    void serviceRolling(std::uint64_t sinceStart) {
+        if (!rollingInitialized_) {
+            rollingNextPacket_ = sinceStart + rollingLeadPackets_;
+            nextState_ = {};
+            nextCycle_ = firstTxCycle_;
+            tx_->advanceState(nextState_, nextCycle_,
+                              static_cast<std::size_t>(rollingNextPacket_));
+            rollingInitialized_ = true;
+        }
+        const std::uint64_t safeFloor = sinceStart + rollingGuardPackets_;
+        if (rollingNextPacket_ < safeFloor) {
+            ++stats_.rollingDeadlineMisses;
+            rollingHealthy_ = false;
+            return;
+        }
+        const std::uint64_t targetExclusive =
+            sinceStart + rollingLeadPackets_ + 1;
+        if (rollingNextPacket_ >= targetExclusive)
+            return;
+        const auto count = static_cast<std::size_t>(
+            targetExclusive - rollingNextPacket_);
+        if (!refillRolling(rollingNextPacket_, count)) {
+            ++stats_.rollingDeadlineMisses;
+            rollingHealthy_ = false;
+            return;
+        }
+        rollingNextPacket_ = targetExclusive;
     }
 
     BlockingPcmTransmitRing176400* tx_ = nullptr;
@@ -431,6 +509,12 @@ private:
     macfw::am824::Playback44100State nextState_{};
     std::uint64_t cyclesObserved_ = 0;
     std::uint64_t lastHalfNumber_ = 0;
+    std::uint64_t rollingNextPacket_ = 0;
+    std::size_t rollingLeadPackets_ = 0;
+    std::size_t rollingGuardPackets_ = 0;
+    bool rollingEnabled_ = false;
+    bool rollingInitialized_ = false;
+    bool rollingHealthy_ = true;
     bool primed_ = false;
     bool streamReached_ = false;
     Stats stats_{};
