@@ -473,7 +473,12 @@ The quad playback pump's missing SHM marker was fixed. A further opt-in
 against the existing 2560-packet, 320-ms ring while preserving the 96-cycle
 rolling lead, startup lead, and capture qualification. This is a hardware
 experiment: the larger ring had previously been selected for scheduling
-headroom. Keep 192 kHz opt-in.
+headroom. Two physical loopbacks at the opt-in 1280-packet ring measured
+9.73 and 10.06 ms, compared with 187-188 ms on the default 2560-packet
+ring. This strongly implicates the longer DMA ring's live visibility/window,
+though packet markers and longer audio/capture stress tests are still needed.
+The CoreAudio 192 kHz latency estimate still describes the older path;
+recalibrate it only after choosing a default geometry. Keep 192 kHz opt-in.
 The high-rate preload and capture admission are separate experiments after
 the rolling TX path has been validated.
 
