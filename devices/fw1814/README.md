@@ -9,7 +9,7 @@ plan from the completed 44.1/48 kHz low-latency work are consolidated in
 
 ## Current scope
 
-The released FW1814 analog profile currently provides:
+The FW1814 analog profile in this branch provides:
 
 - Intel macOS support through Apple's legacy FireWire stack;
 - hardware-validated analog full-duplex CoreAudio at 44.1, 48, 88.2 and 96 kHz;
@@ -44,7 +44,10 @@ with 1280- and 640-packet physical allocations respectively, a 96-cycle live
 lead and a 48-cycle deadline guard. Fixed half-ring refill remains available
 for diagnosis with `MACFW_88_ROLLING_TX=0` or `MACFW_96_ROLLING_TX=0`.
 Both modes have hardware-tested playback, recording, rate switching, restart
-recovery and live performance profiles. Minor artifacts have been observed
+recovery and live performance profiles.
+The normal `make fw1814` and `sudo make fw1814-install` paths include both
+modes; older `*-experimental88` and `*-experimental96` targets remain as
+compatibility aliases. Minor artifacts have been observed
 under heavy host demand; extended stress monitoring remains useful.
 
 The 176.4 and 192 kHz engines remain separate experimental quad-speed work.
@@ -63,7 +66,7 @@ FW1814 development is also the beginning of macfw's explicit multi-device layout
 - FW1814-specific stream geometry, clock/digital-mode handling, control protocol and GUI live under `devices/fw1814/`;
 - the released FW410 implementation remains the regression reference while this extraction happens.
 
-The released FW1814 analog profile has hardware-validated full-duplex
+The FW1814 analog profile has hardware-tested full-duplex
 transport and CoreAudio integration at 44.1, 48, 88.2 and 96 kHz. Audio MIDI Setup
 can switch the nominal rate in either direction, the supervisor selects the
 matching transport engine, and disconnect/reconnect recovery restores the
