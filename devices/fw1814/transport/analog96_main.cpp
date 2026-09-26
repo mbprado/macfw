@@ -51,6 +51,7 @@ constexpr std::uint64_t kAudioServicePeriodNs = 250000;
 // pre-ready TX underflow is silent, and a short reserve is topped up below.
 constexpr std::size_t kSilentStartupFrames = 8 * kRate / 5;
 constexpr std::size_t kMinReadySilenceFrames = 4096;
+constexpr std::size_t kShortReadySilenceFrames = 512;
 
 volatile std::sig_atomic_t gStopRequested = 0;
 void signalHandler(int) { gStopRequested = 1; }
@@ -58,6 +59,11 @@ void signalHandler(int) { gStopRequested = 1; }
 bool rollingTxRequested() {
     const char* value = std::getenv("MACFW_96_ROLLING_TX");
     return !value || std::strcmp(value, "0") != 0;
+}
+
+bool shortReadyReserveRequested() {
+    const char* value = std::getenv("MACFW_96_SHORT_READY_RESERVE");
+    return value && std::strcmp(value, "0") != 0;
 }
 
 std::size_t rollingTxLeadPackets() {
@@ -122,10 +128,17 @@ bool run() {
     {
         macfw::PcmRingBuffer pcm(kPcmCapacityFrames,
                                  macfw::fw1814::kPlaybackPcmPositions);
+        // This guarded trial retains the long startup preload and 4096-cycle
+        // ISO lead while consuming 3584 fewer silent PCM frames before READY.
+        const std::size_t startupFrames =
+            rollingTxRequested() && shortReadyReserveRequested()
+                ? kSilentStartupFrames -
+                      (kMinReadySilenceFrames - kShortReadySilenceFrames)
+                : kSilentStartupFrames;
         std::vector<std::int32_t> silence(
             kSilentStartupFrames * macfw::fw1814::kPlaybackPcmPositions, 0);
-        if (!pcm.valid() || pcm.write(silence.data(), kSilentStartupFrames) !=
-                kSilentStartupFrames) {
+        if (!pcm.valid() || pcm.write(silence.data(), startupFrames) !=
+                startupFrames) {
             std::cerr << "FW1814 96 kHz silent warmup preload failed\n";
             goto cleanup;
         }
@@ -440,9 +453,14 @@ bool run() {
             // producer, top up a short silence reserve if a slow FCP exchange
             // consumed more of the startup preload than expected.
             const auto queued = pcm.availableFrames();
-            if (queued < kMinReadySilenceFrames &&
-                pcm.write(silence.data(), kMinReadySilenceFrames - queued) !=
-                    kMinReadySilenceFrames - queued) {
+            const std::size_t readyReserve =
+                rollingTx && shortReadyReserveRequested()
+                    ? kShortReadySilenceFrames : kMinReadySilenceFrames;
+            std::cout << "FW1814 96 kHz PCM before READY top-up: "
+                      << queued << " frames; target=" << readyReserve << " frames\n";
+            if (queued < readyReserve &&
+                pcm.write(silence.data(), readyReserve - queued) !=
+                    readyReserve - queued) {
                 std::cerr << "FW1814 96 kHz ready silence top-up failed\n";
                 startupOk = false;
             }
