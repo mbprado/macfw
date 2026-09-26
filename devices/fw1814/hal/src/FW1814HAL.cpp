@@ -31,16 +31,18 @@ constexpr Float64 kRate192000 = 192000.0;
 constexpr UInt32 kOutputChannels = macfw::fw1814::hal::kOutputChannels;
 constexpr UInt32 kInputChannels = macfw::fw1814::hal::capture::kInputChannels;
 constexpr UInt32 kQuadRateInputChannels = 2;
-// Provisional device-latency estimates. Loopback round-trip measurements are
+// Provisional device-latency estimates. Electrical loopback round trips are
 // split equally between input and output scopes for CoreAudio clients.
+// These are rate-specific calibration values, not a live measurement of queue
+// depth or host scheduling. Update after transport changes and hardware tests.
 constexpr UInt32 kReported44DeviceLatencyFrames = 1345;
 // The restored 640-packet TX reserve measured 82.65 ms round trip; report half
 // that measured latency on each CoreAudio device scope.
 constexpr UInt32 kReported48DeviceLatencyFrames = 1984;
-// Earlier external loopback measured about 119 ms round trip with the
-// restored 640-packet TX reserve; report half on each CoreAudio scope.
-constexpr UInt32 kReported96DeviceLatencyFrames = 5712;
-constexpr UInt32 kReported88DeviceLatencyFrames = 7286;
+// Rolling TX electrical loopback: about 14 ms at 96 kHz and 26 ms at
+// 88.2 kHz. Preserve the existing equal split across CoreAudio scopes.
+constexpr UInt32 kReported96DeviceLatencyFrames = 672;
+constexpr UInt32 kReported88DeviceLatencyFrames = 1147;
 constexpr UInt32 kReported176DeviceLatencyFrames = 14920;
 constexpr UInt32 kReported192DeviceLatencyFrames = 17018;
 
@@ -392,6 +394,8 @@ OSStatus STDMETHODCALLTYPE PerformDeviceConfigurationChange(AudioServerPlugInDri
     }
 
     Notify(kDeviceID, kAudioDevicePropertyNominalSampleRate);
+    Notify(kDeviceID, kAudioDevicePropertyLatency, kAudioObjectPropertyScopeInput);
+    Notify(kDeviceID, kAudioDevicePropertyLatency, kAudioObjectPropertyScopeOutput);
     Notify(kOutputStreamID, kAudioStreamPropertyVirtualFormat);
     Notify(kOutputStreamID, kAudioStreamPropertyPhysicalFormat);
     Notify(kInputStreamID, kAudioStreamPropertyVirtualFormat);
