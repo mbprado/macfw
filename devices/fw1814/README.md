@@ -20,7 +20,7 @@ The FW1814 analog profile in this branch provides:
 - a transport-owned routing-control API, authoritative write-only register
   cache and native AppKit control panel;
 - persistent Aggressive, Balanced and Conservative transport-performance
-  profiles for the validated 44.1/48/88.2/96 kHz engines;
+  profiles for the validated 44.1/48/88.2/96/176.4/192 kHz engines;
 - hardware-validated runtime assignment of software returns 1/2 and 3/4 to Mixer
   buses 1/2 and 3/4;
 - hardware-validated Mixer/AUX source selection for Analog Outputs 1/2 and 3/4;
@@ -39,11 +39,12 @@ The FW1814 analog profile in this branch provides:
   and reconnect; all four analog input-pair monitor levels also survive a
   transport restart through the same state path.
 
-The 44.1, 48, 88.2 and 96 kHz analog engines now use guarded rolling TX by default.
+The 44.1, 48, 88.2, 96, 176.4 and 192 kHz analog engines now use guarded rolling TX by default.
 The dual-speed modes retain their 1280- and 640-packet physical allocations,
 respectively, with a 96-cycle live lead and a 48-cycle deadline guard. Fixed half-ring refill remains available
 for diagnosis with `MACFW_44_ROLLING_TX=0`, `MACFW_48_ROLLING_TX=0`,
-`MACFW_88_ROLLING_TX=0` or `MACFW_96_ROLLING_TX=0`.
+`MACFW_88_ROLLING_TX=0`, `MACFW_96_ROLLING_TX=0`,
+`MACFW_176_ROLLING_TX=0` or `MACFW_192_ROLLING_TX=0`.
 Both modes have hardware-tested playback, recording, rate switching, restart
 recovery and live performance profiles.
 At 88.2 and 96 kHz rolling TX now use a 512-frame READY silence target to
@@ -58,7 +59,13 @@ modes; older `*-experimental88` and `*-experimental96` targets remain as
 compatibility aliases. Minor artifacts have been observed
 under heavy host demand; extended stress monitoring remains useful.
 
-The 176.4 and 192 kHz engines remain separate experimental quad-speed work.
+The 176.4 and 192 kHz engines retain their experimental quad-speed capture
+qualification and startup paths. At 192 kHz rolling TX uses the tested
+1280-packet ring by default (160 ms physical allocation); set
+`MACFW_192_ROLLING_RING_PACKETS=2560` to compare with the older
+320 ms allocation. Both quad engines accept the live performance profiles.
+The 176.4 kHz rate change may occasionally require a capture qualification
+retry; the engine stops safely and the supervisor restarts it.
 The 192 kHz playback and two-channel input monitoring have been hardware-tested.
 The validation history, remaining caveats and test commands are in
 [`analysis/high-rate-development.md`](analysis/high-rate-development.md).
@@ -170,7 +177,7 @@ successful client read reflects restored authoritative state rather than the
 temporary startup baseline. Direct standalone engine runs remain available
 immediately because they have no supervisor-managed replay phase.
 
-At 44.1/48/88.2/96 kHz, the performance profiles select the Mach-paced audio service
+At 44.1/48/88.2/96/176.4/192 kHz, the performance profiles select the Mach-paced audio service
 period: **Aggressive** is 250 µs, **Balanced** is 375 µs, and
 **Conservative** is 500 µs. Shorter periods favor latency; longer periods
 reduce transport wakeups and CPU use. Profile changes apply live and are saved
