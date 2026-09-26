@@ -69,12 +69,12 @@ constexpr std::chrono::milliseconds kOutputWarmup(1500);
 
 bool rollingTxRequested() {
     const char* value = std::getenv("MACFW_192_ROLLING_TX");
-    return value && value[0] != '\0' && value[0] != '0';
+    return !value || value[0] != '0';
 }
 
 bool shortRollingRingRequested() {
     const char* value = std::getenv("MACFW_192_ROLLING_RING_PACKETS");
-    return value && std::strcmp(value, "1280") == 0;
+    return !value || std::strcmp(value, "2560") != 0;
 }
 
 volatile std::sig_atomic_t gStopRequested = 0;
