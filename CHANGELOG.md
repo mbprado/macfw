@@ -6,6 +6,21 @@ The project uses the `x.y.zzz` version format described in [`RELEASES.md`](RELEA
 
 ## [Unreleased]
 
+### Added
+
+- FW1814 analog playback and recording at 88.2 and 96 kHz, with guarded
+  rolling transmit refill and live Aggressive/Balanced/Conservative service
+  profiles alongside the existing 44.1/48 kHz modes.
+- Dual-speed rolling deadline counters and first-loud diagnostic markers.
+  Fixed refill remains available through per-rate transport overrides.
+
+### Changed
+
+- FW1814 88.2/96 kHz rolling TX and live profiles are active in the normal
+  source install; legacy experimental install targets remain aliases.
+- 176.4/192 kHz quad-speed engines remain experimental.
+
+
 ## [0.04.003] — FW1814 headphone encoder fix — 2026-09-16
 
 ### Fixed
