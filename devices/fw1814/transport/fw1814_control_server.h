@@ -1302,7 +1302,7 @@ private:
                   "aux-software-return-sends=continuous-persistent "
                   "aux-analog-input-sends=continuous-persistent "
                   "aux-output-level=continuous-persistent "
-                  "performance-profiles=44.1/48/88.2/96-persistent-live "
+                  "performance-profiles=44.1/48/88.2/96/176.4/192-persistent-live "
                   "levels=deferred midi=deferred\n");
             return;
         }
@@ -1343,9 +1343,8 @@ private:
                       std::to_string(performance_->periodNs() / 1000) + " " +
                       (performance_->environmentOverride() ? "1\n" : "0\n"));
             } else {
-                // Quad-rate engines retain a fixed service cadence. Accept
-                // restored state so the preference persists until a
-                // profile-enabled engine is selected.
+                // Keep accepting restored state if an engine without a live
+                // performance control is selected.
                 reply("OK unavailable 0 0\n");
             }
             return;
