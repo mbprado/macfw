@@ -4,6 +4,23 @@ This file records visible project milestones rather than every diagnostic
 experiment. Detailed protocol, transport and routing findings remain under
 `devices/fw1814/analysis/`.
 
+## 2026-09-26 — Dual-speed rolling TX and live profiles
+
+The FW1814 88.2 and 96 kHz engines now use guarded rolling TX by default
+while retaining their proven 1280/640-packet NuDCL allocations, 4096-cycle
+startup lead and native dual-speed packet formation. The live window is
+96 cycles with a 48-cycle guard; the engine stops on a missed deadline.
+Fixed refill remains available through per-rate environment overrides.
+
+Electrical loopback fell from roughly 167-175 ms to 21.4-21.5 ms at
+88.2 kHz and from roughly 78-89 ms to 10.5-12 ms at 96 kHz in initial
+tests. Playback, recording, repeated switches across 44.1/48/88.2/96 kHz
+and interface restarts were reported working. The three persistent service
+profiles now apply live at all four rates; six 96 kHz profile probes
+measured about 13.3-15.7 ms without a clear profile latency ordering.
+Occasional small artifacts under heavy host load remain under observation.
+Quad-speed 176.4/192 kHz modes were not included in this validation.
+
 ## 2026-09-25 — Persistent transport performance profiles
 
 The validated 44.1/48 kHz rolling engines now expose three persistent,
