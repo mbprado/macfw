@@ -1484,8 +1484,7 @@ int performanceProfileCommand(const std::string& action,
     }
 
     if (profile == "unavailable") {
-        std::cout << "FW1814 performance profile is unavailable for this engine; "
-                     "this engine retains its validated fixed cadence.\n";
+        std::cout << "FW1814 performance profile unavailable for this engine.\n";
     } else {
         std::cout << "FW1814 performance profile: " << profile << '\n'
                   << "  audio service period: " << periodUs << " us\n"
