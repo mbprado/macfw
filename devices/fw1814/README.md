@@ -39,10 +39,12 @@ The FW1814 analog profile in this branch provides:
   and reconnect; all four analog input-pair monitor levels also survive a
   transport restart through the same state path.
 
-The 88.2 and 96 kHz analog engines now use guarded rolling TX by default,
+The 44.1, 48, 88.2 and 96 kHz analog engines now use guarded rolling TX by default.
+The dual-speed modes
 with 1280- and 640-packet physical allocations respectively, a 96-cycle live
 lead and a 48-cycle deadline guard. Fixed half-ring refill remains available
-for diagnosis with `MACFW_88_ROLLING_TX=0` or `MACFW_96_ROLLING_TX=0`.
+for diagnosis with `MACFW_44_ROLLING_TX=0`, `MACFW_48_ROLLING_TX=0`,
+`MACFW_88_ROLLING_TX=0` or `MACFW_96_ROLLING_TX=0`.
 Both modes have hardware-tested playback, recording, rate switching, restart
 recovery and live performance profiles.
 At 88.2 and 96 kHz rolling TX now use a 512-frame READY silence target to
