@@ -2,6 +2,7 @@
 
 #include "../channel_map.h"
 #include "../hal/include/macfw_fw1814_hal_shm.h"
+#include "../hal/include/macfw_fw1814_impulse_trace.h"
 #include "macfw/pcm_ring_buffer.h"
 
 #include <algorithm>
@@ -27,7 +28,8 @@ inline std::size_t pumpPlayback(
     macfw::PcmRingBuffer& pcm,
     std::vector<float>& audio,
     std::vector<std::int32_t>& mapped,
-    PlaybackPumpStats* stats = nullptr) {
+    PlaybackPumpStats* stats = nullptr,
+    macfw::fw1814::diagnostic::Endpoint* trace = nullptr) {
     const std::size_t frames = std::min<std::size_t>({
         pcm.freeFrames(),
         macfw::fw1814::hal::availableFrames(shared),
@@ -35,8 +37,21 @@ inline std::size_t pumpPlayback(
     });
     if (frames == 0) return 0;
 
+    macfw::fw1814::diagnostic::Point point{};
+    const bool tracing = trace && trace->armed();
+    if (tracing) {
+        point.frame = shared.readFrame.load();
+        point.queue = macfw::fw1814::hal::availableFrames(shared);
+        point.pcmQueue = pcm.availableFrames();
+        point.callbackFrames = frames;
+        point.a = pcm.producedFrames();
+    }
     const std::size_t got =
         macfw::fw1814::hal::read(shared, audio.data(), frames);
+    if (tracing) {
+        point.tick = mach_absolute_time();
+        trace->block(audio.data(), got, macfw::fw1814::hal::kOutputChannels, point);
+    }
     if (stats)
         stats->framesRead += got;
 
@@ -81,10 +96,11 @@ inline void drainPlayback(
     macfw::PcmRingBuffer& pcm,
     std::vector<float>& audio,
     std::vector<std::int32_t>& mapped,
-    PlaybackPumpStats* stats = nullptr) {
+    PlaybackPumpStats* stats = nullptr,
+    macfw::fw1814::diagnostic::Endpoint* trace = nullptr) {
     while (macfw::fw1814::hal::availableFrames(shared) != 0 &&
            pcm.freeFrames() != 0) {
-        if (pumpPlayback(shared, pcm, audio, mapped, stats) == 0)
+        if (pumpPlayback(shared, pcm, audio, mapped, stats, trace) == 0)
             break;
     }
 }

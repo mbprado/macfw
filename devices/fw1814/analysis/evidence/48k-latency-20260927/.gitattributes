@@ -1,0 +1,3 @@
+# Frozen acquisition files must retain their exact bytes on every checkout.
+* -text
+*.csv whitespace=cr-at-eol

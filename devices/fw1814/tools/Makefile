@@ -418,7 +418,7 @@ route-analog: route-analog-tool
 # latency from output channel 1 to input channel 1 using host timestamps.
 audio-loopback-tool: $(AUDIO_LOOPBACK_TOOL)
 
-$(AUDIO_LOOPBACK_TOOL): fw1814audioloopback.cpp
+$(AUDIO_LOOPBACK_TOOL): fw1814audioloopback.cpp fw1814_impulse_trace_client.h ../hal/include/macfw_fw1814_impulse_trace.h
 	$(CXX) $(CXXFLAGS) $< -framework AudioUnit -framework CoreAudio -framework CoreFoundation -o $@
 
 audio-loopback: audio-loopback-tool
@@ -442,3 +442,10 @@ clean:
 	$(MAKE) -C $(CONTROL_DIR) clean
 	$(MAKE) -C $(STATE_CONTROL_DIR) clean
 	rm -f $(BOOT_TOOL) $(FIRMWARE_RESET_TOOL) $(INIT_TOOL) $(DEVICE_PROBE_TOOL) $(AUDIO_LOOPBACK_TOOL) $(CAPTURE48_TOOL) $(DUALCMP_TOOL) $(DUALCMP_WAIT_TOOL) $(DUPLEX_BLOCKING_TOOL) $(DUPLEX96_TOOL) $(TONE96_TOOL) $(TONE96_LIVE_TOOL) $(OUTPUT_WATCH_TOOL) $(TEARDOWN_WATCH_TOOL) $(CLIENT_CLOSE_WATCH_TOOL) $(STREAM_CLIENT_CLOSE_WATCH_TOOL) $(PLAYBACK_MAP_TOOL) $(ROUTE_ANALOG_TOOL) fw1814capture48_duplex_nodata
+
+# Hardware-free trace/parser regression checks.
+.PHONY: impulse-trace-check
+impulse-trace-check:
+	$(CXX) $(CXXFLAGS) test_impulse_trace.cpp -o /tmp/fw1814-impulse-trace-tests
+	/tmp/fw1814-impulse-trace-tests
+	python3 -m unittest discover -s . -p test_latency_states.py -v

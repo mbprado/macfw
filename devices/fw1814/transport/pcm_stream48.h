@@ -89,7 +89,9 @@ public:
         while (lastHalfNumber_ < halfNumber) {
             const std::size_t consumedHalf =
                 static_cast<std::size_t>(lastHalfNumber_ & 1u);
-            accumulate(tx_->refill(*pcm_, consumedHalf * halfPackets_, halfPackets_));
+            accumulate(tx_->refill(*pcm_, consumedHalf * halfPackets_, halfPackets_,
+                                   lastHalfNumber_ * halfPackets_ + tx_->packetCount(),
+                                   sinceStart, tx_->traceClock()));
             ++lastHalfNumber_;
         }
     }
@@ -120,13 +122,15 @@ private:
         stats_.framesSilenced += refill.framesSilenced;
     }
 
-    bool refillRolling(std::uint64_t firstPacket, std::size_t packetCount) {
+    bool refillRolling(std::uint64_t firstPacket, std::size_t packetCount,
+                       std::uint64_t observedPacket) {
         while (packetCount != 0) {
             const std::size_t slot = static_cast<std::size_t>(
                 firstPacket % tx_->packetCount());
             const std::size_t chunk = std::min(
                 packetCount, tx_->packetCount() - slot);
-            const auto refill = tx_->refill(*pcm_, slot, chunk);
+            const auto refill = tx_->refill(*pcm_, slot, chunk, firstPacket, observedPacket,
+                                            tx_->traceClock());
             if (refill.packetsVisited != chunk)
                 return false;
             ++stats_.rollingRefills;
@@ -161,7 +165,7 @@ private:
 
         const auto count = static_cast<std::size_t>(
             targetExclusive - rollingNextPacket_);
-        if (!refillRolling(rollingNextPacket_, count)) {
+        if (!refillRolling(rollingNextPacket_, count, sinceStart)) {
             ++stats_.rollingDeadlineMisses;
             rollingHealthy_ = false;
             return;

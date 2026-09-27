@@ -6,6 +6,7 @@
 #include "../include/macfw_fw1814_capture_shm.h"
 #include "../include/macfw_fw1814_hal_shm.h"
 #include "../include/macfw_fw1814_high_rate.h"
+#include "../include/macfw_fw1814_impulse_trace.h"
 
 #include <atomic>
 #include <cerrno>
@@ -54,6 +55,9 @@ std::atomic<UInt32> gRunningClients{0};
 std::atomic<std::uint32_t> gSampleRate{48000};
 UInt64 gStartHostTime = 0;
 mach_timebase_info_data_t gTimebase{};
+
+macfw::fw1814::diagnostic::Mapping gImpulseTrace;
+macfw::fw1814::diagnostic::Endpoint gTraceSubmit, gTraceDeliver;
 
 int gPlaybackFd = -1;
 macfw::fw1814::hal::SharedPlaybackRing* gPlaybackRing = nullptr;
@@ -335,6 +339,11 @@ OSStatus STDMETHODCALLTYPE Initialize(AudioServerPlugInDriverRef,
     gHost = host;
     mach_timebase_info(&gTimebase);
     gStartHostTime = mach_absolute_time();
+    if (gImpulseTrace.open(true)) {
+        gImpulseTrace.get()->halPid.store(getpid());
+        gTraceSubmit.attach(gImpulseTrace.get(), macfw::fw1814::diagnostic::HalSubmit);
+        gTraceDeliver.attach(gImpulseTrace.get(), macfw::fw1814::diagnostic::HalDelivery);
+    }
     MapPlaybackRing();
     MapCaptureRing();
     return kAudioHardwareNoError;
@@ -974,8 +983,17 @@ OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef,
             gPlaybackRing->sampleRate.load(std::memory_order_acquire) != rate)
             return kAudioHardwareNoError;
 
-        macfw::fw1814::hal::write(
+        macfw::fw1814::diagnostic::Point trace{};
+        const bool tracing = rate == 48000 && gTraceSubmit.armed();
+        if (tracing) {
+            trace.tick = mach_absolute_time();
+            trace.frame = gPlaybackRing->writeFrame.load();
+            trace.queue = macfw::fw1814::hal::availableFrames(*gPlaybackRing);
+            trace.callbackFrames = frames;
+        }
+        const auto written = macfw::fw1814::hal::write(
             *gPlaybackRing, static_cast<const Float32*>(mainBuffer), frames);
+        if (tracing) gTraceSubmit.block(static_cast<const Float32*>(mainBuffer), written, kOutputChannels, trace);
         return kAudioHardwareNoError;
     }
 
@@ -1018,11 +1036,20 @@ OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef,
                 macfw::fw1814::hal::capture::suspendStaleCapture(
                     *gCaptureRing, 4096);
             if (!stale) {
+                macfw::fw1814::diagnostic::Point trace{};
+                const bool tracing = currentRate == 48000 && gTraceDeliver.armed();
+                if (tracing) {
+                    trace.tick = mach_absolute_time();
+                    trace.frame = gCaptureRing->readFrame.load();
+                    trace.queue = macfw::fw1814::hal::capture::availableFrames(*gCaptureRing);
+                    trace.callbackFrames = frames;
+                }
                 got = (currentRate == 176400 || currentRate == 192000)
                     ? macfw::fw1814::hal::capture::readFirstChannels(
                           *gCaptureRing, out, frames, kQuadRateInputChannels)
                     : macfw::fw1814::hal::capture::read(
                           *gCaptureRing, out, frames);
+                if (tracing) gTraceDeliver.block(out, got, kInputChannels, trace);
                 gCaptureRing->halFramesFromRing.fetch_add(got,
                                                           std::memory_order_relaxed);
             }

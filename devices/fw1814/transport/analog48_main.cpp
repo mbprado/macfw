@@ -104,6 +104,19 @@ bool run() {
         return false;
     }
 
+    macfw::fw1814::diagnostic::Mapping impulseTrace;
+    impulseTrace.open(true); // Optional: a missing diagnostic sidecar never stops audio.
+    auto* traceShared = impulseTrace.get();
+    const auto traceCookie = mach_absolute_time();
+    if (traceShared) {
+        traceShared->requestId.store(0, std::memory_order_release);
+        traceShared->counterSequence.store(0);
+        traceShared->counterTick.store(0);
+        (void)macfw::fw1814::diagnostic::nsTicks(0); // initialize clock conversion off the audio thread
+        traceShared->generation.store(device.generation());
+        traceShared->enginePid.store(getpid());
+        traceShared->engineCookie.store(traceCookie, std::memory_order_release);
+    }
     bool ok = false;
     bool playbackActive = false;
     macfw::fw1814::FcpControl fcp;
@@ -135,6 +148,11 @@ bool run() {
             goto cleanup;
         }
 
+        macfw::fw1814::diagnostic::Endpoint tracePcm, traceTx, traceCapture;
+        tracePcm.attach(traceShared, macfw::fw1814::diagnostic::PcmRead);
+        traceTx.attach(traceShared, macfw::fw1814::diagnostic::TxPrepare);
+        traceCapture.attach(traceShared, macfw::fw1814::diagnostic::CaptureDecode);
+        tx.traceTo(&traceTx);
         BlockingPcmStream48k streamer(
             tx, pcm, initialCycle, firstCycle, kTxHalfPackets);
         const bool rollingTx = rollingTxRequested();
@@ -150,6 +168,14 @@ bool run() {
         if (!streamer.valid() || !streamer.prime()) {
             std::cerr << "FW1814 playback stream prime failed\n";
             goto cleanup;
+        }
+        if (traceShared) {
+            traceShared->initialCycle.store(initialCycle);
+            traceShared->firstCycle.store(firstCycle);
+            traceShared->txPackets.store(kTxPackets);
+            traceShared->rolling.store(rollingTx);
+            traceShared->lead.store(rollingLead);
+            traceShared->guard.store(rollingGuard);
         }
         std::cout << "FW1814 playback TX ring: " << kTxPackets
                   << " packets / " << kTxHalfPackets
@@ -234,6 +260,7 @@ bool run() {
         playbackActive = true;
 
         CapturePump48k capturePump;
+        capturePump.traceTo(&traceCapture);
         PlaybackPumpStats playbackPumpStats;
         std::vector<float> audio(
             4096 * macfw::fw1814::hal::kOutputChannels, 0.0f);
@@ -281,14 +308,24 @@ bool run() {
                 const std::uint64_t firstCaptureDoneTicks =
                     verbose ? mach_absolute_time() : 0;
                 drainPlayback(*playbackShared.ring(), pcm, audio, mapped,
-                              &playbackPumpStats);
+                              &playbackPumpStats, &tracePcm);
                 const std::uint64_t playbackDoneTicks =
                     verbose ? mach_absolute_time() : 0;
 
+                const auto traceCycleBegin = tracePcm.armed() ? mach_absolute_time() : 0;
                 UInt32 nowCycleTime = 0;
                 if ((*device.nativeHandle())->GetCycleTime(
                         device.nativeHandle(), &nowCycleTime) == kIOReturnSuccess)
+                {
+                    const auto traceCycleHost = tracePcm.armed() ? mach_absolute_time() : 0;
+                    if (traceCycleBegin && traceCycleHost) {
+                        const auto midpoint = traceCycleBegin + (traceCycleHost-traceCycleBegin)/2;
+                        const auto uncertainty = traceCycleHost-traceCycleBegin;
+                        capturePump.traceCycle(nowCycleTime, midpoint, uncertainty);
+                        tx.traceCycle(nowCycleTime, midpoint, uncertainty);
+                    }
                     streamer.service(cycleCount(nowCycleTime));
+                }
 
                 if (!streamer.healthy()) {
                     const auto& txStats = streamer.stats();
@@ -316,6 +353,24 @@ bool run() {
                         secondCaptureDoneTicks - loopStartTicks);
                 }
 
+                if (traceShared && tracePcm.armed()) {
+                    const auto& ts = streamer.stats();
+                    const auto& rs = capturePump.stats();
+                    const std::uint64_t counters[macfw::fw1814::diagnostic::kCounters] = {
+                        ts.lateCyclePolls, ts.rollingDeadlineMisses, ts.framesFromBuffer,
+                        ts.framesSilenced, pcm.underrunFrames(), rs.dbcDiscontinuities,
+                        rs.stalePackets, captureShared.ring()->droppedFrames.load(),
+                        playbackShared.ring()->droppedFrames.load(),
+                        captureShared.ring()->halUnderrunEvents.load(),
+                        captureShared.ring()->halZeroFilledFrames.load()
+                    };
+                    traceShared->counterSequence.fetch_add(1);
+                    for (unsigned i=0; i<macfw::fw1814::diagnostic::kCounters; ++i)
+                        traceShared->counters[i].store(counters[i], std::memory_order_relaxed);
+                    traceShared->serviceNs.store(performance.periodNs());
+                    traceShared->counterTick.store(mach_absolute_time(), std::memory_order_release);
+                    traceShared->counterSequence.fetch_add(1);
+                }
                 // The HAL suspends capture when a stopped or stalled client
                 // leaves a stale queue behind. Re-arm here after it flushes
                 // that backlog, then resume only after a fresh prefill.
@@ -399,6 +454,10 @@ bool run() {
     }
 
 cleanup:
+    if (traceShared) {
+        auto expected = traceCookie;
+        traceShared->engineCookie.compare_exchange_strong(expected, 0);
+    }
     control.reset();
     if (playbackActive)
         playbackShared.ring()->active.store(0, std::memory_order_release);
