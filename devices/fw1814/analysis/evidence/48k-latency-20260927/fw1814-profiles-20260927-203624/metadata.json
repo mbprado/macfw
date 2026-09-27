@@ -1,0 +1,24 @@
+{
+  "started": "2026-09-27T20:36:25.006391",
+  "initial_rate": 44100,
+  "initial_generation": 380,
+  "initial_profile": "conservative",
+  "initial_period_us": 500,
+  "override": "inactive",
+  "probe_sha256": "276e8ebc17957d240753c0ee1d593859e4a73d1121558f8aaf4ee041e25594a8",
+  "ctl_sha256": "9bbd7ca53a9dbcb3c9520aa7a5d33329f4d93c8d3927684e9ffadde02a87e829",
+  "rates": [
+    44100,
+    48000,
+    88200,
+    96000,
+    176400,
+    192000
+  ],
+  "profiles": {
+    "aggressive": 250,
+    "balanced": 375,
+    "conservative": 500
+  },
+  "attempts_per_group": 20
+}

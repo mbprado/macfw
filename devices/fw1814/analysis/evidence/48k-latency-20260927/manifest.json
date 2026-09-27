@@ -1,0 +1,402 @@
+[
+  {
+    "source": "samples/benchmarks/fw1814-profiles-20260927-combined/earlier-48-anomaly.csv",
+    "archived": "fw1814-profiles-20260927-combined/earlier-48-anomaly.csv",
+    "sha256": "2c22e58bfdf28d54905ab15a07c071aa52aa34ea4017149e9c65b5f17b535626"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-profiles-20260927-combined/report.md",
+    "archived": "fw1814-profiles-20260927-combined/report.md",
+    "sha256": "7948ae20f3e7396a0493582376ab2c745bbeae4c4b6e0033e27c74753e6c95ba"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-profiles-20260927-enriched/validation-probe.txt",
+    "archived": "fw1814-profiles-20260927-enriched/validation-probe.txt",
+    "sha256": "4c2eeabd028832e64cf2377b9ee4a9914f19c2572ac23d173651c8e8c57fe439"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-profiles-20260927-203624/transport.log",
+    "archived": "fw1814-profiles-20260927-203624/transport.log",
+    "sha256": "2030a59ea3afc337659474ba5e5a724cd6ac18f90794bb7f3fcd2e218a8e0b9f"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-profiles-20260927-203624/metadata.json",
+    "archived": "fw1814-profiles-20260927-203624/metadata.json",
+    "sha256": "efd61fff569ea823adb60f23f5b11aa36d6135a68b18ca4d2705a1fd7f61c53c"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-01.txt",
+    "archived": "fw1814-profiles-20260927-203624/48000-aggressive-01.txt",
+    "sha256": "3ec3f6d342efe8f633061c8c6d3ed58954cae42bdc26310c495c9b01ab269ec0"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-02.txt",
+    "archived": "fw1814-profiles-20260927-203624/48000-aggressive-02.txt",
+    "sha256": "154ae3eb6b93395c6ee36457e28b24faaeffaea4ef5f347bc3f86a82b09c8766"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-03.txt",
+    "archived": "fw1814-profiles-20260927-203624/48000-aggressive-03.txt",
+    "sha256": "6a7d2e5a466d0fbeeaa794809175c30089ee121e697cab29c9812bbc787f6c53"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-04.txt",
+    "archived": "fw1814-profiles-20260927-203624/48000-aggressive-04.txt",
+    "sha256": "d86546edf48cb0cf4dfde08da09455c222fd90dec2b4747a25381c503fac1d4d"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-05.txt",
+    "archived": "fw1814-profiles-20260927-203624/48000-aggressive-05.txt",
+    "sha256": "ee5b66c2f94139b12bc9b8fde589bc9e2962df1dec9362f43c71b32a67a410da"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-06.txt",
+    "archived": "fw1814-profiles-20260927-203624/48000-aggressive-06.txt",
+    "sha256": "450875619064a2efdc5e77e6727d53759c25a6df1983b7945a5af47cb6ffea00"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-07.txt",
+    "archived": "fw1814-profiles-20260927-203624/48000-aggressive-07.txt",
+    "sha256": "8dcba956a331339a68b271864202bdc59f82f032e3618490b6e6fd4d2ed89b3f"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-08.txt",
+    "archived": "fw1814-profiles-20260927-203624/48000-aggressive-08.txt",
+    "sha256": "c4438d86f6388b911101c273928567c97ae464565f9b2982b6891f462bf16f60"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-09.txt",
+    "archived": "fw1814-profiles-20260927-203624/48000-aggressive-09.txt",
+    "sha256": "708e2a7824f716773055772444316e2ec44f3c10b39c3a58cfefe87c0a8ba58a"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-10.txt",
+    "archived": "fw1814-profiles-20260927-203624/48000-aggressive-10.txt",
+    "sha256": "285322dda053c2efc87cce4128acb92baffc87bd6c36093fc165649bc28bcd50"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-11.txt",
+    "archived": "fw1814-profiles-20260927-203624/48000-aggressive-11.txt",
+    "sha256": "098952cf5fb461fac9b384d4606b1dcd74038e9cfaea5b2aa65e5fef0ebae245"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-12.txt",
+    "archived": "fw1814-profiles-20260927-203624/48000-aggressive-12.txt",
+    "sha256": "1251e3bdab23626cdf8ff1c8d0e69ca43c140b3c4597987e8f076dc7d1fc791f"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/transport.log",
+    "archived": "fw1814-48-retry-20260927-204149/transport.log",
+    "sha256": "7b8df294403bde94a642d07f683c2d940d4b2d651809b449d7a43dac8e4e9e2e"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/metadata.json",
+    "archived": "fw1814-48-retry-20260927-204149/metadata.json",
+    "sha256": "07d3759b014a7c6a1fa6bb1183d5ef6d45c23a7975e81135d4381e13debaaf3d"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-01.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-01.txt",
+    "sha256": "30b295c453cb86fb1a0ae4d2ea8aef54b4fdf6269b6c9d15c167e973f427e354"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-02.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-02.txt",
+    "sha256": "508e95ee10139a164836777d17606515b4c9fcef1ff439ca0cadde1b98c20148"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-03.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-03.txt",
+    "sha256": "21e1102bb82224811050f177e9cf426845c574113b22e096c3c8fbb736075e9f"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-04.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-04.txt",
+    "sha256": "2985c96070d5590535fe10eba1f768f6245f625a2942678e32afc935f708b00d"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-05.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-05.txt",
+    "sha256": "2c61738031253e85285128cc1c8278a14b5fdb87b36393f6fd63ad1d1821d406"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-06.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-06.txt",
+    "sha256": "c54c6184784d815ad677faedbb30c8f31b195ecb29b850a7eff0d5c84c3276d5"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-07.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-07.txt",
+    "sha256": "0e61949e168cf30fd2024e4d9a301a6f7da1477b9e0218364d9cba6185bdfdf1"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-08.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-08.txt",
+    "sha256": "4be57cbc0fe05ed526a28ed1c5d470e0aa6e2b80f6c6d2af02ef4327b9ca54ea"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-09.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-09.txt",
+    "sha256": "4e802178a277bb15a8fadd4d2cb75278df82b1d1ad52ad60ad1c31f48b5af3b0"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-10.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-10.txt",
+    "sha256": "5b21ddbe1fbdef72421a85c18126ee97376185608e85e46d15f36bfd289ed514"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-11.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-11.txt",
+    "sha256": "f74c311363dad73d813c4a43701b7d60ee6d4cfc658ed02a6af116533fc869f5"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-12.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-12.txt",
+    "sha256": "789ac401b187b04fdec66526cb133b0fffece9de3129b32f002262f6c5449a20"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-13.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-13.txt",
+    "sha256": "a134f25aac166a015d338a5bb48b47727740e83c4d23d354ba2a34f8487e71da"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-14.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-14.txt",
+    "sha256": "7c69f1e81e1587eaa698bdcf68649a30bd02ad4597592853908c0334b7075d23"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-15.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-15.txt",
+    "sha256": "2210aec23740f1bb1bd0ee6bb4df358a6dbd15e6bced1c48203130adcc4c0871"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-16.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-16.txt",
+    "sha256": "9020ed5536e8f0ee45332f3184ce63e0b4124dd922ca87a9a9cc967dfe3dbfb7"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-17.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-17.txt",
+    "sha256": "7da6b3215f28e8eb83280116ef88c689ee87b4c116e356f0e41bd89d5fbbc776"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-18.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-18.txt",
+    "sha256": "a56307a9a9bf203bc79ef9d6ff4f9d85f28d576970e033d586dc52489d012ab6"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-19.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-19.txt",
+    "sha256": "25cf9b96c18fad819c2a16bd0d52ade33f40e75abd0bf8cb764c84c1ef682b2f"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-aggressive-20.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-aggressive-20.txt",
+    "sha256": "58f032504391b3cd9dbac0fdd56814a22bc75c9c68595b125d330c3ee6bf0d6b"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-01.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-01.txt",
+    "sha256": "48b78d5d9a666fdaab48963fb9e95d9cd9ac8bcd119391f410133bf1049ec6c7"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-02.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-02.txt",
+    "sha256": "dd29aacd8f1b00292cc0c817980a782e675817a6ea4d1dd75125afafda78c7d0"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-03.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-03.txt",
+    "sha256": "3825f39f040ce0332bf766f0df024f54a30ccee91190593d1d589e205149c5c7"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-04.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-04.txt",
+    "sha256": "ff6437199d5b9e2b00fa060e8e70f68c5e3f8d06ba20d3287cd22188901f8308"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-05.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-05.txt",
+    "sha256": "ee091056ee854f58bf9e05fd3b66c9b9f2d61ebfdc67d6ec41c84ff15cef3939"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-06.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-06.txt",
+    "sha256": "fb9d42b6113e9ac8fae4afc6686e4d5230d8bb65b2e354ea15b242eb96eee12a"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-07.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-07.txt",
+    "sha256": "d8bca6852dcf0f1af3bda66e54e9c19cae7b8dbca947b84cabcaba37f577c68c"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-08.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-08.txt",
+    "sha256": "e2f876f35d4d7aa03829e33922548b43c38e3bbe77678d45fd282dbebabdc452"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-09.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-09.txt",
+    "sha256": "0b37504ebfda40f2d11e63b0bc275d85b9de4042f09bde7cc8197548027ab9f3"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-10.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-10.txt",
+    "sha256": "e619efee46554e244a55a89f5aab28e3227c03238963d07000ab5bd6a272d0b0"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-11.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-11.txt",
+    "sha256": "b488db86b40e79a43de4258800573f32c15937b52737d1d54998e3a72ef31378"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-12.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-12.txt",
+    "sha256": "3578c7e70209a5971b60e05607e5aad07bf3095fe6cbc3359bb3ffc91c5e613f"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-13.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-13.txt",
+    "sha256": "4ba28f35de3c34c11e1bec9553df3a5146cba04cdeda56696de0833b8927d267"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-14.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-14.txt",
+    "sha256": "f4757d5aabb2b4e16d1d43f5f6d036227959d8d82b3e211eea4ed6b1a74dacca"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-15.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-15.txt",
+    "sha256": "1731faa2b75a7407f151e0c5d78bbe8725b03a62bcf9a3ea08c1835f64c3a006"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-16.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-16.txt",
+    "sha256": "8112f5ced6e29f7e85a21a65ae8eddbcc44b632af2218928b6eb288157a4335a"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-17.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-17.txt",
+    "sha256": "e4a0fb0b609c3b9b7e190c15cbfada6dfdfa2d6d643f76963ba7a90a36da6818"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-18.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-18.txt",
+    "sha256": "718c769f78d23623ca8923d37c4868fce534df1fe7b3a80f48aad81585d89d48"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-19.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-19.txt",
+    "sha256": "4aa0c812aa3d80e08324e1a71a695c9d60e5ef8682c39eb1c05679db74792b38"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-balanced-20.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-balanced-20.txt",
+    "sha256": "c9f0bdae63f2b97cb634540247afcd130f0998bdcf22aebc268ce2a98a9ae1a4"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-01.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-01.txt",
+    "sha256": "7c0801e115b3315fa626fe134e7ed5ff30e9d620fa78e7e73a1219f4c97b5990"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-02.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-02.txt",
+    "sha256": "5327d3e77da77b5f8460c87f5463fef651515eb1e523468979ec027ccf358f10"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-03.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-03.txt",
+    "sha256": "a59d2d4dcb9168f01439a28b5f5c09310d1f83e0056e37d5904f6102316afdb9"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-04.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-04.txt",
+    "sha256": "11c3f42719330fc69ca8a8afcc1c35b3a3f99368b6c7f15a50fcb6f379683eae"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-05.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-05.txt",
+    "sha256": "236fdf462a43813eceb62bb8cef653772ef1ddb1ba680d04a286d4a0dd3ba1d0"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-06.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-06.txt",
+    "sha256": "54cb9e76964a97ca449ffc71fb4446cf7a822b35df0e02b4f422d3db6445e708"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-07.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-07.txt",
+    "sha256": "d3406a0c9a005c22164fa098a67941dbfafbcf299ceccdd5ff94be77cd552c7a"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-08.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-08.txt",
+    "sha256": "76326e92db7607fee92f22072db3b8e67c4dbbc193a45fbb47ba756e64b8886c"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-09.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-09.txt",
+    "sha256": "27aa0c328b0258095a8d526b88e2f164cd7c989ad3b5da6310458039467cef28"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-10.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-10.txt",
+    "sha256": "66f81ea5e72040334ea377cb68e509b6ccf6b75a1ab31ac40e8690b4f1ce06c0"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-11.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-11.txt",
+    "sha256": "6dae23425fda5bba2391a142c34c89caac20fa7ac14de6465a58848d00197812"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-12.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-12.txt",
+    "sha256": "e7a607ce6dc6331f3ac39c6c29009d1560a9e36892b328687deed5691ac0c157"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-13.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-13.txt",
+    "sha256": "583987a4c4033e1985781993ad669fa68e5be65fc954fc12c1d9f2ab6e14bf56"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-14.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-14.txt",
+    "sha256": "3e1b292c47ca4dac9bb3c546f434db968ee8ad8e442ea4a8351edaa38de94a45"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-15.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-15.txt",
+    "sha256": "cba2613ccd3dc8ea8f4d4e94552dbeb5eb76a35f25bcf6501d7060c682314917"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-16.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-16.txt",
+    "sha256": "49b68239be2f316c0b6fdf284caab26202294580d71f1cbc1395f936a0de1d1d"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-17.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-17.txt",
+    "sha256": "9a6b5dbbf241a619d44dd3d12420be00db6d9b200fac47d854358956acb48c9e"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-18.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-18.txt",
+    "sha256": "8ec478cbf45a63e9ecc330a8f4d079ef4d2f1123f725ba51b171d355c1b3ec30"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-19.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-19.txt",
+    "sha256": "54a8b04f23f254289520dd58ea61c1a43487e1293b7044270b88c2e27890c08e"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/48000-conservative-20.txt",
+    "archived": "fw1814-48-retry-20260927-204149/48000-conservative-20.txt",
+    "sha256": "87e01baed62f7515a781c7c7c3d8a40073bba54cd8b8deaf9f7044eb32c5de14"
+  },
+  {
+    "source": "samples/benchmarks/fw1814-48-retry-20260927-204149/results.csv",
+    "archived": "fw1814-48-retry-20260927-204149/results.csv",
+    "sha256": "5894763d0bce7cb8fb24fc7afba1b9459810705e8b4f69240319104bea92db93"
+  }
+]
