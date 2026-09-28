@@ -219,7 +219,7 @@ def run(args):
         return rc,text
     def engine(name):
         rc,text=command([CTL,'engine','get'],name)
-        m=re.search(r'sample rate:\s*(\d+) Hz.*?startup:\s*(\d+)',text,re.S)
+        m=re.search(r'sample rate:\s*(\d+) Hz.*?FireWire generation at control startup:\s*(\d+)',text,re.S)
         if rc or not m:raise RuntimeError('engine not READY/readable')
         return tuple(map(int,m.groups()))
     def logs():
