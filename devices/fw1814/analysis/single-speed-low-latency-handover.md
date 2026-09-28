@@ -558,3 +558,44 @@ Remaining single-speed polish is limited to extended rate-switch stress tests,
 possible GUI transition-state feedback and continued observation of rare
 capture artifacts under heavy host load. None currently blocks using the same
 architecture as the starting point for dual-speed latency work.
+
+## 48 kHz capture backlog follow-up (2026-09-28)
+
+Tagged electrical loopback probes localized an intermittent 82–90 ms round
+trip to capture delivery: in the 88.44 ms probe, TX preparation followed PCM
+read promptly and capture decode followed TX preparation by about 14.8 ms,
+but decode-to-HAL delivery took 80.5 ms. The capture queue was 3,856 frames
+at decode and 4,024 at HAL delivery. The earlier HAL stale-queue threshold
+of 4,096 frames allowed nearly 85 ms of old capture to be read.
+
+The 48 kHz HAL now discards old capture when a client starts and bounds its
+active queue to 2,048 frames: 512 frames of prefill plus eight 192-frame
+CoreAudio callbacks. Discards expose event/frame counters and a reason, so
+queue trimming can be distinguished from transport packet loss. The capture
+shared-memory ABI is version 2; source and package installs must deploy the
+matching HAL and transport binaries together. Rolling TX, the service
+profiles, all other sample-rate capture paths and provisional CoreAudio
+latency reporting were unchanged by this correction.
+
+A clean same-engine 40-probe run returned 39 impulses at 11.98–16.31 ms
+(median 14.15 ms); one return was not detected. A separate 40-probe run
+with YouTube audio playing returned every impulse at 16.48–27.48 ms
+(median 18.73 ms), with no 80–90 ms state. No rolling misses, TX late
+increments or HAL input underruns occurred in either run. Five loaded probes
+had 18 DBC-gap increments in total and reached 20.81–27.48 ms. Their
+capture queues briefly reached 704–896 frames at HAL delivery, compared
+with about 512 frames in most gap-free probes; the available counter
+brackets cannot establish whether packet recovery or scheduling caused the
+brief accumulation. Keep these events for audible recording evaluation;
+do not attribute them to a video player's latency compensation or tune the
+TX lead from these data alone.
+
+The previous 48 kHz HAL latency estimate (1,984 frames per direction) still
+reflects the older high-latency path, not the new median. Recalibrate reported
+latency separately after longer capture and rate-switch validation; it is not
+a live measurement of transport queue depth.
+
+The normal source install already stages all six engines. Both the
+FW1814-only and combined `.pkg` builders must stage the same six engines and
+firmware-reset helper; `make fw1814-capture-live-queue-test` runs the
+host-independent capture-queue regression check.
