@@ -444,8 +444,34 @@ bool run() {
         // Keep the FireWire general callback dispatcher alive independently of
         // the realtime audio service. This is the same scheduling separation
         // used by the released FW410 runtime.
+        std::uint64_t lastDiscardEvents = 0;
+        std::uint64_t lastDiscardedFrames = 0;
         while (!gStopRequested && !audioFinished.load(std::memory_order_acquire)) {
             control.service();
+            const auto* captureRing = captureShared.ring();
+            const auto events = captureRing->halDiscardEvents.load(std::memory_order_acquire);
+            if (events != lastDiscardEvents) {
+                const auto frames = captureRing->halDiscardedFrames.load(std::memory_order_relaxed);
+                const auto reason = static_cast<macfw::fw1814::hal::capture::DiscardReason>(
+                    captureRing->halLastDiscardReason.load(std::memory_order_relaxed));
+                const char* reasonName = reason == macfw::fw1814::hal::capture::DiscardReason::clientStart
+                    ? "client-start" : reason == macfw::fw1814::hal::capture::DiscardReason::liveTrim
+                    ? "live-trim" : reason == macfw::fw1814::hal::capture::DiscardReason::staleFlush
+                    ? "stale-flush" : "unknown";
+                std::cout << "FW1814 48 capture discard: events="
+                          << (events - lastDiscardEvents)
+                          << " frames=" << (frames - lastDiscardedFrames)
+                          << " last-reason=" << reasonName
+                          << " last-queued="
+                          << captureRing->halLastDiscardQueued.load(std::memory_order_relaxed)
+                          << " last-mach-tick="
+                          << captureRing->halLastDiscardTick.load(std::memory_order_relaxed)
+                          << " queued-now="
+                          << macfw::fw1814::hal::capture::availableFrames(*captureRing)
+                          << '\n';
+                lastDiscardEvents = events;
+                lastDiscardedFrames = frames;
+            }
             CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
         }
 

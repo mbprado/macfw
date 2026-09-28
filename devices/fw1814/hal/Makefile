@@ -9,9 +9,16 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic -O2 -DMACFW_GIT_SHA=\"$(GIT_SHA)
 LDFLAGS := -bundle -framework CoreAudio -framework CoreFoundation
 SRC := src/FW1814HAL.cpp
 
-.PHONY: all clean install uninstall
+.PHONY: all clean install uninstall capture-live-queue-test
 
 all: $(MACOS)/macfw-fw1814
+
+capture-live-queue-test: build/capture_live_queue_test
+	./build/capture_live_queue_test
+
+build/capture_live_queue_test: tests/capture_live_queue_test.cpp include/macfw_fw1814_capture_shm.h
+	mkdir -p build
+	$(CXX) -std=c++17 -Wall -Wextra -Wpedantic $< -o $@
 
 $(MACOS)/macfw-fw1814: $(SRC) include/macfw_fw1814_hal_shm.h include/macfw_fw1814_capture_shm.h include/macfw_fw1814_high_rate.h include/macfw_fw1814_impulse_trace.h Info.plist ../version.h
 	mkdir -p $(MACOS)

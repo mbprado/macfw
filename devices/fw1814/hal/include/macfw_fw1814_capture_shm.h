@@ -7,12 +7,19 @@
 
 namespace macfw::fw1814::hal::capture {
 
-constexpr const char* kShmName = "/macfw_fw1814_capture_v1";
+constexpr const char* kShmName = "/macfw_fw1814_capture_v2";
 constexpr std::uint32_t kMagic = 0x4d313849u; // M18I
-constexpr std::uint32_t kVersion = 1;
+constexpr std::uint32_t kVersion = 2;
 constexpr std::uint32_t kInputChannels = 8;
 constexpr std::uint32_t kCapacityFrames = 32768;
 constexpr std::uint64_t kQueueMinUnset = std::numeric_limits<std::uint64_t>::max();
+
+enum class DiscardReason : std::uint32_t {
+    none = 0,
+    clientStart = 1,
+    liveTrim = 2,
+    staleFlush = 3,
+};
 
 // CoreAudio-facing order is physical and analog-only:
 //   0..7 = Analog Inputs 1..8
@@ -41,6 +48,13 @@ struct SharedCaptureRing {
     std::atomic<std::uint64_t> halUnderrunEvents;
 
     float samples[kCapacityFrames * kInputChannels];
+    // Appended so existing ring offsets stay unchanged. The version/size check
+    // prevents a new HAL from accessing these fields in an old mapping.
+    std::atomic<std::uint64_t> halDiscardEvents;
+    std::atomic<std::uint64_t> halDiscardedFrames;
+    std::atomic<std::uint64_t> halLastDiscardTick;
+    std::atomic<std::uint64_t> halLastDiscardQueued;
+    std::atomic<std::uint32_t> halLastDiscardReason;
 };
 
 inline void initialize(SharedCaptureRing& ring, std::uint32_t rate = 48000) {
@@ -64,6 +78,11 @@ inline void initialize(SharedCaptureRing& ring, std::uint32_t rate = 48000) {
     ring.halMinQueuedFrames.store(kQueueMinUnset, std::memory_order_relaxed);
     ring.halMaxQueuedFrames.store(0, std::memory_order_relaxed);
     ring.halUnderrunEvents.store(0, std::memory_order_relaxed);
+    ring.halDiscardEvents.store(0, std::memory_order_relaxed);
+    ring.halDiscardedFrames.store(0, std::memory_order_relaxed);
+    ring.halLastDiscardTick.store(0, std::memory_order_relaxed);
+    ring.halLastDiscardQueued.store(0, std::memory_order_relaxed);
+    ring.halLastDiscardReason.store(0, std::memory_order_relaxed);
 }
 
 inline bool valid(const SharedCaptureRing& ring) {
@@ -78,20 +97,63 @@ inline std::size_t availableFrames(const SharedCaptureRing& ring) {
     return static_cast<std::size_t>(w - r);
 }
 
-// Called by the HAL reader on experimental high-rate paths. When no client reads for long
+inline void recordDiscard(SharedCaptureRing& ring, std::size_t frames,
+                          std::size_t queued, DiscardReason reason,
+                          std::uint64_t tick) {
+    if (frames == 0) return;
+    ring.droppedFrames.fetch_add(frames, std::memory_order_relaxed);
+    ring.halDiscardedFrames.fetch_add(frames, std::memory_order_relaxed);
+    ring.halLastDiscardTick.store(tick, std::memory_order_relaxed);
+    ring.halLastDiscardQueued.store(queued, std::memory_order_relaxed);
+    ring.halLastDiscardReason.store(static_cast<std::uint32_t>(reason),
+                                    std::memory_order_relaxed);
+    ring.halDiscardEvents.fetch_add(1, std::memory_order_release);
+}
+
+// A new 48 kHz client must not inherit samples left by the previous one.
+// The producer will activate the ring again after a fresh 512-frame prefill.
+inline std::size_t discardForClientStart(SharedCaptureRing& ring,
+                                         std::uint64_t tick) {
+    ring.active.store(0, std::memory_order_release);
+    const auto w = ring.writeFrame.load(std::memory_order_acquire);
+    const auto r = ring.readFrame.load(std::memory_order_acquire);
+    const auto queued = static_cast<std::size_t>(w - r);
+    ring.readFrame.store(w, std::memory_order_release);
+    recordDiscard(ring, queued, queued, DiscardReason::clientStart, tick);
+    return queued;
+}
+
+// Preserve enough fresh capture for multiple HAL callbacks while preventing
+// moderate scheduling stalls from becoming persistent input latency.
+inline std::size_t trimLiveCapture(SharedCaptureRing& ring,
+                                   std::size_t maxQueuedFrames,
+                                   std::size_t targetFrames,
+                                   std::uint64_t tick) {
+    const auto w = ring.writeFrame.load(std::memory_order_acquire);
+    const auto r = ring.readFrame.load(std::memory_order_acquire);
+    const auto queued = static_cast<std::size_t>(w - r);
+    if (queued <= maxQueuedFrames || targetFrames >= queued) return 0;
+    const auto discarded = queued - targetFrames;
+    ring.readFrame.store(w - targetFrames, std::memory_order_release);
+    recordDiscard(ring, discarded, queued, DiscardReason::liveTrim, tick);
+    return discarded;
+}
+
+// Called by the HAL reader at every rate. When no client reads for long
 // enough, the producer fills the ring and drops all subsequent (new) frames.
 // Keeping even a small part of that full ring would replay old audio before
 // fresh samples. Suspend reads, discard the whole backlog, and let the
 // transport prefill again from current capture packets before reactivation.
 inline bool suspendStaleCapture(SharedCaptureRing& ring,
-                                std::size_t maxQueuedFrames) {
+                                std::size_t maxQueuedFrames,
+                                std::uint64_t tick = 0) {
     const auto w = ring.writeFrame.load(std::memory_order_acquire);
     const auto r = ring.readFrame.load(std::memory_order_acquire);
     const auto queued = static_cast<std::size_t>(w - r);
     if (queued <= maxQueuedFrames) return false;
     ring.active.store(0, std::memory_order_release);
     ring.readFrame.store(w, std::memory_order_release);
-    ring.droppedFrames.fetch_add(queued, std::memory_order_relaxed);
+    recordDiscard(ring, queued, queued, DiscardReason::staleFlush, tick);
     return true;
 }
 

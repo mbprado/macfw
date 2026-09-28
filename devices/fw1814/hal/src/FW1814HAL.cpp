@@ -881,6 +881,9 @@ OSStatus STDMETHODCALLTYPE StartIO(AudioServerPlugInDriverRef,
             gSampleRate.load(std::memory_order_acquire),
             std::memory_order_release);
         gPlaybackRing->startIOCalls.fetch_add(1, std::memory_order_relaxed);
+        if (gSampleRate.load(std::memory_order_acquire) == 48000)
+            macfw::fw1814::hal::capture::discardForClientStart(
+                *gCaptureRing, mach_absolute_time());
     }
 
     return kAudioHardwareNoError;
@@ -1034,8 +1037,18 @@ OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef,
             // stale backlog larger than the bounded live-capture threshold.
             const bool stale =
                 macfw::fw1814::hal::capture::suspendStaleCapture(
-                    *gCaptureRing, 4096);
+                    *gCaptureRing, 4096, mach_absolute_time());
             if (!stale) {
+                if (currentRate == 48000) {
+                    // The transport activates with 512 fresh frames; 48 kHz
+                    // CoreAudio callbacks are 192 frames. Allow two callbacks
+                    // of drift, then retain the fresh 512-frame prefill.
+                    constexpr std::size_t kPrefill = 512;
+                    constexpr std::size_t kCallback = 192;
+                    macfw::fw1814::hal::capture::trimLiveCapture(
+                        *gCaptureRing, kPrefill + 2 * kCallback,
+                        kPrefill, mach_absolute_time());
+                }
                 macfw::fw1814::diagnostic::Point trace{};
                 const bool tracing = currentRate == 48000 && gTraceDeliver.armed();
                 if (tracing) {
