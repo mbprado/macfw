@@ -21,11 +21,12 @@ Examples:
 ```text
 0.04.000   first unified FW410 + FW1814 release
 0.04.003   released FW1814 headphone encoder fix
+0.05.000   six-rate FW1814 analog transport release
 1.0.000   first major/stable generation
 ```
 
 The published tags use a zero-padded middle field, from `0.01.000` through
-the unified `0.04.000` and current `0.04.003`. Keep the tag, both version
+the unified `0.04.000` and current `0.05.000`. Keep the tag, both version
 headers, package names and release notes identical for each release. The
 workflow accepts the `x.y.zzz` shape but checks the actual tag against the
 version headers.
@@ -43,7 +44,7 @@ binaries.
 The normal release tag is the unified numeric version:
 
 ```text
-0.04.003
+0.05.000
 ```
 
 It builds the combined package containing both supported interfaces and the
@@ -51,8 +52,8 @@ FW410-only and FW1814-only packages.
 Device-prefixed tags remain available when a device-specific package is needed:
 
 ```text
-fw410-0.04.003
-fw1814-0.04.003
+fw410-0.05.000
+fw1814-0.05.000
 ```
 
 The intended release flow is:
