@@ -13,6 +13,12 @@ constexpr std::uint32_t kVersion = 2;
 constexpr std::uint32_t kInputChannels = 8;
 constexpr std::uint32_t kCapacityFrames = 32768;
 constexpr std::uint64_t kQueueMinUnset = std::numeric_limits<std::uint64_t>::max();
+constexpr std::size_t k48CapturePrefillFrames = 512;
+constexpr std::size_t k48CallbackFrames = 192;
+// Eight callbacks are 32 ms at 48 kHz. This covers the ~20 ms callback stalls
+// seen in tagged probes while bounding the live queue below 43 ms.
+constexpr std::size_t k48MaxLiveQueuedFrames =
+    k48CapturePrefillFrames + 8 * k48CallbackFrames;
 
 enum class DiscardReason : std::uint32_t {
     none = 0,

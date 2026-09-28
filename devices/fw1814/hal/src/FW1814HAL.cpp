@@ -1040,14 +1040,14 @@ OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef,
                     *gCaptureRing, 4096, mach_absolute_time());
             if (!stale) {
                 if (currentRate == 48000) {
-                    // The transport activates with 512 fresh frames; 48 kHz
-                    // CoreAudio callbacks are 192 frames. Allow two callbacks
-                    // of drift, then retain the fresh 512-frame prefill.
-                    constexpr std::size_t kPrefill = 512;
-                    constexpr std::size_t kCallback = 192;
+                    // Keep the fresh transport prefill after a backlog trim.
+                    // The bound allows observed callback stalls without
+                    // replaying the 80-ms queue from the slow probe.
                     macfw::fw1814::hal::capture::trimLiveCapture(
-                        *gCaptureRing, kPrefill + 2 * kCallback,
-                        kPrefill, mach_absolute_time());
+                        *gCaptureRing,
+                        macfw::fw1814::hal::capture::k48MaxLiveQueuedFrames,
+                        macfw::fw1814::hal::capture::k48CapturePrefillFrames,
+                        mach_absolute_time());
                 }
                 macfw::fw1814::diagnostic::Point trace{};
                 const bool tracing = currentRate == 48000 && gTraceDeliver.armed();

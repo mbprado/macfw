@@ -56,4 +56,17 @@ int main() {
     assert(ring->halLastDiscardReason.load() ==
            static_cast<std::uint32_t>(capture::DiscardReason::staleFlush));
     assert(ring->halLastDiscardQueued.load() == 4608);
+
+    capture::initialize(*ring);
+    assert(capture::write(*ring, input.data(), 1024) == 1024);
+    assert(capture::write(*ring, input.data(), 1024) == 1024);
+    assert(capture::trimLiveCapture(*ring, capture::k48MaxLiveQueuedFrames,
+                                    capture::k48CapturePrefillFrames, 70) == 0);
+    assert(capture::write(*ring, input.data(), 8) == 8);
+    assert(capture::trimLiveCapture(*ring, capture::k48MaxLiveQueuedFrames,
+                                    capture::k48CapturePrefillFrames, 80) == 1544);
+    assert(capture::availableFrames(*ring) == capture::k48CapturePrefillFrames);
+    assert(capture::read(*ring, output.data(), 192) == 192);
+    assert(output[0] == 520.0f);
+    assert(ring->halUnderrunEvents.load() == 0);
 }
