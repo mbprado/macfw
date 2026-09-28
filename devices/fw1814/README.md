@@ -45,8 +45,8 @@ respectively, with a 96-cycle live lead and a 48-cycle deadline guard. Fixed hal
 for diagnosis with `MACFW_44_ROLLING_TX=0`, `MACFW_48_ROLLING_TX=0`,
 `MACFW_88_ROLLING_TX=0`, `MACFW_96_ROLLING_TX=0`,
 `MACFW_176_ROLLING_TX=0` or `MACFW_192_ROLLING_TX=0`.
-Both modes have hardware-tested playback, recording, rate switching, restart
-recovery and live performance profiles.
+The four 44.1/48/88.2/96 kHz modes have hardware-tested playback, recording,
+rate switching, restart recovery and live performance profiles.
 At 88.2 and 96 kHz rolling TX now use a 512-frame READY silence target to
 avoid retaining a 4096-frame live PCM queue after a Logic-origin rate change.
 Set `MACFW_88_SHORT_READY_RESERVE=0` or
@@ -54,7 +54,7 @@ Set `MACFW_88_SHORT_READY_RESERVE=0` or
 44.1 kHz rolling TX already uses a configurable 512-frame live PCM reserve
 (`MACFW_44_ROLLING_PCM_RESERVE_FRAMES`, 64..2048); 48 kHz has no READY
 silence top-up. Each mode retains its validated startup path.
-The normal `make fw1814` and `sudo make fw1814-install` paths include both
+The normal `make fw1814` and `sudo make fw1814-install` paths include all six analog
 modes; older `*-experimental88` and `*-experimental96` targets remain as
 compatibility aliases. Minor artifacts have been observed
 under heavy host demand; extended stress monitoring remains useful.
