@@ -16,6 +16,10 @@ The project uses the `x.y.zzz` version format described in [`RELEASES.md`](RELEA
 
 ### Fixed
 
+- FW1814 control panel now waits for its requested sample-rate engine and
+  restored control state before refreshing, avoiding a transient missing-socket
+  error during a GUI rate change. Other socket failures remain visible, and
+  the wait reports a timeout after 20 seconds.
 - FW1814 48 kHz HAL capture now discards stale input when a client starts and
   bounds active capture at 2,048 frames (512-frame prefill plus eight 192-frame
   callbacks). Discard counters identify client-start and live-queue trimming.
