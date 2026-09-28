@@ -6,6 +6,8 @@ The project uses the `x.y.zzz` version format described in [`RELEASES.md`](RELEA
 
 ## [Unreleased]
 
+## [0.05.000] — FW1814 six-rate analog transport — 2026-09-28
+
 ### Added
 
 - FW1814 analog playback and recording at 88.2 and 96 kHz, with guarded
