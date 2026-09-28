@@ -8,7 +8,7 @@ The supported targets are the **M-Audio FireWire 410** and **M-Audio FireWire 18
 
 ## Current status
 
-The current unified release is **`0.04.003` alpha** for Intel macOS. Root builds cover both supported interfaces, the default source install selects connected hardware, and the combined package contains both independently namespaced payloads while installing only connected hardware. Focused FW410-only and FW1814-only packages are also available. Native audio, recovery, rate switching and the current control-panel scopes are hardware-validated on real FW410 and FW1814 hardware.
+The current unified release is **`0.05.000` alpha candidate** for Intel macOS. Root builds cover both supported interfaces, the default source install selects connected hardware, and the combined package contains both independently namespaced payloads while installing only connected hardware. Focused FW410-only and FW1814-only packages are also available. Native audio, recovery, rate switching and the current control-panel scopes are hardware-validated on real FW410 and FW1814 hardware.
 
 The following hardware-validated functionality applies specifically to **FW410**:
 
@@ -128,7 +128,7 @@ The FW1814 control panel follows the same transport-owned architecture and
 covers its validated analog surface: two software returns, four analog input
 pairs, two analog output pairs, two digital-volume headphone outputs, AUX
 sends/master, persistent state, diagnostics and 44.1/48/88.2/96 kHz selection.
-At those rates its Device tab exposes 250/375/500 µs service profiles,
+At all six analog rates its Device tab exposes 250/375/500 µs service profiles,
 trading transport CPU wakeups against latency.
 
 ## Main mixer discovery
