@@ -265,9 +265,9 @@ FireWire rate-control probes directly.
 
 The FW1814 Device tab provides three persistent transport profiles:
 **Aggressive** (250 µs), **Balanced** (375 µs), and **Conservative** (500 µs).
-They apply live at 44.1, 48, 88.2 and 96 kHz and survive rate changes and
-transport restarts through the normal control-state path. Quad-speed
-176.4/192 kHz engines also support these live profiles. Advanced installations may
+They apply live at all six FW1814 analog rates (44.1, 48, 88.2, 96,
+176.4 and 192 kHz) and survive rate changes and transport restarts through
+the normal control-state path. Advanced installations may
 set `MACFW_AUDIO_SERVICE_PERIOD_US` between 250 and 2000; that explicit
 launchd value overrides and disables the GUI selector until removed.
 
