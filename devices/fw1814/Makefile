@@ -1,6 +1,6 @@
 PREFIX ?= /Library/Application Support/macfw/fw1814
 
-.PHONY: all clean install-check install install-experimental96 install-experimental88 install-experimental176 install-experimental192 uninstall hal runtime all-tools tools gui
+.PHONY: all clean install-check install install-experimental96 install-experimental88 install-experimental176 install-experimental192 uninstall hal runtime all-tools tools gui capture-live-queue-test
 
 all: hal runtime gui
 
@@ -13,6 +13,9 @@ runtime:
 
 gui:
 	$(MAKE) -C control-panel all
+
+capture-live-queue-test:
+	$(MAKE) -C hal capture-live-queue-test
 
 all-tools tools:
 	$(MAKE) -C tools all
