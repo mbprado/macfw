@@ -74,6 +74,10 @@ static AudioObjectID FindDevice(void){
 @property(nonatomic,strong) NSTextField *deviceStatus;
 @property(nonatomic,strong) NSTextField *auxNote;
 @property(nonatomic,assign) BOOL refreshing;
+@property(nonatomic,assign) BOOL waitingForRateChange;
+@property(nonatomic,assign) NSUInteger rateChangeGeneration;
+@property(nonatomic,assign) Float64 requestedRate;
+@property(nonatomic,strong) NSDate *rateChangeDeadline;
 @property(nonatomic,strong) NSMutableArray<NSButton*> *routes;
 @property(nonatomic,strong) NSMutableArray<NSPopUpButton*> *outputSources;
 @property(nonatomic,strong) NSMutableArray<NSPopUpButton*> *hpSources;
@@ -109,7 +113,7 @@ static AudioObjectID FindDevice(void){
     dispatch_async(dispatch_get_main_queue(),^{[self refresh:nil];});
     [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *timer){
         (void)timer;
-        if (!self.window.isVisible || self.refreshing || [NSEvent pressedMouseButtons]) return;
+        if (!self.window.isVisible || self.refreshing || self.waitingForRateChange || [NSEvent pressedMouseButtons]) return;
         [self refreshLevels:self.hpRows command:@"headphone-volume" args:HP()];
     }];
 }
@@ -238,7 +242,7 @@ static AudioObjectID FindDevice(void){
     AudioObjectID d=FindDevice();if(d==kAudioObjectUnknown){self.deviceStatus.stringValue=@"CoreAudio device: unavailable";self.rate.enabled=NO;self.rate.selectedSegment=-1;return;}
     AudioObjectPropertyAddress a{kAudioDevicePropertyNominalSampleRate,kAudioObjectPropertyScopeGlobal,kAudioObjectPropertyElementMain};Float64 rate=0;UInt32 n=sizeof(rate);
     if(AudioObjectGetPropertyData(d,&a,0,nullptr,&n,&rate)!=noErr){self.deviceStatus.stringValue=@"CoreAudio device: rate unavailable";self.rate.enabled=NO;return;}
-    self.deviceStatus.stringValue=[NSString stringWithFormat:@"CoreAudio device: connected • %.0f Hz",rate];self.rate.enabled=YES;
+    self.deviceStatus.stringValue=[NSString stringWithFormat:@"CoreAudio device: connected • %.0f Hz",rate];self.rate.enabled=!self.waitingForRateChange;
     self.rate.selectedSegment=-1;for(NSInteger i=0;i<6;++i)if(std::fabs(rate-kRates[i])<1){self.rate.selectedSegment=i;break;}
     [self setAuxAvailable:rate<176400.0];
 }
@@ -325,7 +329,40 @@ static AudioObjectID FindDevice(void){
     AudioObjectPropertyAddress a{kAudioDevicePropertyNominalSampleRate,kAudioObjectPropertyScopeGlobal,kAudioObjectPropertyElementMain};Boolean settable=false;
     OSStatus st=AudioObjectIsPropertySettable(d,&a,&settable);if(st==noErr&&settable)st=AudioObjectSetPropertyData(d,&a,0,nullptr,sizeof(rate),&rate);
     if(st!=noErr||!settable){self.status.stringValue=[NSString stringWithFormat:@"CoreAudio rejected rate change (OSStatus %d)",(int)st];self.status.textColor=NSColor.systemRedColor;NSBeep();[self refreshDevice];return;}
-    self.status.stringValue=@"Sample-rate change requested through CoreAudio…";s.enabled=NO;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{s.enabled=YES;[self refresh:nil];});
+    self.waitingForRateChange=YES;
+    self.requestedRate=rate;
+    self.rateChangeDeadline=[NSDate dateWithTimeIntervalSinceNow:20.0];
+    NSUInteger generation=++self.rateChangeGeneration;
+    self.status.stringValue=@"Waiting for FW1814 transport to recover…";
+    self.status.textColor=NSColor.labelColor;
+    s.enabled=NO;
+    [self pollRateChange:generation lastError:nil];
+}
+- (void)pollRateChange:(NSUInteger)generation lastError:(NSString*)lastError{
+    if(!self.waitingForRateChange || generation!=self.rateChangeGeneration)return;
+    NSDictionary *r=[self ctl:@[@"engine",@"get"]];
+    if([r[@"status"] integerValue]==0){
+        NSString *expected=[NSString stringWithFormat:@"sample rate: %.0f Hz",self.requestedRate];
+        if([r[@"output"] containsString:expected]){
+            self.waitingForRateChange=NO;
+            [self refresh:nil];
+            return;
+        }
+        lastError=[NSString stringWithFormat:@"Engine has not reached %.0f Hz",self.requestedRate];
+    }else{
+        NSString *line=[[r[@"output"] componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] firstObject];
+        lastError=line.length?line:@"FW1814 transport is unavailable";
+    }
+    if([self.rateChangeDeadline timeIntervalSinceNow]<=0){
+        self.waitingForRateChange=NO;
+        [self refreshDevice];
+        self.status.stringValue=[NSString stringWithFormat:@"FW1814 did not recover after rate change: %@",lastError];
+        self.status.textColor=NSColor.systemRedColor;
+        NSBeep();
+        return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,500*NSEC_PER_MSEC),
+                   dispatch_get_main_queue(),^{[self pollRateChange:generation lastError:lastError];});
 }
 - (void)performanceProfileChanged:(NSSegmentedControl*)s{
     if(s.selectedSegment<0||s.selectedSegment>2){[self refreshPerformanceProfile];return;}
