@@ -59,6 +59,18 @@ modes; older `*-experimental88` and `*-experimental96` targets remain as
 compatibility aliases. Minor artifacts have been observed
 under heavy host demand; extended stress monitoring remains useful.
 
+At 48 kHz the HAL discards stale capture on client start and limits the live
+capture queue to 2,048 frames (512-frame prefill and eight 192-frame CoreAudio
+callbacks). Queue trims are counted and logged; this prevents a stopped or
+slow client from replaying the previously observed 80–90 ms backlog. In a
+40-probe clean physical loopback run, 39 impulses returned at 11.98–16.31 ms
+(one impulse was not detected). A separate run while YouTube played returned
+all 40 impulses at 16.48–27.48 ms. The longest loaded probes coincided with
+DBC-gap increments and brief capture queue growth; their cause and audible
+impact remain under observation. These tests do not change CoreAudio's
+provisional reported latency estimate. The source install and both FW1814
+package variants include all six analog engine binaries.
+
 The 176.4 and 192 kHz engines retain their experimental quad-speed capture
 qualification and startup paths. At 192 kHz rolling TX uses the tested
 1280-packet ring by default (160 ms physical allocation); set
