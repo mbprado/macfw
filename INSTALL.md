@@ -111,6 +111,7 @@ make fw1814-runtime     # FW1814 installed service/control binaries
 make fw1814-gui         # FW1814 native control-panel application
 make fw1814-tools       # all FW1814 development and diagnostic tools
 make fw1814-package     # clean FW1814 build + device-specific .pkg
+make fw1814-capture-live-queue-test # capture queue regression check (no hardware)
 sudo make fw1814-install
 sudo make fw1814-uninstall
 make fw1814-clean
@@ -155,7 +156,7 @@ Then install the already-built FW1814 HAL, supervised runtime and control panel 
 sudo make fw1814-install
 ```
 
-The FW1814 analog profile exposes Analog Outputs 1-4 and Analog Inputs 1-8 at 44.1, 48, 88.2 and 96 kHz. These modes have hardware-tested playback, recording, rate switching and restart recovery. The 88.2/96 kHz engines use guarded rolling TX and support the persistent live Aggressive, Balanced and Conservative service profiles. Occasional small artifacts remain possible under heavy host load. The 176.4/192 kHz quad-speed engines remain experimental; S/PDIF, ADAT and MIDI remain under development.
+The FW1814 analog profile exposes Analog Outputs 1-4 and Analog Inputs 1-8 at 44.1, 48, 88.2 and 96 kHz. These modes have hardware-tested playback, recording, rate switching and restart recovery. The 88.2/96 kHz engines use guarded rolling TX and support the persistent live Aggressive, Balanced and Conservative service profiles. At 48 kHz the HAL bounds active capture to 2,048 frames and discards stale capture on client start to prevent long queue replay. The FW1814-only and combined `.pkg` builders stage all six analog engines, including the experimental quad modes. Occasional small artifacts remain possible under heavy host load. The 176.4/192 kHz quad-speed engines remain experimental; S/PDIF, ADAT and MIDI remain under development.
 
 The first routing-control API is available through the transport-owned socket. It reports the exact write-only routing baseline cached by the active engine without issuing new FireWire writes:
 
