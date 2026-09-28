@@ -21,7 +21,7 @@ Apple Silicon is not currently supported.
 2. Obtain the unified `.pkg` and install it normally, or from Terminal:
 
    ```bash
-   sudo installer -pkg macfw-0.04.003-<build>.pkg -target /
+   sudo installer -pkg macfw-0.05.000-<build>.pkg -target /
    ```
 
 3. The installer validates the connected interface(s) and installs only the
@@ -195,9 +195,9 @@ package/dist/
 For example:
 
 ```text
-package/dist/macfw-0.04.003-<git-sha>.pkg
-package/dist/macfw-fw410-0.04.003-<git-sha>.pkg
-package/dist/macfw-fw1814-0.04.003-<git-sha>.pkg
+package/dist/macfw-0.05.000-<git-sha>.pkg
+package/dist/macfw-fw410-0.05.000-<git-sha>.pkg
+package/dist/macfw-fw1814-0.05.000-<git-sha>.pkg
 ```
 
 Packages disable bundle relocation so each selected control application is installed at its authoritative `/Applications` path even when development copies exist elsewhere on the Mac.
@@ -267,7 +267,7 @@ The FW1814 Device tab provides three persistent transport profiles:
 **Aggressive** (250 µs), **Balanced** (375 µs), and **Conservative** (500 µs).
 They apply live at 44.1, 48, 88.2 and 96 kHz and survive rate changes and
 transport restarts through the normal control-state path. Quad-speed
-176.4/192 kHz engines retain their fixed cadence. Advanced installations may
+176.4/192 kHz engines also support these live profiles. Advanced installations may
 set `MACFW_AUDIO_SERVICE_PERIOD_US` between 250 and 2000; that explicit
 launchd value overrides and disables the GUI selector until removed.
 
