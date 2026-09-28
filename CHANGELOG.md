@@ -14,6 +14,16 @@ The project uses the `x.y.zzz` version format described in [`RELEASES.md`](RELEA
 - Dual-speed rolling deadline counters and first-loud diagnostic markers.
   Fixed refill remains available through per-rate transport overrides.
 
+### Fixed
+
+- FW1814 48 kHz HAL capture now discards stale input when a client starts and
+  bounds active capture at 2,048 frames (512-frame prefill plus eight 192-frame
+  callbacks). Discard counters identify client-start and live-queue trimming.
+  This addresses occasional 80–90 ms capture backlog latency without changing
+  the rolling TX schedule or the reported device latency.
+- FW1814-only and combined installer packages now include all six analog
+  engines and the firmware-reset helper, matching source installs.
+
 ### Changed
 
 - FW1814 rolling 88.2 kHz now uses a 512-frame READY silence target; this
