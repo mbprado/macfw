@@ -274,8 +274,12 @@ launchd value overrides and disables the GUI selector until removed.
 After selecting a different FW1814 sample rate in the Device tab, allow the
 new engine to report ONLINE and the CoreAudio stream to settle before making a
 latency measurement. The GUI uses the standard asynchronous CoreAudio rate
-property; an immediate probe can still sample the transition even though the
-new transport starts correctly. Repeating the probe after a few seconds should
+property and waits up to 20 seconds for the matching transport engine and
+restored control state before refreshing controls. During a GUI-initiated rate
+change, a temporarily missing control socket is shown as recovery progress;
+other socket failures still appear immediately. If recovery times out, the
+last error is displayed. An immediate audio probe can still sample the
+transition even though the new transport starts correctly. Repeating the probe after a few seconds should
 be preferred over changing transport tuning from one anomalous result.
 
 ## Control architecture and persistence
