@@ -67,7 +67,7 @@ class StateTests(unittest.TestCase):
             calls.append(argv)
             text=''
             if '--trace-id' in argv:
-                text=fixture(int(argv[-1]),70000000 if probes[0] else 0)
+                text=fixture(int(argv[argv.index('--trace-id')+1]),70000000 if probes[0] else 0)
                 probes[0]+=1
             elif 'engine' in argv:
                 text='sample rate: 48000 Hz; FireWire generation at control startup: 7'
@@ -75,13 +75,15 @@ class StateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary);log=root/'transport-source.log';log.write_text('')
             args=SimpleNamespace(output=root/'results',routing='fixture',host_load='simulated',probes=40,
-                                 idle_gap=.25,fast_max_ms=20,slow_min_ms=60)
+                                 idle_gap=.25,fast_max_ms=20,slow_min_ms=60,output_channel=2)
             with patch.object(b,'LOG',log),patch.object(b.subprocess,'run',run),patch.object(b.time,'sleep',lambda _:None):
                 self.assertEqual(b.run(args),0)
             self.assertEqual(probes[0],2)
             result=json.loads((args.output/'results.json').read_text())
             self.assertEqual([row['state'] for row in result],['fast','slow'])
             self.assertEqual(len(list(args.output.glob('probe-*.txt'))),2)
+            self.assertTrue(all(argv[-2:]==['--output-channel','2']
+                                for argv in calls if '--trace-id' in argv))
             for argv in calls:
                 self.assertNotIn('--rate',argv)
                 self.assertNotIn('set',argv)

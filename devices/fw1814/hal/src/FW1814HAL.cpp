@@ -996,7 +996,7 @@ OSStatus STDMETHODCALLTYPE DoIOOperation(AudioServerPlugInDriverRef,
         }
         const auto written = macfw::fw1814::hal::write(
             *gPlaybackRing, static_cast<const Float32*>(mainBuffer), frames);
-        if (tracing) gTraceSubmit.block(static_cast<const Float32*>(mainBuffer), written, kOutputChannels, trace);
+        if (tracing) gTraceSubmit.block(static_cast<const Float32*>(mainBuffer), written, kOutputChannels, trace, 0, 2);
         return kAudioHardwareNoError;
     }
 

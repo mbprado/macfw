@@ -38,6 +38,14 @@ int main() {
     assert(shared.points[PcmRead].id.load()==123456);
     assert(shared.points[PcmRead].frame.load()==777);
     assert(shared.points[PcmRead].tick.load()==1234);
+    Endpoint output2; output2.attach(&shared,HalSubmit);
+    std::vector<float> stereo(kTagFrames*2);
+    for (unsigned i=0;i<kTagFrames;++i) stereo[i*2+1]=waveform(123456,i);
+    point.frame=900; point.tick=2000;
+    output2.block(stereo.data(),kTagFrames,2,point,0,2);
+    assert(shared.points[HalSubmit].id.load()==123456);
+    assert(shared.points[HalSubmit].frame.load()==900);
+    assert(shared.points[HalSubmit].tick.load()==2000);
     shared.requestId.store(654321);
     endpoint.block(interleaved.data(),kTagFrames,4,point);
     assert(shared.points[PcmRead].id.load()!=654321);

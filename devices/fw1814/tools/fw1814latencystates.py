@@ -238,6 +238,7 @@ def run(args):
         rc,processes=command(['ps','-axo','pid,comm'],'initial-processes')
         if re.search(r'Logic Pro(?: X)?\.app/Contents/MacOS/',processes):raise RuntimeError('Logic is running')
         metadata=dict(routing=args.routing,host_load=args.host_load,initial_engine=initial,
+                      output_channel=getattr(args,'output_channel',1),
                       probes=args.probes,idle_gap_s=args.idle_gap,fast_max_ms=args.fast_max_ms,slow_min_ms=args.slow_min_ms,
                       method='new AUHAL client per impulse; same transport; tagged leading edge; no rate/profile/reset requests')
         for name,argv in [('git-head',['git','rev-parse','HEAD']),('git-status',['git','status','--porcelain']),('os',['sw_vers']),('kernel',['uname','-a']),('hardware',['sysctl','hw.model','hw.memsize','hw.ncpu']),('profile',[CTL,'performance-profile','get']),('launchd-config',['plutil','-p','/Library/LaunchDaemons/com.mbprado.macfw.fw1814.transport.plist'])]:
@@ -253,7 +254,10 @@ def run(args):
             if re.search(r'Logic Pro(?: X)?\.app/Contents/MacOS/',processes):raise RuntimeError('Logic reopened')
             impulse_id=nonce+i
             name=f'probe-{i+1:02d}-id-{impulse_id}'
-            rc,text=command(['sudo','-n',TOOL,'--trace-id',str(impulse_id)],name)
+            probe_command=['sudo','-n',TOOL,'--trace-id',str(impulse_id)]
+            if getattr(args,'output_channel',1)!=1:
+                probe_command.extend(['--output-channel',str(args.output_channel)])
+            rc,text=command(probe_command,name)
             row=parse(text,impulse_id);row['raw_file']=name+'.txt';row['returncode']=rc
             row['state']='invalid' if row['errors'] or rc else 'fast' if row['electrical_ms']<=args.fast_max_ms else 'slow' if row['electrical_ms']>=args.slow_min_ms else 'intermediate'
             rows.append(row)
@@ -293,6 +297,7 @@ def main():
     c.add_argument('--probes',type=int,default=40);c.add_argument('--idle-gap',type=float,default=.25)
     c.add_argument('--fast-max-ms',type=float,default=20);c.add_argument('--slow-min-ms',type=float,default=60)
     c.add_argument('--routing',required=True);c.add_argument('--host-load',required=True)
+    c.add_argument('--output-channel',type=int,choices=(1,2),default=1)
     a=sub.add_parser('analyze');a.add_argument('directory',type=Path)
     args=p.parse_args()
     if args.command=='analyze':

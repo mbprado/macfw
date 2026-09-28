@@ -78,6 +78,8 @@ static bool waitForFw1814Transport(double rate, double timeoutSeconds) {
 
 struct P {
     std::uint32_t traceId = 0;
+    UInt32 outputChannel = 1;
+    UInt32 outputChannels = 1;
     macfw::fw1814::diagnostic::Session traceSession;
     macfw::fw1814::diagnostic::Endpoint traceOut;
     macfw::fw1814::diagnostic::Detector traceIn;
@@ -96,9 +98,9 @@ struct P {
         auto* p = static_cast<P*>(r);
         auto* data = static_cast<float*>(list->mBuffers[0].mData);
         const auto base = p->out.fetch_add(n);
-        std::fill_n(data, n, 0);
+        std::fill_n(data, n*p->outputChannels, 0);
         if (!p->sent && base <= 48000 && 48000 < base+n) {
-            data[48000-base] = .8f;
+            data[(48000-base)*p->outputChannels+p->outputChannel-1] = .8f;
             p->outFrames = n;
             p->outOffset = 48000-base;
             p->wall0 = mach_absolute_time();
@@ -111,7 +113,7 @@ struct P {
             for (UInt32 i=0; i<n; ++i) {
                 const auto frame = base+i;
                 if (frame >= 48000 && frame < 48000+macfw::fw1814::diagnostic::kTagFrames)
-                    data[i] = macfw::fw1814::diagnostic::waveform(p->traceId, frame-48000);
+                    data[i*p->outputChannels+p->outputChannel-1] = macfw::fw1814::diagnostic::waveform(p->traceId, frame-48000);
             }
             macfw::fw1814::diagnostic::Point point{};
             point.tick = base <= 48000 && 48000 < base+n ? p->wall0 : mach_absolute_time();
@@ -120,7 +122,7 @@ struct P {
             point.sampleHost = t->mHostTime;
             point.frame = base;
             point.callbackFrames = n;
-            p->traceOut.block(data, n, 1, point, p->hp());
+            p->traceOut.block(data, n, p->outputChannels, point, p->hp(), p->outputChannels);
         }
         return noErr;
     }
@@ -180,10 +182,15 @@ struct P {
 };
 int main(int argc,char**argv){double requestedRate=0;
 std::uint32_t traceId=0;
+UInt32 outputChannel=1;
 for(int i=1;i+1<argc;i++){if(std::string(argv[i])=="--rate")requestedRate=std::stod(argv[i+1]);
 if(std::string(argv[i])=="--trace-id"){auto id=std::stoull(argv[i+1]);
 if(!id||id>UINT32_MAX)return 3;
 traceId=static_cast<std::uint32_t>(id);
+}if(std::string(argv[i])=="--output-channel"){
+auto channel=std::stoul(argv[i+1]);
+if(channel!=1&&channel!=2){std::cerr<<"output channel must be 1 or 2\n";return 3;}
+outputChannel=static_cast<UInt32>(channel);
 }}if(traceId&&requestedRate){std::cerr<<"trace probes must not request a rate transition\n";
 return 3;
 }AudioComponentDescription d{kAudioUnitType_Output,kAudioUnitSubType_HALOutput,kAudioUnitManufacturer_Apple,0,0};
@@ -191,6 +198,8 @@ auto c=AudioComponentFindNext(nullptr,&d);
 if(!c)return 1;
 P p;
 p.traceId=traceId;
+p.outputChannel=outputChannel;
+p.outputChannels=outputChannel;
 if(AudioComponentInstanceNew(c,&p.u)!=noErr)return 1;
 UInt32 one=1;
 if(AudioUnitSetProperty(p.u,kAudioOutputUnitProperty_EnableIO,kAudioUnitScope_Input,1,&one,4)||AudioUnitSetProperty(p.u,kAudioOutputUnitProperty_EnableIO,kAudioUnitScope_Output,0,&one,4))return 1;
@@ -253,8 +262,13 @@ auto be=AudioObjectGetPropertyData(dev,&ba,0,nullptr,&bs,&bf);
 std::cout<<"device_buffer_frames="<<(be==noErr?std::to_string(bf):"unavailable")<<"\n";
 std::cout<<"running at "<<p.rate<<" Hz\n";
 AudioStreamBasicDescription cfmt{p.rate,kAudioFormatLinearPCM,kAudioFormatFlagIsFloat|kAudioFormatFlagIsPacked|kAudioFormatFlagsNativeEndian,4,1,4,1,32,0};
-AudioUnitSetProperty(p.u,kAudioUnitProperty_StreamFormat,kAudioUnitScope_Input,0,&cfmt,sizeof(cfmt));
-AudioUnitSetProperty(p.u,kAudioUnitProperty_StreamFormat,kAudioUnitScope_Output,1,&cfmt,sizeof(cfmt));
+AudioStreamBasicDescription ofmt=cfmt;
+ofmt.mBytesPerPacket=4*p.outputChannels;
+ofmt.mBytesPerFrame=4*p.outputChannels;
+ofmt.mChannelsPerFrame=p.outputChannels;
+if(AudioUnitSetProperty(p.u,kAudioUnitProperty_StreamFormat,kAudioUnitScope_Input,0,&ofmt,sizeof(ofmt)) ||
+   AudioUnitSetProperty(p.u,kAudioUnitProperty_StreamFormat,kAudioUnitScope_Output,1,&cfmt,sizeof(cfmt))){
+std::cerr<<"could not set AUHAL stream formats\n";return 1;}
 AURenderCallbackStruct o{P::outcb,&p},i{P::incb,&p};
 AudioUnitSetProperty(p.u,kAudioUnitProperty_SetRenderCallback,kAudioUnitScope_Input,0,&o,sizeof(o));
 AudioUnitSetProperty(p.u,kAudioOutputUnitProperty_SetInputCallback,kAudioUnitScope_Global,0,&i,sizeof(i));

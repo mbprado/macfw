@@ -151,31 +151,36 @@ public:
                shared_->expiry.load() > mach_absolute_time();
     }
     void block(const float* audio, std::size_t frames, std::size_t channels, Point base,
-               std::uint64_t ticksPerSample = 0) {
+               std::uint64_t ticksPerSample = 0, std::size_t scanChannels = 1) {
         if (!armed()) return;
         for (std::size_t i=0; i<frames; ++i) {
             Point p=base; p.frame+=i; p.offset=i;
             if (p.sampleHost) p.sampleHost+=i*ticksPerSample;
-            feed(audio[i*channels], p);
+            for (std::size_t ch=0; ch<scanChannels && ch<channels && ch<detectors_.size(); ++ch)
+                feed(audio[i*channels+ch], p, ch);
         }
     }
-    void feed(float sample, const Point& point) {
+    void feed(float sample, const Point& point, std::size_t channel = 0) {
         if (!shared_) return;
+        if (channel >= detectors_.size()) return;
         const auto id=shared_->requestId.load(std::memory_order_acquire);
         if (!id || id>UINT32_MAX || shared_->requestCookie.load()!=shared_->engineCookie.load() ||
             shared_->expiry.load() <= point.tick) return;
-        if (id!=id_) { id_=id; detector_.reset(static_cast<std::uint32_t>(id)); }
+        if (id!=id_) {
+            id_=id;
+            for (auto& detector: detectors_) detector.reset(static_cast<std::uint32_t>(id));
+        }
         if (shared_->points[stage_].id.load(std::memory_order_acquire)==id) return;
-        if (detector_.feed(sample,point)) {
+        if (detectors_[channel].feed(sample,point)) {
             shared_->points[stage_].lastA.store(point.a);
             shared_->points[stage_].lastTick.store(point.tick);
-            publish(*shared_,stage_,id,detector_.onset());
+            publish(*shared_,stage_,id,detectors_[channel].onset());
         }
     }
 private:
     Shared* shared_ = nullptr;
     Stage stage_ = ToolSubmit;
     std::uint64_t id_ = 0;
-    Detector detector_;
+    std::array<Detector,2> detectors_{};
 };
 } // namespace macfw::fw1814::diagnostic

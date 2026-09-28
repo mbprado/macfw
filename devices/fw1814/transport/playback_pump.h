@@ -50,7 +50,7 @@ inline std::size_t pumpPlayback(
         macfw::fw1814::hal::read(shared, audio.data(), frames);
     if (tracing) {
         point.tick = mach_absolute_time();
-        trace->block(audio.data(), got, macfw::fw1814::hal::kOutputChannels, point);
+        trace->block(audio.data(), got, macfw::fw1814::hal::kOutputChannels, point, 0, 2);
     }
     if (stats)
         stats->framesRead += got;

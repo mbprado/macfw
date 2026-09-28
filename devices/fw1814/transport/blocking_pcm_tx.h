@@ -213,8 +213,9 @@ public:
                 for (std::size_t event=0; event<rr.framesFromBuffer; ++event) {
                     point.offset=event;
                     point.frame=readFrame+event;
-                    // Analog output 1 maps to raw PCM position 2.
-                    trace_->feed(static_cast<float>(frames[event*kPcmChannels+2]/8388607.0), point);
+                    // Analog outputs 1/2 map to raw PCM positions 2/3.
+                    trace_->feed(static_cast<float>(frames[event*kPcmChannels+2]/8388607.0), point, 0);
+                    trace_->feed(static_cast<float>(frames[event*kPcmChannels+3]/8388607.0), point, 1);
                 }
             }
             ++result.dataPacketsRefilled;
