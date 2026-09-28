@@ -32,7 +32,7 @@ among 44.1/48/88.2/96 kHz and interface restart succeeded, and the three
 live service profiles changed successfully. Small artifacts were observed
 under heavy host demand. This development test does not extend the
 per-version installer validation in the table above to all four rates.
-The 176.4/192 kHz modes remain experimental.
+Analog 176.4/192 kHz playback, recording, loopback and live profile changes were additionally tested on the development Mac. Both remain experimental because their startup/capture qualification paths can require retry; these tests do not extend the operating-system matrix to quad rates.
 
 ## Hardware
 
