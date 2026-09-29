@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <mach/mach_time.h>
 #include <sys/mman.h>
 #include <utility>
 
@@ -33,6 +34,7 @@ public:
         std::size_t framesRequested = 0;
         std::size_t framesFromBuffer = 0;
         std::size_t framesSilenced = 0;
+        std::uint64_t firstLoudHostTime = 0;
     };
 
     BlockingPcmTransmitRing44100() = default;
@@ -177,6 +179,13 @@ public:
                 result.framesRequested += rr.framesRequested;
                 result.framesFromBuffer += rr.framesFromBuffer;
                 result.framesSilenced += rr.framesSilenced;
+                for (const auto sample : frames) {
+                    if (result.firstLoudHostTime == 0 &&
+                        (sample >= 6291456 || sample <= -6291456)) {
+                        result.firstLoudHostTime = mach_absolute_time();
+                        break;
+                    }
+                }
 
                 for (std::size_t event = 0; event < kEventsPerDataPacket; ++event) {
                     for (std::size_t ch = 0; ch < kPcmChannels; ++ch) {
@@ -199,6 +208,62 @@ public:
 
         std::atomic_thread_fence(std::memory_order_release);
         return result;
+    }
+
+    // The first NuDCL pass already contains the correct non-repeating 44.1-kHz
+    // DBC/SYT sequence. Rolling startup may replace its PCM payload, but must
+    // not advance those headers to the next 640-cycle continuation state.
+    RefillResult refillPcmOnly(macfw::PcmRingBuffer& pcm,
+                               std::size_t firstPacket,
+                               std::size_t packetCount) {
+        RefillResult result{};
+        if (!storage_ || packetCount_ != kRequiredPackets || !pcm.valid() ||
+            pcm.channelCount() != kPcmChannels || firstPacket >= packetCount_ ||
+            packetCount == 0)
+            return result;
+
+        const std::size_t end = std::min(packetCount_, firstPacket + packetCount);
+        std::int32_t frames[kEventsPerDataPacket * kPcmChannels]{};
+        for (std::size_t i = firstPacket; i < end; ++i) {
+            ++result.packetsVisited;
+            if (!storage_[i].dataBearing) continue;
+
+            const auto rr = pcm.read(frames, kEventsPerDataPacket);
+            result.framesRequested += rr.framesRequested;
+            result.framesFromBuffer += rr.framesFromBuffer;
+            result.framesSilenced += rr.framesSilenced;
+            for (const auto sample : frames) {
+                if (result.firstLoudHostTime == 0 &&
+                    (sample >= 6291456 || sample <= -6291456)) {
+                    result.firstLoudHostTime = mach_absolute_time();
+                    break;
+                }
+            }
+            for (std::size_t event = 0; event < kEventsPerDataPacket; ++event) {
+                for (std::size_t ch = 0; ch < kPcmChannels; ++ch) {
+                    const auto sample = std::max<std::int32_t>(
+                        -8388608,
+                        std::min<std::int32_t>(
+                            8388607, frames[event * kPcmChannels + ch]));
+                    const std::uint32_t word = 0x40000000u |
+                        (static_cast<std::uint32_t>(sample) & 0x00ffffffu);
+                    const std::size_t off = 8 +
+                        (event * kDbs + ch) * sizeof(std::uint32_t);
+                    putBe32(storage_[i].payload + off, word);
+                }
+            }
+            ++result.dataPacketsRefilled;
+        }
+
+        std::atomic_thread_fence(std::memory_order_release);
+        return result;
+    }
+
+    void advanceSchedule(std::size_t packetCount,
+                         macfw::am824::Playback44100State& state,
+                         UInt32& cycle) const {
+        for (std::size_t i = 0; i < packetCount; ++i, ++cycle)
+            (void)buildSilencePacket(cycle % kCyclesPerSecond, state);
     }
 
     explicit operator bool() const { return localPort_ != nullptr; }
@@ -320,10 +385,15 @@ class BlockingPcmStream44100 {
 public:
     struct Stats {
         std::uint64_t halvesRefilled = 0;
+        std::uint64_t rollingRefills = 0;
+        std::uint64_t rollingPacketsRefilled = 0;
+        std::uint64_t rollingDeadlineMisses = 0;
         std::uint64_t dataPacketsRefilled = 0;
         std::uint64_t framesFromBuffer = 0;
         std::uint64_t framesSilenced = 0;
         std::uint64_t lateCyclePolls = 0;
+        UInt32 maxCycleDelta = 0;
+        std::uint64_t firstLoudHostTime = 0;
     };
 
     BlockingPcmStream44100(BlockingPcmTransmitRing44100& tx,
@@ -344,6 +414,17 @@ public:
                tx_->packetCount() == 640 && halfPackets_ == 320;
     }
 
+    bool enableRolling(std::size_t leadPackets,
+                       std::size_t guardPackets) {
+        if (!valid() || leadPackets == 0 || leadPackets >= tx_->packetCount() ||
+            guardPackets == 0 || guardPackets >= leadPackets)
+            return false;
+        rollingEnabled_ = true;
+        rollingLeadPackets_ = leadPackets;
+        rollingGuardPackets_ = guardPackets;
+        return true;
+    }
+
     bool prime() {
         if (!valid()) return false;
         macfw::am824::Playback44100State state{};
@@ -354,6 +435,8 @@ public:
             return false;
         nextState_ = state;
         nextCycle_ = cycle;
+        rollingState_ = state;
+        rollingCycle_ = cycle;
         primed_ = true;
         return true;
     }
@@ -364,6 +447,7 @@ public:
         const UInt32 delta = cycleDelta(currentCycle, lastCycle_);
         lastCycle_ = currentCycle;
         if (delta > 32) ++stats_.lateCyclePolls;
+        if (delta > stats_.maxCycleDelta) stats_.maxCycleDelta = delta;
         cyclesObserved_ += delta;
 
         if (!streamReached_) {
@@ -372,6 +456,11 @@ public:
         }
 
         const std::uint64_t sinceStart = cyclesObserved_ - leadCycles_;
+        if (rollingEnabled_) {
+            serviceRolling(sinceStart);
+            return;
+        }
+
         const std::uint64_t halfNumber = sinceStart / halfPackets_;
         while (lastHalfNumber_ < halfNumber) {
             const std::size_t consumedHalf =
@@ -384,18 +473,89 @@ public:
             stats_.dataPacketsRefilled += rr.dataPacketsRefilled;
             stats_.framesFromBuffer += rr.framesFromBuffer;
             stats_.framesSilenced += rr.framesSilenced;
+            if (stats_.firstLoudHostTime == 0 && rr.firstLoudHostTime != 0)
+                stats_.firstLoudHostTime = rr.firstLoudHostTime;
             ++lastHalfNumber_;
         }
     }
 
     const Stats& stats() const { return stats_; }
     bool streamReached() const { return streamReached_; }
+    bool healthy() const { return rollingHealthy_; }
 
 private:
     static constexpr UInt32 kCyclesPerSecond = 8000;
 
     static UInt32 cycleDelta(UInt32 newer, UInt32 older) {
         return (newer + kCyclesPerSecond - older) % kCyclesPerSecond;
+    }
+
+    void accumulateFrames(
+        const BlockingPcmTransmitRing44100::RefillResult& refill) {
+        stats_.dataPacketsRefilled += refill.dataPacketsRefilled;
+        stats_.framesFromBuffer += refill.framesFromBuffer;
+        stats_.framesSilenced += refill.framesSilenced;
+        if (stats_.firstLoudHostTime == 0 && refill.firstLoudHostTime != 0)
+            stats_.firstLoudHostTime = refill.firstLoudHostTime;
+    }
+
+    bool refillRolling(std::uint64_t firstPacket, std::size_t packetCount) {
+        while (packetCount != 0) {
+            const std::size_t slot = static_cast<std::size_t>(
+                firstPacket % tx_->packetCount());
+            const std::size_t chunk = std::min(
+                packetCount, tx_->packetCount() - slot);
+            BlockingPcmTransmitRing44100::RefillResult refill{};
+            if (firstPacket < tx_->packetCount()) {
+                refill = tx_->refillPcmOnly(*pcm_, slot, chunk);
+            } else {
+                refill = tx_->refill(*pcm_, slot, chunk,
+                                     rollingState_, rollingCycle_);
+            }
+            if (refill.packetsVisited != chunk)
+                return false;
+            ++stats_.rollingRefills;
+            stats_.rollingPacketsRefilled += refill.packetsVisited;
+            accumulateFrames(refill);
+            firstPacket += chunk;
+            packetCount -= chunk;
+        }
+        return true;
+    }
+
+    void serviceRolling(std::uint64_t sinceStart) {
+        if (!rollingInitialized_) {
+            rollingNextPacket_ = sinceStart + rollingLeadPackets_;
+            // Rolling is enabled only after the validated startup sequence.
+            // Derive the non-repeating DBC/SYT continuation state for the
+            // first absolute packet that will be rewritten.
+            if (rollingNextPacket_ > tx_->packetCount())
+                tx_->advanceSchedule(
+                    static_cast<std::size_t>(
+                        rollingNextPacket_ - tx_->packetCount()),
+                    rollingState_, rollingCycle_);
+            rollingInitialized_ = true;
+        }
+
+        const std::uint64_t safeFloor = sinceStart + rollingGuardPackets_;
+        if (rollingNextPacket_ < safeFloor) {
+            ++stats_.rollingDeadlineMisses;
+            rollingHealthy_ = false;
+            return;
+        }
+
+        const std::uint64_t targetExclusive =
+            sinceStart + rollingLeadPackets_ + 1;
+        if (rollingNextPacket_ >= targetExclusive)
+            return;
+        const auto count = static_cast<std::size_t>(
+            targetExclusive - rollingNextPacket_);
+        if (!refillRolling(rollingNextPacket_, count)) {
+            ++stats_.rollingDeadlineMisses;
+            rollingHealthy_ = false;
+            return;
+        }
+        rollingNextPacket_ = targetExclusive;
     }
 
     BlockingPcmTransmitRing44100* tx_ = nullptr;
@@ -407,8 +567,16 @@ private:
     UInt32 nextCycle_ = 0;
     std::size_t halfPackets_ = 0;
     macfw::am824::Playback44100State nextState_{};
+    macfw::am824::Playback44100State rollingState_{};
     std::uint64_t cyclesObserved_ = 0;
     std::uint64_t lastHalfNumber_ = 0;
+    std::uint64_t rollingNextPacket_ = 0;
+    UInt32 rollingCycle_ = 0;
+    std::size_t rollingLeadPackets_ = 0;
+    std::size_t rollingGuardPackets_ = 0;
+    bool rollingEnabled_ = false;
+    bool rollingInitialized_ = false;
+    bool rollingHealthy_ = true;
     bool primed_ = false;
     bool streamReached_ = false;
     Stats stats_{};

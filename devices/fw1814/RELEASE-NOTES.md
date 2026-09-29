@@ -1,70 +1,11 @@
-# macfw FW1814 0.04.003 — Alpha
+# FW1814 in macfw 0.05.000 — Alpha
 
-`0.04.003` updates the installable macfw alpha for the
-**M-Audio FireWire 1814**. Its first unified release was `0.04.000`.
+The primary [unified release notes](../../RELEASE-NOTES.md) cover packaging, compatibility and installation. This page summarizes the FW1814 scope.
 
-## Highlights
+Analog Outputs 1–4 and Inputs 1–8 have hardware-tested full-duplex operation at 44.1, 48, 88.2 and 96 kHz. Analog 176.4 and 192 kHz playback and two-channel capture are available as experimental modes. All six analog engines use guarded rolling TX and accept persistent Aggressive, Balanced and Conservative live service profiles. Firmware boot recovery, rate switching, reconnect and saved analog mixer/headphone control are included.
 
-- Physical headphone knobs adjust and persist their output volume; the open
-  control panel follows the changes.
+At 48 kHz, stale capture is discarded when a client starts and active capture is bounded to 2,048 frames. One clean 40-probe run returned 39 impulses at 11.98–16.31 ms; a loaded run returned all 40 at 16.48–27.48 ms. Quad-rate qualification can occasionally retry. Small capture artifacts and DBC gaps were observed under host load. The GUI now waits for engine and restored-control readiness after a rate change before refreshing its socket-backed controls. CoreAudio latency properties are provisional estimates.
 
-- Hardware-validated analog full-duplex CoreAudio operation at 44.1 and 48 kHz.
-- Runtime sample-rate switching from Audio MIDI Setup and the native Device tab.
-- Automatic bootloader recovery, launchd supervision and physical reconnect.
-- Persistent restoration of the selected rate and validated analog controls.
-- Native AppKit control panel for software returns, analog input monitoring,
-  analog outputs, both digital-volume headphone outputs and the AUX bus.
-- Continuous linked or independent stereo level controls and analog-input pan.
-- Device-specific source install/uninstall and macOS installer package.
-- Independent FW1814 paths allow the FW410 and FW1814 drivers and control
-  panels to coexist.
-- Hardware detection distinguishes the FW1814 operational identity (`FW 1814`)
-  and bootloader identity (`FW 1814 Bootloader`) from the FW410 generic
-  `FW Bootloader` identity.
+Build `make fw1814` then `sudo make fw1814-install`, or use the combined `macfw-0.05.000-<build>.pkg` or focused `macfw-fw1814-0.05.000-<build>.pkg`. The package requires connected supported hardware. The bundled FW1814 control panel installs under `/Applications/macfw FW1814 Control.app`. See [INSTALL.md](../../INSTALL.md) for complete instructions and [high-rate development](analysis/high-rate-development.md) for the experimental startup history.
 
-## Current scope
-
-The release exposes Analog Outputs 1–4 and Analog Inputs 1–8. The validated
-control surface includes mixer routing, input monitor levels/pan, software
-return levels, output source/volume, headphone source/volume, AUX sends and AUX
-master volume. Successful changes persist across service restart, rate switch
-and reconnect.
-
-S/PDIF, ADAT, higher sample rates and MIDI remain deferred pending direct
-comparison with the original M-Audio control panels.
-
-## Installation
-
-The primary `0.04.003` distribution contains both device payloads and installs
-only the connected interface stack(s):
-
-```bash
-sudo installer -pkg macfw-0.04.003-<build>.pkg -target /
-```
-
-If both interfaces are connected, both stacks are installed. To install only
-the FW1814 package regardless of FW410 presence, use the device-specific
-package:
-
-```bash
-sudo installer -pkg macfw-fw1814-0.04.003-<build>.pkg -target /
-```
-
-The package installs:
-
-```text
-/Applications/macfw FW1814 Control.app
-/Library/Audio/Plug-Ins/HAL/macfw-fw1814.driver
-/Library/Application Support/macfw/fw1814/
-/Library/LaunchDaemons/com.mbprado.macfw.fw1814.transport.plist
-```
-
-Source build, package, status and uninstall instructions are in
-[`INSTALL.md`](../../INSTALL.md).
-
-## Compatibility
-
-This alpha targets Intel macOS systems using Apple's legacy FireWire stack.
-Apple Silicon and macOS Tahoe 26 are not currently supported. See
-[`COMPATIBILITY.md`](../../COMPATIBILITY.md) and
-[`KNOWN-LIMITATIONS.md`](../../KNOWN-LIMITATIONS.md).
+The package is unsigned and unnotarized. Intel Macs using Apple's legacy FireWire stack are the current target. Apple Silicon and Tahoe 26 are unsupported. S/PDIF, ADAT and MIDI are deferred. The [compatibility matrix](../../COMPATIBILITY.md) is cumulative and does not imply high-rate validation on every macOS version.

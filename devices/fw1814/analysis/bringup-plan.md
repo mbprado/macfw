@@ -79,8 +79,9 @@ The FW1814 special firmware is known to react badly to unsupported commands. Exp
 ## Deferred
 
 - MIDI/CoreMIDI;
-- 88.2 kHz;
-- 96 kHz;
+- promotion of the experimental 88.2/96 kHz CoreAudio/transport engines into
+  the normal installer (both remain opt-in; see
+  [`high-rate-development.md`](high-rate-development.md));
 - 176.4 kHz;
 - 192 kHz;
 - ADAT S/MUX/high-rate mode work;

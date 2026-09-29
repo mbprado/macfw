@@ -72,6 +72,14 @@ bool validDb(const std::string& value) {
 }
 
 bool validStoredCommand(const Entry& entry) {
+    if (entry.arguments.size() == 3 &&
+        entry.arguments[0] == "performance-profile" &&
+        entry.arguments[1] == "set" &&
+        (entry.arguments[2] == "aggressive" ||
+         entry.arguments[2] == "balanced" ||
+         entry.arguments[2] == "conservative"))
+        return entry.key == "performance-profile";
+
     if (entry.arguments.size() == 5 &&
         entry.arguments[0] == "mixer-route" &&
         entry.arguments[1] == "set" &&
@@ -382,7 +390,13 @@ int restoreEntries(const char* argv0, const std::vector<Entry>& entries) {
 
 std::vector<Entry> defaultState() {
     std::vector<Entry> entries;
-    entries.reserve(41);
+    entries.reserve(42);
+    Entry performance;
+    performance.key = "performance-profile";
+    performance.arguments = {
+        "performance-profile", "set", "aggressive",
+    };
+    entries.push_back(std::move(performance));
     for (const char* sourceValue : kMixerSources) {
         for (const char* busValue : kMixerBuses) {
             const std::string source(sourceValue);

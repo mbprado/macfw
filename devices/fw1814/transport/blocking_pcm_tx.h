@@ -1,6 +1,7 @@
 #pragma once
 
 #include "macfw/firewire_device.h"
+#include "../hal/include/macfw_fw1814_impulse_trace.h"
 #include "macfw/pcm_ring_buffer.h"
 
 #include <IOKit/firewire/IOFireWireLibIsoch.h>
@@ -19,6 +20,13 @@ namespace macfw::fw1814::transport {
 // formation: 6 PCM + 1 MIDI (DBS=7), CIP_BLOCKING, 8/8/8/NODATA cadence.
 class BlockingPcmTransmitRing48k {
 public:
+    void traceTo(macfw::fw1814::diagnostic::Endpoint* trace) { trace_ = trace; }
+    void traceCycle(std::uint32_t timer, std::uint64_t host, std::uint64_t uncertainty) {
+        cycleTimer_=timer; cycleHost_=host; cycleUncertainty_=uncertainty;
+    }
+    std::uint64_t traceClock() const {
+        return trace_ && trace_->armed() ? cycleHost_ : 0;
+    }
     struct RefillResult {
         std::size_t packetsVisited = 0;
         std::size_t dataPacketsRefilled = 0;
@@ -152,7 +160,10 @@ public:
 
     RefillResult refill(macfw::PcmRingBuffer& pcm,
                         std::size_t firstPacket,
-                        std::size_t packetCount) {
+                        std::size_t packetCount,
+                        std::uint64_t absolutePacket = UINT64_MAX,
+                        std::uint64_t observedPacket = 0,
+                        std::uint64_t observedTick = 0) {
         RefillResult result{};
         if (!storage_ || packetCount_ == 0 || !pcm.valid() ||
             pcm.channelCount() != kPcmChannels || firstPacket >= packetCount_ ||
@@ -165,6 +176,9 @@ public:
             ++result.packetsVisited;
             if (!storage_[i].dataBearing) continue;
 
+            const bool tracing = trace_ && trace_->armed();
+            const auto readFrame = tracing ? pcm.consumedFrames() : 0;
+            const auto queued = tracing ? pcm.availableFrames() : 0;
             const auto rr = pcm.read(frames, kEventsPerDataPacket);
             result.framesRequested += rr.framesRequested;
             result.framesFromBuffer += rr.framesFromBuffer;
@@ -180,6 +194,28 @@ public:
                     const std::size_t off = 8 +
                         (event * kDbs + ch) * sizeof(std::uint32_t);
                     putBe32(storage_[i].payload + off, word);
+                }
+            }
+            if (tracing) {
+                macfw::fw1814::diagnostic::Point point{};
+                point.tick = mach_absolute_time();
+                point.cycleTimer = cycleTimer_;
+                point.cycleHost = cycleHost_;
+                point.cycleUncertainty = cycleUncertainty_;
+                point.frame = readFrame;
+                point.pcmQueue = queued;
+                point.callbackFrames = kEventsPerDataPacket;
+                point.a = absolutePacket == UINT64_MAX ? UINT64_MAX : absolutePacket + (i-firstPacket);
+                point.b = observedPacket;
+                if (point.a != UINT64_MAX && point.a >= observedPacket && observedTick)
+                    point.c = observedTick + macfw::fw1814::diagnostic::nsTicks((point.a-observedPacket)*125000);
+                point.d = i;
+                for (std::size_t event=0; event<rr.framesFromBuffer; ++event) {
+                    point.offset=event;
+                    point.frame=readFrame+event;
+                    // Analog outputs 1/2 map to raw PCM positions 2/3.
+                    trace_->feed(static_cast<float>(frames[event*kPcmChannels+2]/8388607.0), point, 0);
+                    trace_->feed(static_cast<float>(frames[event*kPcmChannels+3]/8388607.0), point, 1);
                 }
             }
             ++result.dataPacketsRefilled;
@@ -249,6 +285,8 @@ private:
     }
 
     void moveFrom(BlockingPcmTransmitRing48k&& other) noexcept {
+        trace_ = other.trace_;
+        other.trace_ = nullptr;
         storage_ = other.storage_;
         packetCount_ = other.packetCount_;
         mappedBytes_ = other.mappedBytes_;
@@ -263,6 +301,9 @@ private:
         other.localPort_ = nullptr;
     }
 
+    macfw::fw1814::diagnostic::Endpoint* trace_ = nullptr;
+    std::uint32_t cycleTimer_ = 0;
+    std::uint64_t cycleHost_ = 0, cycleUncertainty_ = 0;
     StorageSlot* storage_ = nullptr;
     std::size_t packetCount_ = 0;
     std::size_t mappedBytes_ = 0;

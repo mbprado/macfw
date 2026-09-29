@@ -1,4 +1,5 @@
 #include "../hal/include/macfw_fw1814_hal_shm.h"
+#include "../hal/include/macfw_fw1814_high_rate.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -18,6 +19,8 @@
 
 namespace {
 
+constexpr std::chrono::milliseconds kSupervisorPollInterval(500);
+
 using Clock = std::chrono::steady_clock;
 
 volatile std::sig_atomic_t gStopRequested = 0;
@@ -26,6 +29,11 @@ void signalHandler(int) { gStopRequested = 1; }
 constexpr int kBootNoBootloader = 10;
 constexpr int kBootFailure = 11;
 constexpr int kBootGuardRefused = 12;
+constexpr int kQualificationRetry = 2;
+
+bool isQuadRate(std::uint32_t rate) {
+    return rate == 176400 || rate == 192000;
+}
 
 std::string executableDirectory(const char* argv0) {
     char resolved[PATH_MAX] = {};
@@ -52,7 +60,11 @@ bool requestedSampleRate(std::uint32_t& rate) {
     if (ready) {
         const std::uint32_t requested =
             ring->sampleRate.load(std::memory_order_acquire);
-        ready = requested == 44100 || requested == 48000;
+        ready = requested == 44100 || requested == 48000 ||
+                (requested == 88200 && macfw::fw1814::experimental::enabled88()) ||
+                (requested == 96000 && macfw::fw1814::experimental::enabled96()) ||
+                (requested == 176400 && macfw::fw1814::experimental::enabled176()) ||
+                (requested == 192000 && macfw::fw1814::experimental::enabled192());
         if (ready) rate = requested;
     }
     munmap(p, sizeof(*ring));
@@ -103,7 +115,7 @@ int runChild(const std::string& path,
             break;
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(kSupervisorPollInterval);
     }
 
     if (WIFEXITED(status)) return WEXITSTATUS(status);
@@ -164,6 +176,7 @@ int runEngine(const std::string& path,
         char fdText[32] = {};
         std::snprintf(fdText, sizeof(fdText), "%d", readyPipe[1]);
         setenv("MACFW_ENGINE_READY_FD", fdText, 1);
+        (void)startedRate;
         execl(path.c_str(), path.c_str(), static_cast<char*>(nullptr));
         _exit(127);
     }
@@ -231,7 +244,7 @@ int runEngine(const std::string& path,
             break;
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(kSupervisorPollInterval);
     }
 
     if (readyPipe[0] >= 0) close(readyPipe[0]);
@@ -271,12 +284,48 @@ int runBusReset(const std::string& path) {
             break;
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(kSupervisorPollInterval);
     }
 
     if (WIFEXITED(status)) return WEXITSTATUS(status);
     if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
     return 1;
+}
+
+
+int runFirmwareReboot(const std::string& resetPath,
+                      const std::string& bootPath) {
+    const int resetStatus =
+        runChild(resetPath, "--execute", "--experimental-firmware-reset");
+    if (resetStatus != 0) return resetStatus;
+    if (gStopRequested) return 130;
+
+    std::printf("FW1814 firmware reset accepted; waiting for bootloader personality\n");
+    const auto deadline = Clock::now() + std::chrono::seconds(10);
+    sleepInterruptibly(std::chrono::milliseconds(500));
+
+    while (!gStopRequested && Clock::now() < deadline) {
+        const int bootStatus = runChild(bootPath, "--execute");
+        if (bootStatus == 0) {
+            std::printf("FW1814 guarded boot-from-flash cue issued; "
+                        "operational personality will be polled by the supervisor\n");
+            return gStopRequested ? 130 : 0;
+        }
+
+        if (bootStatus != kBootNoBootloader) {
+            std::fprintf(stderr,
+                         "FW1814 guarded boot-from-flash failed with status %d\n",
+                         bootStatus);
+            return bootStatus;
+        }
+
+        sleepInterruptibly(kSupervisorPollInterval);
+    }
+
+    if (gStopRequested) return 130;
+    std::fprintf(stderr,
+                 "FW1814 bootloader personality did not appear within 10 seconds\n");
+    return 124;
 }
 
 } // namespace
@@ -290,15 +339,22 @@ int main(int argc, char** argv) {
     const std::string here = executableDirectory(argc > 0 ? argv[0] : nullptr);
     const std::string initPath = here + "/fw1814init";
     const std::string bootPath = here + "/fwboot1814";
+    const std::string firmwareResetPath = here + "/fw1814firmwarereset";
     const std::string busResetPath = here + "/firewirebusreset";
     const std::string engine48Path = here + "/fw1814analog48";
     const std::string engine44Path = here + "/fw1814analog44";
+    const std::string engine96Path = here + "/fw1814analog96";
+    const std::string engine88Path = here + "/fw1814analog88";
+    const std::string engine176Path = here + "/fw1814analog176";
+    const std::string engine192Path = here + "/fw1814analog192";
     const std::string stateHelperPath = here + "/fw1814state";
     const std::string controlHelperPath = here + "/fw1814ctl";
 
-    std::printf("macfw fw1814supervisor — resilient 44.1/48 kHz transport supervisor\n");
-    std::printf("automatic reconnect and guarded bootloader recovery: enabled\n");
-    std::printf("validated pre-transport FW1814 bus reset: enabled\n");
+    std::printf("macfw fw1814supervisor — resilient 44.1/48/88.2/96/176.4/192 kHz transport supervisor\n");
+    const bool forceRecovery = std::getenv("MACFW_FW1814_FORCE_RECOVERY") != nullptr;
+    std::printf("automatic reconnect: enabled\n");
+    std::printf("routine pre-transport recovery: %s (set MACFW_FW1814_FORCE_RECOVERY=1 to enable)\n",
+                forceRecovery ? "enabled" : "disabled");
     std::printf("persistent validated routing-state restore: enabled\n");
 
     std::chrono::milliseconds retryDelay(250);
@@ -306,16 +362,15 @@ int main(int argc, char** argv) {
     constexpr std::chrono::milliseconds kReenumerationDelay(1000);
     constexpr std::chrono::milliseconds kPostEngineExitDelay(800);
     constexpr std::chrono::milliseconds kCleanBusResetSettleDelay(3000);
+    constexpr std::chrono::milliseconds kQuadRatePostInitQuiescence(2000);
 
-    // A physical disconnect/re-enumeration can leave the FW1814 playback side
-    // in a bad device-local stream state even though init-48 and all host-side
-    // transport diagnostics pass. Hardware testing showed that one guarded,
-    // product-scoped bus reset while the operational personality is confirmed,
-    // followed by a settle delay and a fresh init-48, reliably clears it.
-    //
-    // This flag is consumed before the reset is issued so the generation change
-    // caused by our own reset cannot recursively request another reset.
-    bool cleanBusResetRequired = true;
+    // Do not reboot or bus-reset the device as part of ordinary startup. Linux
+    // snd-bebob changes rates without a routine recovery; keeping this path
+    // opt-in lets malformed first-attempt streams remain observable. A genuine
+    // engine failure still arms recovery below.
+    bool deviceRecoveryRequired = forceRecovery;
+    bool operationalEnumerationPending = false;
+    Clock::time_point operationalEnumerationDeadline = Clock::time_point::min();
 
     while (!gStopRequested) {
         std::uint32_t requestedRate = 0;
@@ -335,6 +390,23 @@ int main(int argc, char** argv) {
         if (gStopRequested) break;
 
         if (initStatus != 0) {
+            if (operationalEnumerationPending) {
+                if (Clock::now() < operationalEnumerationDeadline) {
+                    std::printf("FW1814 operational personality not ready after "
+                                "boot-from-flash; polling again in 500 ms\n");
+                    sleepInterruptibly(kSupervisorPollInterval);
+                    continue;
+                }
+
+                operationalEnumerationPending = false;
+                deviceRecoveryRequired = true;
+                std::fprintf(stderr,
+                             "FW1814 operational personality did not return "
+                             "within 10 seconds; guarded recovery will retry\n");
+                sleepInterruptibly(retryDelay);
+                continue;
+            }
+
             std::fprintf(stderr,
                          "FW1814 init-%s unavailable/failed with status %d; "
                          "checking guarded bootloader personality\n",
@@ -378,6 +450,16 @@ int main(int argc, char** argv) {
         }
 
         retryDelay = std::chrono::milliseconds(250);
+        if (operationalEnumerationPending) {
+            const auto enumerationMs = std::chrono::duration_cast<
+                std::chrono::milliseconds>(
+                Clock::now() -
+                (operationalEnumerationDeadline - std::chrono::seconds(10)))
+                                           .count();
+            std::printf("FW1814 operational personality ready after %lld ms\n",
+                        static_cast<long long>(enumerationMs));
+            operationalEnumerationPending = false;
+        }
 
         std::uint32_t latestRate = 0;
         if (!requestedSampleRate(latestRate) || latestRate != requestedRate) {
@@ -385,18 +467,44 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        if (cleanBusResetRequired) {
-            std::printf("FW1814 operational init PASS; performing validated clean bus reset before transport\n");
+        if (deviceRecoveryRequired) {
+            // Consume the request before issuing a reset. Either recovery
+            // changes device/bus state and must not schedule itself recursively.
+            deviceRecoveryRequired = false;
 
-            // Consume the request before issuing BusReset(). Our own reset will
-            // change the FireWire generation; that generation change must not
-            // schedule another reset recursively.
-            cleanBusResetRequired = false;
+            if (isQuadRate(requestedRate)) {
+                std::printf("FW1814 operational init PASS; performing guarded firmware reboot before %u Hz transport\n",
+                            requestedRate);
+                const int recoveryStatus =
+                    runFirmwareReboot(firmwareResetPath, bootPath);
+                if (gStopRequested) break;
+
+                if (recoveryStatus != 0) {
+                    deviceRecoveryRequired = true;
+                    std::fprintf(stderr,
+                                 "FW1814 guarded firmware reboot failed with status %d; "
+                                 "not starting transport; retrying in %lld ms\n",
+                                 recoveryStatus,
+                                 static_cast<long long>(retryDelay.count()));
+                    sleepInterruptibly(retryDelay);
+                    retryDelay = std::min(retryDelay * 2, kMaxRetryDelay);
+                    continue;
+                }
+
+                operationalEnumerationPending = true;
+                operationalEnumerationDeadline =
+                    Clock::now() + std::chrono::seconds(10);
+                std::printf("FW1814 guarded firmware reboot PASS; polling for "
+                            "fresh operational init-48000\n");
+                continue;
+            }
+
+            std::printf("FW1814 operational init PASS; performing validated clean bus reset before transport\n");
             const int resetStatus = runBusReset(busResetPath);
             if (gStopRequested) break;
 
             if (resetStatus != 0) {
-                cleanBusResetRequired = true;
+                deviceRecoveryRequired = true;
                 std::fprintf(stderr,
                              "FW1814 guarded bus reset failed with status %d; "
                              "not starting transport; retrying in %lld ms\n",
@@ -413,12 +521,40 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        const std::string& enginePath =
+        const std::string& enginePath = requestedRate == 192000 ? engine192Path :
+            requestedRate == 176400 ? engine176Path :
+            requestedRate == 88200 ? engine88Path :
+            requestedRate == 96000 ? engine96Path :
             requestedRate == 44100 ? engine44Path : engine48Path;
-        std::printf("FW1814 post-reset init-%s PASS; starting %s\n",
-                    rateArg, requestedRate == 44100
-                        ? "44.1 kHz analog transport engine"
-                        : "48 kHz analog transport engine");
+        if (access(enginePath.c_str(), X_OK) != 0) {
+            std::fprintf(stderr, "FW1814 requested engine unavailable: %s\n", enginePath.c_str());
+            sleepInterruptibly(retryDelay);
+            continue;
+        }
+        if (isQuadRate(requestedRate)) {
+            std::printf("FW1814 post-init 48000 PASS; quiescing device for 2000 ms before %u Hz transport\n",
+                        requestedRate);
+            sleepInterruptibly(kQuadRatePostInitQuiescence);
+            if (gStopRequested) break;
+
+            std::uint32_t settledRate = 0;
+            if (!requestedSampleRate(settledRate) || settledRate != requestedRate) {
+                std::printf("FW1814 rate request changed during quad-rate quiescence; restarting selection\n");
+                continue;
+            }
+        }
+        std::printf("FW1814 post-init %s PASS; starting %s\n",
+                    rateArg, requestedRate == 192000
+                        ? "192 kHz analog transport engine"
+                        : requestedRate == 176400
+                        ? "176.4 kHz analog transport engine"
+                        : requestedRate == 88200
+                        ? "88.2 kHz analog transport engine"
+                        : requestedRate == 96000
+                        ? "96 kHz analog transport engine"
+                        : requestedRate == 44100
+                            ? "44.1 kHz analog transport engine"
+                            : "48 kHz analog transport engine");
         bool rateChangeRequested = false;
         const int engineStatus =
             runEngine(enginePath, stateHelperPath, controlHelperPath,
@@ -426,16 +562,28 @@ int main(int argc, char** argv) {
                       rateChangeRequested);
         if (gStopRequested) break;
 
-        // Any engine exit outside supervisor shutdown means the next transport
-        // start must pass through the validated clean bus-reset sequence again.
-        cleanBusResetRequired = true;
         if (rateChangeRequested) {
             std::printf("FW1814 controlled rate handoff requested; "
-                        "clean bus reset required before next transport start\n");
+                        "restarting without firmware recovery\n");
+            // Normal rate changes follow the Linux snd-bebob model: stop the
+            // stream, restore the known 48 kHz baseline, apply the new rate,
+            // then start the selected engine. Reserve firmware recovery for
+            // an engine failure or failed qualification.
+            deviceRecoveryRequired = false;
+        } else if (engineStatus == kQualificationRetry) {
+            // Qualification and startup-schedule rejection are host-side
+            // transport failures. A FireWire bus reset cannot repair them and
+            // would only turn a deterministic rejection into a reset loop.
+            std::printf("FW1814 %u Hz transport qualification/startup failed; "
+                        "retrying without firmware recovery\n", requestedRate);
+            deviceRecoveryRequired = false;
         } else {
+            // Any unexpected engine exit means the next transport start must
+            // pass through the rate-appropriate recovery again.
+            deviceRecoveryRequired = true;
             std::fprintf(stderr,
                          "FW1814 analog transport engine exited with status %d; "
-                         "clean bus reset required before next transport start\n",
+                         "device recovery required before next transport start\n",
                          engineStatus);
         }
         sleepInterruptibly(kPostEngineExitDelay);

@@ -1,0 +1,15 @@
+device 58: Built-in Microphone
+device 48: Built-in Output
+device 43: HDMI
+device 65: M-Audio FireWire 1814
+device_latency_input=1984 frames
+device_latency_output=1984 frames
+stream_latency_input=0 frames
+stream_latency_output=0 frames
+running at 48000 Hz
+round_trip_seconds=0.01075 round_trip_frames=515.998
+callback_wall_seconds=0.0160301 callback_wall_frames=769.446
+marker-tool-out=263908858478135 marker-tool-in=263908874508259
+transport_playback_frames=0 (0 ms)
+transport_capture_frames=1824 (38 ms)
+transport_queue_sum_frames=1824 (38 ms)

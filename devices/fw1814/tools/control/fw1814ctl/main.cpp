@@ -121,6 +121,9 @@ int usage() {
         << "  fw1814ctl aux-output-volume set "
            "<dB|-inf> [<right-dB|-inf>]\n"
         << "  fw1814ctl capabilities get\n"
+        << "  fw1814ctl performance-profile get\n"
+        << "  fw1814ctl performance-profile set "
+           "aggressive|balanced|conservative\n"
         << "  fw1814ctl engine get\n\n"
         << "FW1814 mixer registers are write-only. The active transport "
            "establishes a known startup baseline and maintains the "
@@ -399,6 +402,8 @@ int routingGet() {
               << "  MIX_ANA_DIG_IN: " << inputMixerText << '\n'
               << "  hardware readback: unavailable (" << stateSource
               << ")\n";
+    if (rate == 176400 || rate == 192000)
+        std::cout << "  AUX bus: unavailable at quad rate; Mixer routing is active\n";
     return 0;
 }
 
@@ -1445,6 +1450,52 @@ int engineGet() {
     return 0;
 }
 
+int performanceProfileCommand(const std::string& action,
+                              int argc,
+                              char** argv) {
+    if ((action == "get" && argc != 3) ||
+        (action == "set" && argc != 4) ||
+        (action != "get" && action != "set"))
+        return usage();
+
+    std::string command = "PERFORMANCE_PROFILE ";
+    if (action == "get") {
+        command += "GET";
+    } else {
+        const std::string profile = argv[3];
+        if (profile != "aggressive" && profile != "balanced" &&
+            profile != "conservative")
+            return usage();
+        command += "SET " + profile;
+    }
+
+    std::string payload;
+    if (!payloadFor(command, payload)) return 1;
+    std::istringstream input(payload);
+    std::string profile;
+    unsigned periodUs = 0;
+    unsigned environmentOverride = 0;
+    std::string extra;
+    if (!(input >> profile >> periodUs >> environmentOverride) ||
+        (input >> extra) || environmentOverride > 1) {
+        std::cerr << "fw1814ctl: invalid performance-profile response: "
+                  << payload << '\n';
+        return 1;
+    }
+
+    if (profile == "unavailable") {
+        std::cout << "FW1814 performance profile unavailable for this engine.\n";
+    } else {
+        std::cout << "FW1814 performance profile: " << profile << '\n'
+                  << "  audio service period: " << periodUs << " us\n"
+                  << "  environment override: "
+                  << (environmentOverride ? "active" : "inactive") << '\n';
+    }
+    if (action == "set")
+        persistSuccessfulSet(argv[0], "performance-profile", argc, argv);
+    return 0;
+}
+
 int internalReady() {
     std::string payload;
     if (!payloadFor("CONTROL READY", payload)) return 1;
@@ -1509,6 +1560,8 @@ int main(int argc, char** argv) {
         return auxOutputVolumeCommand(action, argc, argv);
     if (control == "capabilities")
         return action == "get" && argc == 3 ? capabilitiesGet() : usage();
+    if (control == "performance-profile")
+        return performanceProfileCommand(action, argc, argv);
     if (control == "engine")
         return action == "get" && argc == 3 ? engineGet() : usage();
     return usage();

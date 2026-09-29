@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../channel_map.h"
+#include "../hal/include/macfw_fw1814_impulse_trace.h"
 #include "../hal/include/macfw_fw1814_capture_shm.h"
 #include "macfw/am824.h"
 #include "macfw/amdtp_receive_ring.h"
@@ -15,6 +16,8 @@ namespace macfw::fw1814::transport {
 
 class CapturePump48k {
 public:
+    void traceTo(macfw::fw1814::diagnostic::Endpoint* trace) { trace_ = trace; }
+    void traceCycle(std::uint32_t timer, std::uint64_t host, std::uint64_t uncertainty) { cycleTimer_=timer; cycleHost_=host; cycleUncertainty_=uncertainty; }
     struct Stats {
         std::uint64_t dbcDiscontinuities = 0;
         std::uint64_t timestampRegressions = 0;
@@ -228,6 +231,22 @@ private:
             p += kCaptureStreamPositions * 4;
         }
 
+        if (trace_ && trace_->armed()) {
+            macfw::fw1814::diagnostic::Point point{};
+            point.tick = mach_absolute_time();
+            point.frame = out.writeFrame.load();
+            point.queue = macfw::fw1814::hal::capture::availableFrames(out);
+            point.callbackFrames = candidate.events;
+            point.cycleTimer = cycleTimer_;
+            point.cycleHost = cycleHost_;
+            point.cycleUncertainty = cycleUncertainty_;
+            point.a = candidate.timestamp;
+            point.b = h.syt;
+            point.c = h.dbc;
+            point.d = out.decodedPackets.load();
+            trace_->block(decoded.data(), candidate.events,
+                          macfw::fw1814::hal::capture::kInputChannels, point);
+        }
         for (std::size_t ch = 0; ch < meterPeaks_.size(); ++ch)
             meterPeaks_[ch] = std::max(peaks[ch], meterPeaks_[ch] * kMeterDecay);
 
@@ -241,6 +260,9 @@ private:
 
     std::array<std::uint64_t, 8> lastChunkSignature_{};
     Stats stats_{};
+    std::uint32_t cycleTimer_ = 0;
+    std::uint64_t cycleHost_ = 0, cycleUncertainty_ = 0;
+    macfw::fw1814::diagnostic::Endpoint* trace_ = nullptr;
     std::array<float, macfw::fw1814::hal::capture::kInputChannels> meterPeaks_{};
     bool haveExpectedDbc_ = false;
     std::uint8_t expectedDbc_ = 0;

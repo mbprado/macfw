@@ -20,15 +20,25 @@ public:
     DuplexLifecycle(const DuplexLifecycle&) = delete;
     DuplexLifecycle& operator=(const DuplexLifecycle&) = delete;
 
+    // Attach the FireWire client before ISO resources exist when a device
+    // requires AV/C rate configuration ahead of CMP/ISO setup. Existing
+    // engines can continue to let prepare() attach implicitly.
+    bool attachDevice(macfw::FireWireDevice& device) {
+        if (device_)
+            return device_ == &device && native_ == device.nativeHandle() &&
+                   generationStillValid();
+        device_ = &device;
+        native_ = device.nativeHandle();
+        initialGeneration_ = device.generation();
+        return native_ != nullptr && initialGeneration_ != 0;
+    }
+
     bool prepare(macfw::FireWireDevice& device,
                  macfw::AmdtpReceiveRing& rx,
                  IOFireWireLibLocalIsochPortRef playbackPort,
                  UInt32 captureMaxPacket,
                  UInt32 playbackMaxPacket) {
-        device_ = &device;
-        native_ = device.nativeHandle();
-        initialGeneration_ = device.generation();
-        if (!native_) return false;
+        if (!attachDevice(device)) return false;
 
         if (macfw::cmp::readOpcr0(device, opcr0_) != kIOReturnSuccess ||
             macfw::cmp::readIpcr0(device, ipcr0_) != kIOReturnSuccess)

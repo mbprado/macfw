@@ -4,6 +4,186 @@ This file records visible project milestones rather than every diagnostic
 experiment. Detailed protocol, transport and routing findings remain under
 `devices/fw1814/analysis/`.
 
+## 2026-09-26 — Dual-speed rolling TX and live profiles
+
+The FW1814 88.2 and 96 kHz engines now use guarded rolling TX by default
+while retaining their proven 1280/640-packet NuDCL allocations, 4096-cycle
+startup lead and native dual-speed packet formation. The live window is
+96 cycles with a 48-cycle guard; the engine stops on a missed deadline.
+Fixed refill remains available through per-rate environment overrides.
+
+Electrical loopback fell from roughly 167-175 ms to 21.4-21.5 ms at
+88.2 kHz and from roughly 78-89 ms to 10.5-12 ms at 96 kHz in initial
+tests. Playback, recording, repeated switches across 44.1/48/88.2/96 kHz
+and interface restarts were reported working. The three persistent service
+profiles now apply live at all four rates; six 96 kHz profile probes
+measured about 13.3-15.7 ms without a clear profile latency ordering.
+Occasional small artifacts under heavy host load remain under observation.
+Quad-speed 176.4/192 kHz modes were not included in this validation.
+A subsequent clean checkout and full uninstall/rebuild/reinstall showed
+no regressions across the four validated rates; recording artifacts were
+reported as drastically reduced and nearly absent in that run.
+
+## 2026-09-25 — Persistent transport performance profiles
+
+The validated 44.1/48 kHz rolling engines now expose three persistent,
+live-switchable service cadences: Aggressive at 250 µs, Balanced at 375 µs,
+and Conservative at 500 µs. Hardware testing found clean playback/capture at
+all three values. The 375 µs profile measured a median 48 kHz electrical
+round trip of approximately 14.0 ms (20.0 ms callback wall time); two valid
+44.1 kHz runs measured approximately 21.5–23.4 ms.
+
+`fw1814ctl performance-profile get|set` uses the existing transport-owned
+socket and `fw1814state` persistence path. The Device tab presents the same
+three choices without editing launchd configuration or requiring an
+administrator prompt. `MACFW_AUDIO_SERVICE_PERIOD_US` remains an advanced
+authoritative override. The loopback diagnostic now waits for matching active
+transport shared memory and advancing capture before injecting its impulse
+after a rate change, reducing the observed first-run readiness race.
+
+The completed single-speed investigation is now consolidated in
+[`analysis/single-speed-low-latency-handover.md`](analysis/single-speed-low-latency-handover.md).
+It records the separation between stable NuDCL allocation and the live rolling
+horizon, the independent startup leads, capture/playback admission, real-time
+service measurements, failed approaches and the staged plan for applying the
+same design principles to 88.2/96 kHz dual-speed modes.
+
+Follow-up transition testing also showed that a loopback probe started
+immediately after a GUI sample-rate selection can observe a temporary unsettled
+state. A subsequent clean 44.1 -> 48 kHz cycle returned repeated 12-14 ms
+timestamp round trips with advancing rolling counters, zero rolling misses and
+zero DBC gaps. Matching installed/source hashes and fresh counter resets ruled
+out an old transport binary. The single-rate engines therefore remain the
+stable baseline; GUI transition-state feedback is deferred polish.
+
+## 2026-09-24 — Experimental rolling 48 kHz transmit window
+
+An opt-in rolling transmitter decouples the stable 640-packet NuDCL allocation
+from the amount of live audio scheduled ahead of the FireWire cursor. The
+validated startup sequence, 640/320 allocation geometry and capture prefill
+remain unchanged. `MACFW_48_ROLLING_TX=1` enables the experiment, and
+`MACFW_48_ROLLING_TX_CYCLES` can override its 96-cycle (12 ms) default lead.
+The engine stops before unsafe slot reuse if it misses the associated
+48-cycle deadline guard.
+
+Hardware testing exposed an effective DMA-prefetch boundary between 64 and
+96 cycles. A 64-cycle lead remained stable but still measured 88.1–90.3 ms
+electrical round trip because updated packets apparently missed the active
+DMA pass and waited for the next ring rotation. At 96 cycles, repeated 48 kHz
+loopback measurements fell to 14.81–17.98 ms (711–863 frames). Program audio,
+capture and software monitoring remained clean and usable in real time, with
+no rolling deadline misses, DBC discontinuities, malformed packets, invalid
+labels or reordering in the representative run. Rare capture artifacts were
+heard only while deliberately stressing host CPU or I/O; the 512-frame
+capture prefill is therefore retained for headroom.
+
+## 2026-09-22 — Experimental 192 kHz CoreAudio trial
+
+The hardware-validated 192 kHz blocking transport is now available through a
+separate `fw1814-install-experimental192` opt-in. The HAL advertises four analog
+outputs and two analog inputs only when its root-owned marker exists. The
+supervisor applies the same guarded firmware reboot and validated two-second
+post-init settling period used at 176.4 kHz, then starts a dedicated 192 kHz
+engine. Unlike the 176.4 kHz path, the engine pre-arms OUTPUT and INPUT at
+192 kHz before CMP/ISO setup, waits for authoritative INPUT readback, and still
+repeats the M-Audio rate kick after both streams start.
+
+Hardware testing confirmed clean 192 kHz CoreAudio output with acceptable
+latency and normal two-channel input monitoring. During active playback the
+transport reported nonzero 24-bit PCM with no dangerous TX gaps or FireWire
+DBC discontinuities. Capture advanced by exactly 384000 frames per two-second
+status interval with no malformed packets, timestamp regressions, reordering
+or metadata swaps. Invalid MBLA labels were confined to startup and stopped
+increasing before the listener test. A controlled 192 -> 48 -> 192 transition
+also returned both engines online; the returning 192 kHz start had no invalid
+labels, DBC gaps, malformed packets or metadata swaps. The 192 kHz engine
+remains experimental; extended recording, program-audio and broader repeated
+cross-rate testing are still needed.
+
+## 2026-09-23 — 48 kHz latency reduction and loopback diagnostic
+
+The released 48 kHz engine's live transmit ring was reduced from 640 packets
+(about 80 ms) to 128 packets (about 16 ms), retaining the same four-phase
+blocking packet geometry and 64-packet refill halves. Physical CoreAudio
+loopback improved from 82.65 ms to approximately 17–22 ms round trip, making
+the mode usable for software monitoring and approaching the 9.46 ms result
+measured from the connected H5 interface.
+
+The HAL now reports provisional 48 kHz device latency of 400 frames on each
+input and output scope; stream latency remains zero. Logic consequently reports
+about 22 ms, close to the measured live path. The HAL also flushes any active
+capture backlog larger than 4096 frames at every supported rate, preventing a
+stopped client from replaying hundreds of milliseconds of stale monitoring
+audio. The validated two-second post-init settling period is unchanged.
+
+`fw1814audioloopback` was added as a selectable-device CoreAudio diagnostic.
+It reports the actual AUHAL rate, device and stream latency properties,
+host-timestamped electrical round-trip latency, and FW1814 shared-ring queue
+estimates. The H5 reference measured 9.46 ms at 48 kHz; stale capture queues
+are identified explicitly in the FW1814 report.
+
+The same live TX reserve reduction was applied to the experimental 96 kHz
+engine. Its 640-packet ring was reduced to 128 packets while retaining the
+separate startup reserve and warmup sequence. Loopback improved to 11.8–15.6
+ms round trip, and the HAL now reports 750 device frames per direction at
+96 kHz. A 640/320 reduction was tested at 176.4 kHz but did not return a clean
+physical impulse, so the validated 1280/640 176.4-kHz geometry was restored.
+
+CoreAudio device-latency reporting was extended to 44.1, 88.2, 176.4 and
+192 kHz. Provisional values split stabilized electrical loopback measurements
+equally between input and output scopes: 1345, 7286, 14920 and 17018 frames
+per direction, respectively. The corresponding 44.1/88.2/176.4/192 kHz
+round-trip measurements used for reporting were 61.0/165.2/169.2/177.3 ms.
+The 44.1-kHz loopback varied from 56.4 to 66.4 ms across recent runs. The
+192-kHz value uses an earlier successful loopback; its verification probe did
+not return an impulse. The 48 and 96 kHz reports were later updated when their
+validated 640-packet TX reserves were restored.
+
+## 2026-09-18 — Experimental 88.2/96 kHz CoreAudio trials
+
+Guarded rate-control and duplex-stream diagnostics established the FW1814's
+high-rate packet formats. Separate opt-in CoreAudio engines were developed for
+88.2 and 96 kHz; the normal installation still exposes 44.1 and 48 kHz.
+At 88.2 kHz, a 1280-packet playback ring made the standalone 440-Hz tone
+clear. Receive-slot completion, FireWire cycle rollover handling and guarded
+salvage of a group with one stale slot stabilized CoreAudio capture.
+
+The test Mac recorded and played an approximately five-minute song at 88.2
+kHz without audible abnormalities. The log showed continuous capture, no
+capture drops or overwritten groups, and 37 salvaged groups, two HAL input
+underruns and 528 playback silence frames. Rate switching among 44.1, 48,
+88.2 and 96 kHz also worked, although a rare first 44.1-kHz start sounded
+broken and recovered on a subsequent switch. High-rate engines remain
+experimental pending further testing; detailed evidence is in
+[`analysis/high-rate-development.md`](analysis/high-rate-development.md).
+
+Guarded CONTROL-only tests subsequently confirmed both 176.4 and 192 kHz:
+each accepted OUTPUT then INPUT, returned the requested INPUT STATUS, and
+restored the original 48-kHz rate. The offline 32-event packet schedule
+passed on the test Mac. The first silent 176.4-kHz duplex test then received
+44 matching data packets and 20 NODATA packets in 64 slots, with no TX
+underruns, unchanged bus generation and successful PCR/rate restoration.
+After the TX lead was anchored following PCM preload, the position-2 440-Hz
+tone became clear at 176.4 kHz. All four playback positions kept their
+lower-rate analog-output mapping (2->1, 3->2, 0->3, 1->4). A standalone
+continuous two-position capture decoder then passed on the test Mac: six
+steady half-second windows near 176400 Hz, no DBC gaps, malformed packets
+or dropped frames, and successful PCR/rate restoration. The first raw input
+position carried the stronger test signal. An initially ambiguous Input 2
+result was traced to a generator fault. After correction, Input 2 appeared
+only on raw position 1 at -29.66 dBFS while position 0 remained at the noise
+floor; Input 1 had already appeared on position 0. The two quad-rate capture
+positions are therefore mapped as Input 1 -> 0 and Input 2 -> 1. The guarded
+standalone transport provided the basis for opt-in CoreAudio integration.
+
+Hardware routing tests also identified a quad-rate AUX boundary. The AUX bus
+remained audible at 88.2/96 kHz but was silent through both headphone and
+analog-output AUX selections at 176.4 kHz while mixer routing remained
+functional. macfw now reports AUX routing as unavailable at quad rates,
+rejects interactive AUX source selection and applies a Mixer 1/2 runtime
+fallback without overwriting the saved lower-rate AUX preference. The control
+panel disables the unavailable AUX choices and controls at 176.4/192 kHz.
+
 ## 2026-09-16 — Physical headphone encoders in the `0.04.003` release
 
 The first unified `0.04.000` release included the FW1814 analog CoreAudio
@@ -277,6 +457,46 @@ state containing `MIX_STM_IN=0x0000000e` and `SRC_ANA_OUT=0x00000002` survived:
 - a launchd transport restart;
 - 44.1 -> 48 kHz and 48 -> 44.1 kHz transitions;
 - physical disconnect/reconnect at both supported rates.
+
+## 2026-09-23 — Restore validated 48 kHz playback reserve
+
+The 48 kHz transmit ring is restored from 128 packets (16 ms) to the previous
+hardware-validated 640-packet geometry (about 80 ms), with 320-packet refill
+halves. Playback crackling persisted after reinstall and reboot, while the
+transport counters showed no host playback underruns. The earlier physical
+loopback measurement for the 640-packet configuration was 82.65 ms round trip,
+so the HAL reports 1984 device-latency frames on each 48 kHz input/output
+scope. The 48 kHz mode should be retested after installing this rollback.
+
+## 2026-09-23 — Restore validated 96 kHz playback reserve
+
+The experimental 96 kHz transmit ring is restored from 128 packets to its
+previous 640-packet geometry, with 320-packet refill halves (80 ms / 40 ms).
+The 128-packet configuration repeatedly started with broken playback. The
+existing external recording reference measured about 119 ms round trip with
+the longer reserve, so the HAL reports 5712 device-latency frames per 96 kHz
+input/output scope. The 96 kHz mode needs listener validation after install.
+
+## 2026-09-23 — Capture recovery and latency probe follow-up
+
+After recording was reported to go silent after several seconds at 48 kHz,
+the transport was found to enable capture only once. When the HAL discarded a
+stale capture backlog and cleared the ring's active flag, the 48 kHz engine did
+not re-enable it. The 44.1 kHz path now also tracks that state; 48 kHz now
+prefills and reactivates capture after a HAL flush. Logic capture and the
+electrical loopback test both worked after the 48 kHz fix. The 48 kHz loopback
+measured 87.98 ms; Logic's reported latency was within about 2 ms.
+
+`fw1814audioloopback --rate RATE` now reads the current nominal rate and skips
+the rate write and two-second wait when the device is already at `RATE`.
+Otherwise it requests the rate and retains the existing settling wait.
+
+At 96 kHz, two consecutive loopback runs measured 80.30 ms round trip while
+CoreAudio reported 5712 frames on each device scope (about 119 ms combined),
+and Logic displayed about 121 ms. The report remains at 5712 frames per scope
+pending better directional latency measurements; the loopback only measures
+the combined path. No 96 kHz latency adjustment was made. The two-second
+post-init settling period remains unchanged.
 
 `fw1814state reset` applies and records the proven straight-through macfw
 baseline without claiming undocumented M-Audio factory-default semantics.

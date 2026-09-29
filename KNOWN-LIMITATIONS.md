@@ -18,8 +18,8 @@ This file records limitations and open items for the current FW410 and FW1814 al
 
 ## Audio formats
 
-- Native **44.1 kHz** and **48 kHz** are supported.
-- Higher sample rates are not currently exposed/supported.
+- **FW410:** native 44.1 and 48 kHz.
+- **FW1814:** hardware-tested analog 44.1, 48, 88.2 and 96 kHz; experimental analog 176.4 and 192 kHz.
 - **FW410:** playback exposes Analog Out 1-8 plus S/PDIF L/R; capture exposes Analog In 1-2 plus S/PDIF L/R.
 - **FW1814:** playback exposes Analog Out 1-4; capture exposes Analog In 1-8. S/PDIF and ADAT are not yet exposed through its CoreAudio device.
 
@@ -29,7 +29,7 @@ This file records limitations and open items for the current FW410 and FW1814 al
 
 This prefill is only one internal buffering layer and must not be confused with complete CoreAudio or end-to-end latency.
 
-The HAL does not yet publish calibrated `kAudioDevicePropertyLatency`, `kAudioDevicePropertySafetyOffset`, or stream-latency values. Those internal properties currently remain zero placeholders, and the control panel deliberately displays **Not reported by HAL** instead of presenting them as real measurements.
+The FW410 HAL does not yet publish calibrated device latency, safety offset or stream latency; its control panel displays **Not reported by HAL**. The FW1814 HAL publishes provisional per-rate device latency estimates from physical loopbacks. They are not a live electrical measurement, and the values seen in Logic may differ from the actual round trip.
 
 ## 44.1 kHz lifecycle and rate-switch timing
 
@@ -87,7 +87,7 @@ The GUI currently invokes `fw410ctl` subprocesses as its proven backend boundary
 The **FW1814** exposes its validated analog mixer/routing, input monitoring,
 software-return levels, analog outputs, AUX and two headphone outputs. Its
 physical headphone encoders adjust saved gain and the open control panel
-follows those changes. Higher rates, digital I/O and MIDI remain deferred.
+follows those changes. Analog 88.2/96 kHz are hardware-tested; 176.4/192 kHz remain experimental. Digital I/O and MIDI remain deferred.
 
 ## S/PDIF control coverage
 

@@ -21,7 +21,7 @@ Apple Silicon is not currently supported.
 2. Obtain the unified `.pkg` and install it normally, or from Terminal:
 
    ```bash
-   sudo installer -pkg macfw-0.04.003-<build>.pkg -target /
+   sudo installer -pkg macfw-0.05.000-<build>.pkg -target /
    ```
 
 3. The installer validates the connected interface(s) and installs only the
@@ -111,6 +111,7 @@ make fw1814-runtime     # FW1814 installed service/control binaries
 make fw1814-gui         # FW1814 native control-panel application
 make fw1814-tools       # all FW1814 development and diagnostic tools
 make fw1814-package     # clean FW1814 build + device-specific .pkg
+make fw1814-capture-live-queue-test # capture queue regression check (no hardware)
 sudo make fw1814-install
 sudo make fw1814-uninstall
 make fw1814-clean
@@ -155,7 +156,7 @@ Then install the already-built FW1814 HAL, supervised runtime and control panel 
 sudo make fw1814-install
 ```
 
-The current FW1814 scope exposes Analog Outputs 1-4 and Analog Inputs 1-8 at 44.1 and 48 kHz. Rate switching, reconnect restoration, persistent analog routing/mixer controls and the native AppKit control panel are hardware-validated. S/PDIF, ADAT, higher rates and MIDI remain under development.
+The FW1814 analog profile exposes Analog Outputs 1-4 and Analog Inputs 1-8 at 44.1, 48, 88.2 and 96 kHz. These modes have hardware-tested playback, recording, rate switching and restart recovery. The 88.2/96 kHz engines use guarded rolling TX and support the persistent live Aggressive, Balanced and Conservative service profiles. At 48 kHz the HAL bounds active capture to 2,048 frames and discards stale capture on client start to prevent long queue replay. The FW1814-only and combined `.pkg` builders stage all six analog engines, including the experimental quad modes. Occasional small artifacts remain possible under heavy host load. The 176.4/192 kHz quad-speed engines remain experimental; S/PDIF, ADAT and MIDI remain under development.
 
 The first routing-control API is available through the transport-owned socket. It reports the exact write-only routing baseline cached by the active engine without issuing new FireWire writes:
 
@@ -163,6 +164,8 @@ The first routing-control API is available through the transport-owned socket. I
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" routing get
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" capabilities get
 "/Library/Application Support/macfw/fw1814/bin/fw1814ctl" engine get
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" performance-profile get
+"/Library/Application Support/macfw/fw1814/bin/fw1814ctl" performance-profile set balanced
 ```
 
 Do not run standalone FireWire probes while the supervised engine is active; the transport must remain the sole FireWire owner.
@@ -192,9 +195,9 @@ package/dist/
 For example:
 
 ```text
-package/dist/macfw-0.04.003-<git-sha>.pkg
-package/dist/macfw-fw410-0.04.003-<git-sha>.pkg
-package/dist/macfw-fw1814-0.04.003-<git-sha>.pkg
+package/dist/macfw-0.05.000-<git-sha>.pkg
+package/dist/macfw-fw410-0.05.000-<git-sha>.pkg
+package/dist/macfw-fw1814-0.05.000-<git-sha>.pkg
 ```
 
 Packages disable bundle relocation so each selected control application is installed at its authoritative `/Applications` path even when development copies exist elsewhere on the Mac.
@@ -259,6 +262,25 @@ AUX bus. Its physical headphone encoders adjust saved volume and the panel
 updates the sliders while open. Both panels use the standard CoreAudio
 nominal-sample-rate property for Device-tab rate changes rather than calling
 FireWire rate-control probes directly.
+
+The FW1814 Device tab provides three persistent transport profiles:
+**Aggressive** (250 µs), **Balanced** (375 µs), and **Conservative** (500 µs).
+They apply live at all six FW1814 analog rates (44.1, 48, 88.2, 96,
+176.4 and 192 kHz) and survive rate changes and transport restarts through
+the normal control-state path. Advanced installations may
+set `MACFW_AUDIO_SERVICE_PERIOD_US` between 250 and 2000; that explicit
+launchd value overrides and disables the GUI selector until removed.
+
+After selecting a different FW1814 sample rate in the Device tab, allow the
+new engine to report ONLINE and the CoreAudio stream to settle before making a
+latency measurement. The GUI uses the standard asynchronous CoreAudio rate
+property and waits up to 20 seconds for the matching transport engine and
+restored control state before refreshing controls. During a GUI-initiated rate
+change, a temporarily missing control socket is shown as recovery progress;
+other socket failures still appear immediately. If recovery times out, the
+last error is displayed. An immediate audio probe can still sample the
+transition even though the new transport starts correctly. Repeating the probe after a few seconds should
+be preferred over changing transport tuning from one anomalous result.
 
 ## Control architecture and persistence
 

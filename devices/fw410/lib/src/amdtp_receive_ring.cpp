@@ -1,4 +1,5 @@
 #include "macfw/amdtp_receive_ring.h"
+#include "macfw/receive_metadata.h"
 #include <CoreFoundation/CoreFoundation.h>
 #include <cstring>
 #include <new>
@@ -125,8 +126,12 @@ AmdtpReceiveRing AmdtpReceiveRing::create(FireWireDevice& device, std::size_t pa
 void AmdtpReceiveRing::syncSlot(std::size_t index) const {
     if (!slots_ || !storage_ || index >= packetCount_) return;
     const auto* raw = reinterpret_cast<const RawSlot*>(storage_ + index * rawSlotBytes_);
-    slots_[index].isoHeader = raw->isoHeader; slots_[index].status = raw->status;
-    slots_[index].timestamp = raw->timestamp;
+    const auto metadata = normalizeReceiveMetadata(raw->isoHeader, raw->status,
+                                                   raw->timestamp, packetCapacity_);
+    slots_[index].isoHeader = metadata.isoHeader;
+    slots_[index].status = metadata.status;
+    slots_[index].timestamp = metadata.timestamp;
+    slots_[index].metadataByteSwapped = metadata.byteSwapped;
 }
 const AmdtpReceiveRing::PacketSlot& AmdtpReceiveRing::slot(std::size_t index) const {
     static const PacketSlot empty{}; if (!slots_ || index >= packetCount_) return empty;

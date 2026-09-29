@@ -21,7 +21,7 @@ src/cmp.o: src/cmp.cpp include/macfw/cmp.h include/macfw/firewire_device.h
 src/isoch_allocation.o: src/isoch_allocation.cpp include/macfw/isoch_allocation.h include/macfw/firewire_device.h
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
-src/amdtp_receive_ring.o: src/amdtp_receive_ring.cpp include/macfw/amdtp_receive_ring.h include/macfw/amdtp_packet.h include/macfw/firewire_device.h
+src/amdtp_receive_ring.o: src/amdtp_receive_ring.cpp include/macfw/amdtp_receive_ring.h include/macfw/receive_metadata.h include/macfw/amdtp_packet.h include/macfw/firewire_device.h
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
 src/amdtp_transmit_ring.o: src/amdtp_transmit_ring.cpp include/macfw/amdtp_transmit_ring.h include/macfw/am824_playback.h include/macfw/pcm_buffer.h include/macfw/pcm_ring_buffer.h include/macfw/firewire_device.h

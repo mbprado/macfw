@@ -1,0 +1,13 @@
+rate,profile,run,status,latency_ms,wall_ms,capture_queue_frames,playback_queue_frames,returncode,duration_s,note,raw_file,source_directory
+48000,aggressive,1,transition_high,100.271,107.876,2056.0,0.0,0,1.2916833370000091,excluded early result above 100 ms,samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-01.txt,samples/benchmarks/fw1814-profiles-20260927-203624
+48000,aggressive,2,valid,97.9375,104.057,1864.0,0.0,0,1.2877395499999977,,samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-02.txt,samples/benchmarks/fw1814-profiles-20260927-203624
+48000,aggressive,3,valid,90.1041,96.1822,1472.0,0.0,0,1.2861912049999944,,samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-03.txt,samples/benchmarks/fw1814-profiles-20260927-203624
+48000,aggressive,4,valid,89.6041,96.0017,1472.0,0.0,0,1.2848303399999992,,samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-04.txt,samples/benchmarks/fw1814-profiles-20260927-203624
+48000,aggressive,5,valid,89.7708,95.9731,1472.0,0.0,0,1.2865816120000062,,samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-05.txt,samples/benchmarks/fw1814-profiles-20260927-203624
+48000,aggressive,6,valid,91.9374,95.9862,1664.0,0.0,0,1.2824589599999996,,samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-06.txt,samples/benchmarks/fw1814-profiles-20260927-203624
+48000,aggressive,7,valid,90.7708,96.024,1472.0,0.0,0,1.2906376069999936,,samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-07.txt,samples/benchmarks/fw1814-profiles-20260927-203624
+48000,aggressive,8,valid,90.7708,95.98819999999999,1472.0,0.0,0,1.2908889600000037,,samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-08.txt,samples/benchmarks/fw1814-profiles-20260927-203624
+48000,aggressive,9,valid,90.7708,95.9995,1472.0,0.0,0,1.2860192429999984,,samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-09.txt,samples/benchmarks/fw1814-profiles-20260927-203624
+48000,aggressive,10,valid,89.7708,96.046,1664.0,0.0,0,1.2941245500000065,,samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-10.txt,samples/benchmarks/fw1814-profiles-20260927-203624
+48000,aggressive,11,valid,99.77080000000001,103.999,1864.0,0.0,0,1.2986064749999997,,samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-11.txt,samples/benchmarks/fw1814-profiles-20260927-203624
+48000,aggressive,12,anomaly,106.437,111.969,2256.0,0.0,0,1.3033629020000035,retained successful measurement; stopped because steady-state latency exceeded 100 ms,samples/benchmarks/fw1814-profiles-20260927-203624/48000-aggressive-12.txt,samples/benchmarks/fw1814-profiles-20260927-203624
